@@ -1,0 +1,22 @@
+// The port between the runner and the coding agent that works on the task.
+// The runner decides what to prompt and when; an adapter only runs one turn of
+// one long-lived session and says how it ended.
+
+export interface SessionTurn {
+  prompt: string;
+  sessionId: string;
+  /** False for the first turn, which creates the session `sessionId`; true for every later one. */
+  isResume: boolean;
+}
+
+export interface TurnOutcome {
+  /** Set when the turn failed; becomes the task's failure reason, so it carries the cause. */
+  failure?: string;
+  /** The session's running cost total after this turn; unset when the agent reported none. */
+  totalCostUsd?: number;
+}
+
+export interface AgentSession {
+  /** Runs one turn to its end. `onActivity` hears what the agent is doing meanwhile. */
+  runTurn(turn: SessionTurn, onActivity?: (activity: string) => void): Promise<TurnOutcome>;
+}

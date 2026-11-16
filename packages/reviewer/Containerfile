@@ -1,0 +1,48 @@
+# Build context is the repository root:
+#   podman build -t factory-reviewer:latest -f packages/reviewer/Containerfile .
+# One container per review: the request comes in on stdin, the answer goes
+# out on stdout. The first argument picks the role: `spec` reviews a draft
+# task's specification, `input` the input a supervised agent asks for, `pr` a
+# pull request. All only read, so the image carries the claude CLI, git and gh,
+# and no toolchain to build with.
+FROM docker.io/library/node:26.13.1-trixie-slim
+
+ARG CLAUDE_CODE_VERSION=2.1.322
+
+# git and gh from the official GitHub CLI apt repository, for the PR and input
+# reviews to read pull requests and the code around them.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates git wget \
+ && mkdir -p -m 755 /etc/apt/keyrings \
+ && wget -nv -O /etc/apt/keyrings/githubcli-archive-keyring.gpg https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+ && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+ && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      > /etc/apt/sources.list.d/github-cli.list \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends gh \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+ && npm cache clean --force
+
+# The PR review reads whole diffs and waits up to 10 minutes for CI checks; the
+# CLI's defaults would cut a diff at 30,000 characters and a command at 2 minutes.
+ENV DISABLE_AUTOUPDATER=1 \
+    BASH_MAX_OUTPUT_LENGTH=150000 \
+    BASH_MAX_TIMEOUT_MS=600000 \
+    GH_NO_UPDATE_NOTIFIER=1 \
+    GH_PROMPT_DISABLED=1
+
+WORKDIR /app
+
+# The reviewer's only dependency is the core package, which has none itself;
+# a symlink stands in for a Yarn install.
+COPY packages/core packages/core
+COPY packages/reviewer packages/reviewer
+RUN mkdir -p packages/reviewer/node_modules/@factory \
+ && ln -s ../../../core packages/reviewer/node_modules/@factory/core
+
+USER node
+WORKDIR /home/node
+
+ENTRYPOINT ["node", "/app/packages/reviewer/src/main.ts"]
