@@ -30,7 +30,7 @@ function setup(pull: Answer, reviewPages: Answer[] = [{ body: [] }]) {
 
 const url = 'https://github.com/o/r/pull/7';
 const pull = (fields: Record<string, unknown> = {}): Answer => ({
-  body: { state: 'open', merged: false, title: 'Add x', user: { login: 'factory-bot' }, ...fields },
+  body: { state: 'open', merged: false, title: 'Add x', user: { login: 'factory-bot' }, head: { sha: 'abc' }, ...fields },
 });
 const gitHubReview = (id: number, state: string, login = 'alice', association = 'COLLABORATOR') => ({
   id,
@@ -52,7 +52,7 @@ const review = (id: number, state: string) => ({
 
 test('read asks the GitHub API with the token and maps open, merged and closed', async () => {
   const open = setup(pull());
-  assert.deepEqual(await open.reader.read(url), { url, title: 'Add x', status: 'open', reviews: [] });
+  assert.deepEqual(await open.reader.read(url), { url, title: 'Add x', status: 'open', headSha: 'abc', reviews: [] });
   assert.equal(open.requests[0]!.url, 'https://api.github.com/repos/o/r/pulls/7');
   assert.equal(open.requests[0]!.headers.authorization, 'Bearer gh-token');
   assert.equal(open.requests[1]!.url, 'https://api.github.com/repos/o/r/pulls/7/reviews?per_page=100');
@@ -129,7 +129,8 @@ test('readHead reads the commit the head points to', async () => {
   const { reader, requests } = setup(pull({ head: { sha: 'abc' } }));
   assert.equal(await reader.readHead(url), 'abc');
   assert.equal(requests[0]!.url, 'https://api.github.com/repos/o/r/pulls/7');
-  await assert.rejects(setup(pull()).reader.readHead(url), /no head commit/);
+  await assert.rejects(setup(pull({ head: undefined })).reader.readHead(url), /no head commit/);
+  await assert.rejects(setup(pull({ head: undefined })).reader.read(url), /no head commit/);
 });
 
 test('comment posts to the conversation of the pull request', async () => {

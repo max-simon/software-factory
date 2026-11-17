@@ -2,6 +2,7 @@ export type * from './task.ts';
 export type * from './ports.ts';
 export type * from './events.ts';
 export type * from './views.ts';
+export { pullRequestEvents } from './events.ts';
 export { toAgentTaskView, toProjectTaskSummary, toTaskView } from './views.ts';
 export { createProject, editProject, type NewProject, type Project, type ProjectEdit } from './project.ts';
 export { agentConsolePort, doorbellPort } from './ports.ts';

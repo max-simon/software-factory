@@ -4,21 +4,18 @@ import {
   isWorking,
   needsNotify,
   type ExecutionRuntime,
-  type PullRequest,
-  type PullRequestReader,
   type StartedExecution,
   type Task,
-  type TaskStatus,
 } from '@factory/core';
 import { createAgentToken } from './agent-token.ts';
 import type { LifecycleService } from './lifecycle-service.ts';
+import { redact } from './redact.ts';
 import type { TaskStore } from './task-store.ts';
 
 export interface DispatcherDeps {
   tasks: TaskStore;
   lifecycle: LifecycleService;
   runtime: ExecutionRuntime;
-  pullRequests: PullRequestReader;
   /** Control-plane address as seen from an execution server. */
   controlPlaneUrl: string;
   /** Execution servers that may be working at the same time; notified ones may exceed it briefly. */
@@ -40,8 +37,6 @@ export interface DispatcherDeps {
 // Covers starting, resuming or restarting the execution server and its runner
 // before the first heartbeat; remote compute may also pull the image first.
 export const startupTimeoutMs = 5 * 60_000;
-// Pull requests stay open for hours or days; GitHub's rate limit is per hour.
-export const pullRequestCheckIntervalMs = 60_000;
 // Orphans only arise from rare crashes and failed removals. Listing them is a
 // single call however many tasks there are, but not worth making every pass.
 export const orphanSweepIntervalMs = 10 * 60_000;
@@ -49,17 +44,12 @@ export const orphanSweepIntervalMs = 10 * 60_000;
 /** For tasks with an execution server only. */
 const workerSince = (task: Task): number => Date.parse(task.execution!.worker.since);
 
-/** Statuses whose pull requests may still change: the agent may push, reviewers may review. */
-const watchedStatuses: readonly TaskStatus[] = ['in_progress', 'input_required', 'ready', 'failed'];
-const hasOpenPullRequest = (task: Task): boolean => task.pullRequests.some((pr) => pr.status === 'open');
-/** Its last reports have arrived, so it is done once no pull request is open. */
-const isSettleable = (task: Task): boolean => task.status === 'ready' && !isWorking(task);
-/** A failed task's pull requests are watched only while a follow-up can still resume its agent. */
-const isWatched = (task: Task): boolean =>
-  (task.status !== 'failed' || task.execution !== undefined) && (hasOpenPullRequest(task) || isSettleable(task));
-const reviewIds = (pr: PullRequest): string | undefined => pr.reviews?.map((review) => review.id).join();
-const hasChanged = (before: PullRequest, after: PullRequest): boolean =>
-  after.status !== before.status || after.title !== before.title || reviewIds(after) !== reviewIds(before);
+/**
+ * Ready, its last reports have arrived, and none of its pull requests is open
+ * as last recorded; recording them is the pull request observer's job.
+ */
+const isSettleable = (task: Task): boolean =>
+  task.status === 'ready' && !isWorking(task) && task.pullRequests.every((pr) => pr.status !== 'open');
 
 export class Dispatcher {
   readonly #deps: DispatcherDeps;
@@ -71,8 +61,6 @@ export class Dispatcher {
    */
   readonly #awakeSince: () => number;
   #lastSweepAt: number | undefined;
-  /** Per watched task, when its pull requests were last read; a restart reads them all once. */
-  readonly #pullRequestChecks = new Map<string, number>();
 
   constructor(deps: DispatcherDeps) {
     this.#deps = deps;
@@ -86,12 +74,11 @@ export class Dispatcher {
    * One pass: remove orphaned execution servers when a sweep is due, restart
    * silent workers, notify idle workers that have work, start queued tasks
    * whose dependencies are done in rank order while fewer workers than the
-   * limit are working, read the open
-   * pull requests of started tasks and settle ready ones, and remove execution
-   * servers no task needs.
+   * limit are working, mark ready tasks done once none of their pull requests
+   * is open, and remove execution servers no task needs.
    */
   async reconcile(): Promise<void> {
-    const { tasks, maxRunning } = this.#deps;
+    const { tasks, lifecycle, maxRunning } = this.#deps;
     await this.#sweepOrphansIfDue();
     await this.#forEach(tasks.list().filter(isWorking), (task) => this.#restartIfSilent(task));
     await this.#forEach(tasks.list(['in_progress']).filter(needsNotify), (task) => this.#notify(task));
@@ -99,9 +86,9 @@ export class Dispatcher {
     const freeSlots = Math.max(0, maxRunning - all.filter(isWorking).length);
     const startable = tasks.list(['queued']).filter((task) => !isBlocked(task, all));
     await this.#forEach(startable.slice(0, freeSlots), (task) => this.#dispatch(task));
-    const watched = tasks.list(watchedStatuses).filter(isWatched);
-    this.#forgetPullRequestChecks(watched);
-    await this.#forEach(watched, (task) => this.#checkPullRequestsIfDue(task));
+    await this.#forEach(tasks.list(['ready']).filter(isSettleable), async (task) => {
+      lifecycle.markDone(task.id);
+    });
     await this.#forEach(tasks.list(['done']), (task) => this.#removeExecution(task));
     await this.#forEach(tasks.list(['failed']).filter((task) => this.#isFollowUpWindowOver(task)), (task) =>
       this.#removeExecution(task),
@@ -213,33 +200,6 @@ export class Dispatcher {
     return this.#now() - Math.max(lastSign, this.#awakeSince()) > timeout;
   }
 
-  /** A task that is watched again later is read at once. */
-  #forgetPullRequestChecks(watched: readonly Task[]): void {
-    const ids = new Set(watched.map((task) => task.id));
-    for (const id of this.#pullRequestChecks.keys()) if (!ids.has(id)) this.#pullRequestChecks.delete(id);
-  }
-
-  /**
-   * Reads the open pull requests of a task and records changes to title, status
-   * and reviews. A settleable task is marked done once none is open, at once
-   * when it has none.
-   */
-  async #checkPullRequestsIfDue(task: Task): Promise<void> {
-    const { tasks, lifecycle, pullRequests } = this.#deps;
-    const now = this.#now();
-    const lastCheck = this.#pullRequestChecks.get(task.id);
-    if (lastCheck !== undefined && now - lastCheck < pullRequestCheckIntervalMs) return;
-    // Recorded first, so a failing GitHub is asked again only at the next interval.
-    this.#pullRequestChecks.set(task.id, now);
-    const open = task.pullRequests.filter((pr) => pr.status === 'open');
-    const current = await Promise.all(open.map((pr) => pullRequests.read(pr.url)));
-    const changed = current.filter((pr, i) => hasChanged(open[i]!, pr));
-    if (changed.length > 0) lifecycle.updatePullRequests(task.id, changed);
-    if (current.some((pr) => pr.status === 'open')) return;
-    // A follow-up may have resumed the task while GitHub was asked.
-    if (isSettleable(tasks.get(task.id))) lifecycle.markDone(task.id);
-  }
-
   #isFollowUpWindowOver(task: Task): boolean {
     return task.execution !== undefined && !isWorking(task) && this.#now() - workerSince(task) > this.#deps.followUpWindowMs;
   }
@@ -251,7 +211,7 @@ export class Dispatcher {
   }
 
   #redact(text: string): string {
-    return this.#deps.secrets.filter(Boolean).reduce((result, secret) => result.replaceAll(secret, '[redacted]'), text);
+    return redact(text, this.#deps.secrets);
   }
 
   // One broken task must not stop the others from being reconciled.

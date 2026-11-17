@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import {
+  pullRequestEvents,
   taskChanges,
   type ChangeActor,
   type Heartbeat,
@@ -78,7 +79,10 @@ export class TaskStore {
     this.#onEvent({ type: 'task.created', task });
   }
 
-  /** Loads the task, applies `operation`, stamps `updatedAt`, saves it with its changelog and publishes it. */
+  /**
+   * Loads the task, applies `operation`, stamps `updatedAt`, saves it with its
+   * changelog and publishes it, followed by what changed on its pull requests.
+   */
   update(id: string, actor: ChangeActor, operation: (task: Task) => Task): Task {
     const current = this.get(id);
     const now = this.now();
@@ -86,6 +90,7 @@ export class TaskStore {
     const changes = taskChanges(current, next, { at: now, actor });
     this.#repository.save(next, changes);
     this.#onEvent({ type: 'task.updated', task: next, actor, changes });
+    pullRequestEvents(current, next).forEach((event) => this.#onEvent(event));
     return next;
   }
 

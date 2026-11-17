@@ -1,4 +1,5 @@
 import {
+  addFollowUp,
   detachExecution,
   markDone,
   markFailed,
@@ -55,7 +56,15 @@ export class LifecycleService {
     return this.#tasks.update(id, 'system', markDone);
   }
 
+  /** The single entry for pull request state, polled or pushed by a webhook; the task store derives the pull request events from it. */
   updatePullRequests(id: string, updates: readonly PullRequest[]): Task {
     return this.#tasks.update(id, 'system', (task) => updatePullRequests(task, updates));
+  }
+
+  /** A message for the agent that the control plane sends on its own, e.g. when a pull request was reviewed. */
+  addFollowUp(id: string, message: string): Task {
+    return this.#tasks.update(id, 'system', (task) =>
+      addFollowUp(task, { id: this.#tasks.newItemId('f'), createdAt: this.#tasks.now(), message }),
+    );
   }
 }
