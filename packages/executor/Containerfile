@@ -54,6 +54,10 @@ COPY packages/executor packages/executor
 RUN yarn workspaces focus --production @factory/executor \
  && rm -rf "$(yarn config get cacheFolder)" /root/.cache
 
+# Skills the control plane names in follow-ups. Both agents read user skills
+# from ~/.claude/skills (opencode as a Claude-compatible location).
+COPY --chown=node:node packages/executor/skills /home/node/.claude/skills
+
 # claude refuses --dangerously-skip-permissions as root; the runner clones into
 # the home directory of the image's `node` user (uid 1000).
 USER node

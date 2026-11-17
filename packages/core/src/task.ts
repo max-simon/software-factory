@@ -95,6 +95,8 @@ export interface PullRequest {
   title: string;
   /** `open` when reported; the control plane updates it while it watches the pull requests. */
   status: PullRequestStatus;
+  /** The commit its head pointed to when the control plane last read it; unset until the first read. */
+  headSha?: string;
   /** Submitted reviews, oldest first, as the control plane last read them; unset until the first read. */
   reviews?: PullRequestReview[];
 }

@@ -10,6 +10,7 @@ import { Dispatcher } from './dispatcher.ts';
 import { Hooks } from './hooks/hooks.ts';
 import { InputReviewHook } from './hooks/input-review-hook.ts';
 import { PrReviewHook } from './hooks/pr-review-hook.ts';
+import { PullRequestReviewedHook } from './hooks/pull-request-reviewed-hook.ts';
 import { SpecReviewHook } from './hooks/spec-review-hook.ts';
 import { agentRoutes } from './http/agent-routes.ts';
 import { engineerRoutes } from './http/engineer-routes.ts';
@@ -17,6 +18,7 @@ import { createServer, mcpPath } from './http/server.ts';
 import { staticFiles } from './http/static-files.ts';
 import { PauseWatch } from './pause-watch.ts';
 import { ProjectService } from './project-service.ts';
+import { PullRequestObserver, pullRequestPollIntervalMs } from './pull-request-observer.ts';
 import { ReviewTracker } from './review-tracker.ts';
 import { createServices } from './services.ts';
 
@@ -29,11 +31,10 @@ const webDist = fileURLToPath(new URL('../../web/dist', import.meta.url));
 
 // Each pass is scheduled only after the previous one finished, so passes never overlap.
 // The first pass runs immediately, which recovers state after a control-plane restart.
-function runDispatcher(dispatcher: Dispatcher): void {
-  void dispatcher
-    .reconcile()
-    .catch((error: unknown) => console.error('dispatcher pass failed:', error))
-    .finally(() => setTimeout(() => runDispatcher(dispatcher), reconcileIntervalMs));
+function runLoop(name: string, pass: () => Promise<void>, intervalMs: number): void {
+  void pass()
+    .catch((error: unknown) => console.error(`${name} pass failed:`, error))
+    .finally(() => setTimeout(() => runLoop(name, pass, intervalMs), intervalMs));
 }
 
 function main(): void {
@@ -62,6 +63,7 @@ function main(): void {
   hooks.register(new SpecReviewHook({ tasks, service, projects, reviewer, reviews }));
   hooks.register(new InputReviewHook({ tasks, service, projects, reviewer, reviews }));
   hooks.register(new PrReviewHook({ tasks, pullRequests, reviewer, projects, reviews }));
+  hooks.register(new PullRequestReviewedHook({ lifecycle }));
   const routes = [
     ...engineerRoutes(tasks, service, projects, (agent) => unavailableAgent(config.agentCredentials, agent), reviews),
     ...agentRoutes(tasks, agent, projects),
@@ -74,6 +76,7 @@ function main(): void {
   // Checked on a timer of its own: a host may sleep in the middle of a dispatcher pass.
   const pauseWatch = new PauseWatch();
   setInterval(() => pauseWatch.check(), pauseCheckIntervalMs).unref();
+  const secrets = [...config.credentials.map((name) => process.env[name]!), process.env.GITHUB_TOKEN!];
   const dispatcher = new Dispatcher({
     tasks,
     lifecycle,
@@ -83,13 +86,15 @@ function main(): void {
     controlPlaneUrl: `http://host.containers.internal:${config.port}`,
     maxRunning: config.maxRunning,
     followUpWindowMs: config.followUpWindowHours * 3_600_000,
-    pullRequests,
-    secrets: [...config.credentials.map((name) => process.env[name]!), process.env.GITHUB_TOKEN!],
+    secrets,
     awakeSince: () => pauseWatch.check(),
   });
+  // Polls GitHub for pull request changes; replaceable by a webhook that records the same changes.
+  const pullRequestObserver = new PullRequestObserver({ tasks, lifecycle, pullRequests, secrets });
   server.listen(config.port, host, () => {
     console.log(`control plane listening on http://${host}:${config.port} (MCP at ${mcpPath})`);
-    runDispatcher(dispatcher);
+    runLoop('dispatcher', () => dispatcher.reconcile(), reconcileIntervalMs);
+    runLoop('pull request observer', () => pullRequestObserver.observe(), pullRequestPollIntervalMs);
   });
 }
 

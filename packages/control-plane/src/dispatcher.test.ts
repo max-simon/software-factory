@@ -7,14 +7,13 @@ import {
   type ExecutionSpec,
   type NewTask,
   type PullRequest,
-  type PullRequestReader,
   type StartedExecution,
   type Task,
   type TaskAgent,
 } from '@factory/core';
 import { SqliteTaskRepository } from './adapters/sqlite-task-repository.ts';
 import { hashAgentToken } from './agent-token.ts';
-import { Dispatcher, orphanSweepIntervalMs, type DispatcherDeps, pullRequestCheckIntervalMs, startupTimeoutMs } from './dispatcher.ts';
+import { Dispatcher, orphanSweepIntervalMs, type DispatcherDeps, startupTimeoutMs } from './dispatcher.ts';
 import { createServices } from './services.ts';
 import type { TaskService } from './task-service.ts';
 import { sequentialItemIds } from './test-support.ts';
@@ -76,20 +75,6 @@ class FakeRuntime implements ExecutionRuntime {
   }
 }
 
-class FakePullRequests implements PullRequestReader {
-  /** What GitHub answers per URL; a string is thrown as an error. */
-  answers = new Map<string, PullRequest | string>();
-  reads: string[] = [];
-
-  async read(url: string): Promise<PullRequest> {
-    this.reads.push(url);
-    const answer = this.answers.get(url);
-    if (answer === undefined) throw new Error(`unexpected read of ${url}`);
-    if (typeof answer === 'string') throw new Error(answer);
-    return answer;
-  }
-}
-
 const secrets = ['sk-secret', 'ghp_secret'];
 /** Long enough that any working execution server counts as silent, with or without a heartbeat. */
 const silence = startupTimeoutMs + 1;
@@ -98,7 +83,6 @@ const followUpWindowMs = 6 * 3_600_000;
 /** The service and the dispatcher share one clock that only `advance` moves. */
 function setup(maxRunning = 10) {
   const runtime = new FakeRuntime();
-  const pullRequests = new FakePullRequests();
   let counter = 0;
   let now = Date.parse('2026-11-12T10:00:00.000Z');
   const { tasks, service, agent, lifecycle } = createServices({
@@ -113,7 +97,6 @@ function setup(maxRunning = 10) {
     tasks,
     lifecycle,
     runtime,
-    pullRequests,
     controlPlaneUrl: 'http://host.containers.internal:8080',
     maxRunning,
     followUpWindowMs,
@@ -127,7 +110,7 @@ function setup(maxRunning = 10) {
     now += ms;
   };
   const beat = (id: string) => agent.recordHeartbeat(tasks.get(id), { phase: 'working' });
-  return { runtime, pullRequests, tasks, service, agent, lifecycle, deps, dispatcher: newDispatcher(), newDispatcher, logged, advance, beat, now: () => now };
+  return { runtime, tasks, service, agent, lifecycle, deps, dispatcher: newDispatcher(), newDispatcher, logged, advance, beat, now: () => now };
 }
 
 type Fixture = ReturnType<typeof setup>;
@@ -505,25 +488,16 @@ test('a notified worker that never reports is restarted after the startup timeou
   assert.match(f.tasks.get(task.id).failureReason!, /stopped sending heartbeats before the task finished/);
 });
 
-test('marks a ready task done and removes its execution server once its pull requests are merged or closed', async () => {
+test('marks a ready task done and removes its execution server once none of its pull requests is open', async () => {
   const f = setup();
   const task = readyWith(f, [pullRequest(1), pullRequest(2)]);
-  f.pullRequests.answers.set(pullRequest(1).url, { ...pullRequest(1, 'merged'), title: 'Renamed' });
-  f.pullRequests.answers.set(pullRequest(2).url, pullRequest(2, 'open'));
+  f.lifecycle.updatePullRequests(task.id, [pullRequest(1, 'merged')]);
   await f.dispatcher.reconcile();
   assert.equal(f.tasks.get(task.id).status, 'ready');
-  assert.deepEqual(f.tasks.get(task.id).pullRequests, [{ ...pullRequest(1, 'merged'), title: 'Renamed' }, pullRequest(2)]);
 
-  f.pullRequests.answers.set(pullRequest(2).url, pullRequest(2, 'closed'));
-  f.advance(pullRequestCheckIntervalMs - 1);
+  f.lifecycle.updatePullRequests(task.id, [pullRequest(2, 'closed')]);
   await f.dispatcher.reconcile();
-  assert.equal(f.pullRequests.reads.length, 2, 'not due yet');
-  f.advance(1);
-  await f.dispatcher.reconcile();
-  assert.deepEqual(f.pullRequests.reads.slice(2), [pullRequest(2).url], 'merged ones are final');
-  const done = f.tasks.get(task.id);
-  assert.equal(done.status, 'done');
-  assert.equal(done.pullRequests[1]!.status, 'closed');
+  assert.equal(f.tasks.get(task.id).status, 'done');
   assert.deepEqual(f.runtime.removed, [`c-${task.id}`]);
 });
 
@@ -539,79 +513,6 @@ test('does not settle a ready task while its worker is working, so its last repo
   const task = inStatus(f, 'ready', 'c1');
   await f.dispatcher.reconcile();
   assert.equal(f.tasks.get(task.id).status, 'ready');
-});
-
-test('a follow-up arriving while GitHub is asked keeps the task in progress', async () => {
-  const f = setup();
-  const task = readyWith(f, [pullRequest(1)]);
-  f.pullRequests.read = async (url) => {
-    f.service.addFollowUp(task.id, 'one more thing');
-    return { ...pullRequest(1, 'merged'), url };
-  };
-  await f.dispatcher.reconcile();
-  assert.equal(f.tasks.get(task.id).status, 'in_progress');
-  assert.deepEqual(f.logged, []);
-});
-
-test('reads the open pull requests of a task in progress and records reviews, without settling it', async () => {
-  const f = setup();
-  const task = inStatus(f, 'in_progress', 'c1');
-  f.agent.addPullRequest(task.id, { url: pullRequest(1).url, title: pullRequest(1).title });
-  const review = {
-    id: 9,
-    state: 'commented' as const,
-    author: 'alice',
-    body: 'Why?',
-    url: `${pullRequest(1).url}#pullrequestreview-9`,
-    submittedAt: '2026-11-12T10:00:00Z',
-  };
-  f.pullRequests.answers.set(pullRequest(1).url, { ...pullRequest(1), reviews: [review] });
-  await f.dispatcher.reconcile();
-  assert.deepEqual(f.tasks.get(task.id).pullRequests, [{ ...pullRequest(1), reviews: [review] }]);
-
-  const updatedAt = f.tasks.get(task.id).updatedAt;
-  f.advance(pullRequestCheckIntervalMs);
-  await f.dispatcher.reconcile();
-  assert.equal(f.pullRequests.reads.length, 2);
-  assert.equal(f.tasks.get(task.id).updatedAt, updatedAt, 'nothing changed, nothing saved');
-
-  f.pullRequests.answers.set(pullRequest(1).url, pullRequest(1, 'merged'));
-  f.advance(pullRequestCheckIntervalMs);
-  await f.dispatcher.reconcile();
-  assert.equal(f.tasks.get(task.id).status, 'in_progress');
-  f.advance(pullRequestCheckIntervalMs);
-  await f.dispatcher.reconcile();
-  assert.equal(f.pullRequests.reads.length, 3, 'a task without open pull requests is watched only once settleable');
-});
-
-test('reads the open pull requests of a failed task only while it keeps its execution server', async () => {
-  const f = setup();
-  const task = readyWith(f, [pullRequest(1)]);
-  f.lifecycle.markFailed(task.id, 'boom');
-  f.pullRequests.answers.set(pullRequest(1).url, pullRequest(1));
-  await f.dispatcher.reconcile();
-  assert.equal(f.pullRequests.reads.length, 1);
-
-  f.lifecycle.detachExecution(task.id);
-  f.advance(pullRequestCheckIntervalMs);
-  await f.dispatcher.reconcile();
-  assert.equal(f.pullRequests.reads.length, 1);
-});
-
-test('a failing GitHub read is logged and retried at the next interval', async () => {
-  const f = setup();
-  const task = readyWith(f, [pullRequest(1)]);
-  f.pullRequests.answers.set(pullRequest(1).url, 'GitHub answered 502 with ghp_secret');
-  await f.dispatcher.reconcile();
-  assert.equal(f.tasks.get(task.id).status, 'ready');
-  assert.match(f.logged[0]!, /GitHub answered 502 with \[redacted\]/);
-
-  f.pullRequests.answers.set(pullRequest(1).url, pullRequest(1, 'merged'));
-  await f.dispatcher.reconcile();
-  assert.equal(f.pullRequests.reads.length, 1);
-  f.advance(pullRequestCheckIntervalMs);
-  await f.dispatcher.reconcile();
-  assert.equal(f.tasks.get(task.id).status, 'done');
 });
 
 test('removes the execution server of a done task and clears its id', async () => {

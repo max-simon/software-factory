@@ -23,7 +23,7 @@ export interface SpecReviewHookDeps {
 export function triggersSpecReview(event: TaskEvent): boolean {
   if (event.task.status !== 'draft') return false;
   if (event.type === 'task.created') return true;
-  return event.actor === 'user' && event.changes.some((change) => ['title', 'specification', 'dependsOn', 'status'].includes(change.field));
+  return event.type === 'task.updated' && event.actor === 'user' && event.changes.some((change) => ['title', 'specification', 'dependsOn', 'status'].includes(change.field));
 }
 
 export function specReviewRequest(task: Task, project: Project, projectTasks: readonly Task[]): SpecReviewRequest {

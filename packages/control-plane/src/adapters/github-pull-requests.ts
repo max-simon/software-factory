@@ -47,20 +47,19 @@ export class GitHubPullRequests implements PullRequestReader, PullRequestWriter 
     const { state, merged, title, user } = body as { state?: unknown; merged?: unknown; title?: unknown; user?: { login?: unknown } };
     if (state !== 'open' && state !== 'closed') throw new Error(`GitHub returned an unknown state for ${url}: ${String(state)}`);
     if (typeof title !== 'string' || title.trim() === '') throw new Error(`GitHub returned no title for ${url}`);
+    const headSha = headShaOf(body, url);
     const reviews = (await this.#listReviews(`${base}/reviews?per_page=100`, url))
       .filter((review) => trustedAssociations.has(review.author_association))
       .map(toReview)
       // The author cannot review their own pull request; GitHub files the
       // author's replies to review threads as reviews, which they are not.
       .filter((review): review is PullRequestReview => review !== undefined && review.author !== user?.login);
-    return { url, title, status: merged === true ? 'merged' : state, reviews };
+    return { url, title, status: merged === true ? 'merged' : state, headSha, reviews };
   }
 
   async readHead(url: string): Promise<string> {
     const { body } = await this.#get(apiUrl(url), url);
-    const sha = (body as { head?: { sha?: unknown } }).head?.sha;
-    if (typeof sha !== 'string') throw new Error(`GitHub returned no head commit for ${url}`);
-    return sha;
+    return headShaOf(body, url);
   }
 
   /** A conversation comment, not a review: `read` lists reviews only, so it never counts as one. */
@@ -108,6 +107,12 @@ export class GitHubPullRequests implements PullRequestReader, PullRequestWriter 
     if (!response.ok) throw new Error(`GitHub answered ${response.status} for ${url}: ${(await response.text()).slice(0, 200)}`);
     return response;
   }
+}
+
+function headShaOf(pull: unknown, url: string): string {
+  const sha = (pull as { head?: { sha?: unknown } }).head?.sha;
+  if (typeof sha !== 'string') throw new Error(`GitHub returned no head commit for ${url}`);
+  return sha;
 }
 
 /** Pending and dismissed reviews, and entries without the fields a review needs, are skipped. */

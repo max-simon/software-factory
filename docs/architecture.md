@@ -6,8 +6,8 @@ Detail behind the [README](../README.md): packages, task lifecycle, the worker p
 
 | Package | Role |
 |---|---|
-| `packages/core` | Domain model and rules: task and project types (a started task carries its `Execution`: token hash, worker state, heartbeat, console), the views each audience gets (`TaskView`, `AgentTaskView`), the status machine, pure operations (`startTask`, `addDecision`, `markReady`, …) the worker lifecycle (`pendingWork`, `acceptWork`, `releaseWorker`, …), task events, and the ports (`TaskRepository`, `ProjectRepository`, `ExecutionRuntime`, `PullRequestReader`, `PullRequestWriter`, `Reviewer`). No I/O. |
-| `packages/control-plane` | HTTP server on `127.0.0.1:4700`. Engineer API (`/projects`, `/tasks`), MCP endpoint (`/mcp`), agent API (`/agent/*`, token-authenticated), static web UI. Reads go through the `TaskStore`; changes through one service per actor: `TaskService` (engineer), `AgentService` (agent and runner), `LifecycleService` (the dispatcher). Adapters: SQLite repositories (`node:sqlite`), `PodmanRuntime`, `PodmanReviewer` and `GitHubPullRequests` (REST API). The `Dispatcher` reconciles every 2 s; `Hooks` react to task events. |
+| `packages/core` | Domain model and rules: task and project types (a started task carries its `Execution`: token hash, worker state, heartbeat, console), the views each audience gets (`TaskView`, `AgentTaskView`), the status machine, pure operations (`startTask`, `addDecision`, `markReady`, …) the worker lifecycle (`pendingWork`, `acceptWork`, `releaseWorker`, …), task and pull request events (`pullRequestEvents` derives the latter from two saved versions of a task), and the ports (`TaskRepository`, `ProjectRepository`, `ExecutionRuntime`, `PullRequestReader`, `PullRequestWriter`, `Reviewer`). No I/O. |
+| `packages/control-plane` | HTTP server on `127.0.0.1:4700`. Engineer API (`/projects`, `/tasks`), MCP endpoint (`/mcp`), agent API (`/agent/*`, token-authenticated), static web UI. Reads go through the `TaskStore`; changes through one service per actor: `TaskService` (engineer), `AgentService` (agent and runner), `LifecycleService` (the dispatcher). Adapters: SQLite repositories (`node:sqlite`), `PodmanRuntime`, `PodmanReviewer` and `GitHubPullRequests` (REST API). The `Dispatcher` reconciles every 2 s; the `PullRequestObserver` polls GitHub every minute; `Hooks` react to task and pull request events. |
 | `packages/reviewer` | The reviewer image, with three roles picked by its first argument, each with its own system prompt. `spec` reads one task specification with its project and the project's other tasks; `input` reads a supervised task waiting for input, with its open questions and approval requests, and may read the repository and pull requests with `gh` and `git` for context; `pr` reads one pull request reference (URL, head commit, the task it was opened for) and lets the model read the pull request itself with `gh` and `git`. Each takes the request as JSON on stdin, runs one `claude -p` turn with structured output (without tools for `spec`), and prints the answer as JSON on stdout. |
 | `packages/executor` | The container image. Its runner asks the control plane for work, clones the repository, runs one agent turn per piece of work and, once there is none, waits for a nudge on its doorbell; the session state stays on the container's disk, so a restarted runner resumes it. Two agent adapters behind the `AgentSession` port: the `claude` CLI (one process per turn) and `opencode serve` (one HTTP session). The agent reports through a stdio MCP bridge (`report_plan`, `report_decision`, `ask_question`, `report_ready`, …). |
 | `packages/web` | React + Vite UI: project sidebar, per-project board and dashboard with its open pull requests, task detail with timeline, question and approval forms, follow-ups. Polls the engineer API. |
@@ -34,9 +34,9 @@ Detail behind the [README](../README.md): packages, task lifecycle, the worker p
   question is answered and every approval reviewed. The input review hook
   (see *Hooks*) settles what it can on the engineer's behalf first.
 - **ready → done:** the agent reported its work complete. Once its worker is
-  idle, the dispatcher reads the task's pull requests from GitHub
-  every minute and marks it `done` once all are merged or closed (immediately
-  when there are none), then removes the execution server.
+  idle and none of its pull requests is open as last recorded (see *Pull
+  request events*), the dispatcher marks it `done` (immediately when it has
+  none), then removes the execution server.
 - **failed:** the agent or runner reported a failure, the engineer cancelled, a
   turn ended without an outcome, or a working execution server sent no
   heartbeat for 60 s (5 min after it was started or notified). Time the
@@ -60,11 +60,8 @@ Detail behind the [README](../README.md): packages, task lifecycle, the worker p
   with a kind prefix (`q-…`, `d-…`, `a-…`, `f-…`). A restart empties these
   lists, so counted ids would repeat, and a review still running from the
   earlier run could then settle an item of the new one.
-- **Pull requests:** the dispatcher reads every open pull request of a task in
-  `in_progress`, `input_required` or `ready`, or `failed` while it keeps its
-  execution server, once a minute, with its submitted reviews, which the web UI
-  shows. Reviews on GitHub do not reach the agent; forward what matters with a
-  follow-up.
+- **Pull requests:** see *Pull request events* below. A review submitted on
+  GitHub reaches the agent as a follow-up.
 
 ## Workers: working and idle
 
@@ -104,10 +101,34 @@ provider suspends idle machines resumes them on the inbound nudge. Idle
 containers count toward no limit, so on Podman they hold their memory until
 the task is done or its follow-up window ends.
 
+## Pull request events
+
+The `PullRequestObserver` reads every open pull request of a task in
+`in_progress`, `input_required` or `ready`, or `failed` while it keeps its
+execution server, once a minute: title, status, head commit and submitted
+reviews by people with a say on the repository (the author's own replies to
+review threads are not reviews). It records what changed through
+`LifecycleService.updatePullRequests`, the single entry for pull request
+state. On every save, the `TaskStore` compares the task's pull requests before
+and after, like the changelog, and publishes after the `task.updated` event:
+
+| Event | When |
+|---|---|
+| `pull_request.reviewed` | one per review it had not recorded yet; all of them on the first read |
+| `pull_request.pushed` | the head commit moved; not on the first read |
+| `pull_request.merged`, `pull_request.closed` | the pull request left `open` |
+
+Events are derived from recorded state, not from how it was learned. A GitHub
+webhook can therefore replace the observer: it records the same changes
+through `updatePullRequests` (finding the task by pull request URL) and the
+observer's loop in `main.ts` is dropped; hooks and dispatcher stay as they are.
+Polling adds up to a minute of latency, and a change that is undone between
+two reads (a push followed by a force-push back) raises nothing.
+
 ## Hooks
 
 The `TaskStore` publishes a `task.created` or `task.updated` event (with actor
-and changelog entries) after every save. `Hooks` hands each event to every
+and changelog entries) after every save, followed by its pull request events. `Hooks` hands each event to every
 registered hook in the background: the request that caused it never waits, and
 a failing hook is logged and affects no other. A hook implements `{ name,
 handle(event) }` and is registered in `main.ts`. Hooks run in memory, so one
@@ -212,6 +233,24 @@ a human reviewer should check.
   auto-merge only for projects where that risk is acceptable.
 - Only the transition to `ready` triggers it. A follow-up that leaves the task
   `ready` again triggers a new review.
+
+The **pull request reviewed hook** hands each `pull_request.reviewed` event to
+the task's own agent as a follow-up, logged with actor `system`, which resumes
+a `ready` or `failed` task. The follow-up names the review and tells the agent
+to use the `address-pr-review` skill, which the executor image installs under
+`~/.claude/skills` from `packages/executor/skills`. The skill reads the review
+and its inline comments, classifies each as worth fixing or not, fixes the
+worthwhile ones on the pull request's branch, pushes, replies to every comment
+(`Fixed in <sha>` or `Won't fix: <reason>`) and reports ready again, which
+starts another PR review.
+
+- An approval without a body triggers nothing. Its inline comments, if any,
+  are missed: the observer lists reviews, not their comments.
+- A task without an execution server (done, or failed past its follow-up
+  window) cannot take the follow-up; the hook fails and is logged.
+- The agent's replies are written with the token that opened the pull request,
+  so the observer does not read them as new reviews, and the PR review hook
+  only writes conversation comments: neither loops back.
 
 `PodmanReviewer` runs `podman run --rm -i` on the reviewer image per review,
 with the role (`spec` or `pr`) as argument, passes the request on stdin and
