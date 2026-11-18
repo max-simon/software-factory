@@ -22,6 +22,7 @@ import type {
   TaskEdit,
   TaskAgent,
   TaskModel,
+  TokenUsage,
 } from '@factory/core';
 import { usernameMaxLength } from '@factory/core';
 import { passwordMaxLength } from '../auth/passwords.ts';
@@ -319,8 +320,25 @@ export function parseHeartbeat(body: unknown): Omit<Heartbeat, 'at'> {
 /** One session's usage, added to the task totals. */
 export function parseSessionMetrics(body: unknown): SessionMetrics {
   const fields = object(body);
-  rejectUnknownFields(fields, ['durationMs', 'costUsd']);
-  return { durationMs: nonNegativeNumber(fields, 'durationMs'), costUsd: nonNegativeNumber(fields, 'costUsd') };
+  rejectUnknownFields(fields, ['durationMs', 'costUsd', 'tokens']);
+  return {
+    durationMs: nonNegativeNumber(fields, 'durationMs'),
+    costUsd: nonNegativeNumber(fields, 'costUsd'),
+    ...(fields.tokens !== undefined && { tokens: parseTokenUsage(fields.tokens) }),
+  };
+}
+
+const tokenCounters = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheCreationTokens'] as const;
+
+function parseTokenUsage(value: unknown): TokenUsage {
+  const fields = object(value, 'tokens');
+  rejectUnknownFields(fields, tokenCounters, 'tokens');
+  return {
+    inputTokens: nonNegativeNumber(fields, 'inputTokens'),
+    outputTokens: nonNegativeNumber(fields, 'outputTokens'),
+    cacheReadTokens: nonNegativeNumber(fields, 'cacheReadTokens'),
+    cacheCreationTokens: nonNegativeNumber(fields, 'cacheCreationTokens'),
+  };
 }
 
 function nonNegativeNumber(fields: Fields, key: string): number {

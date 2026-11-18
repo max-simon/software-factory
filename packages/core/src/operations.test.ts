@@ -349,6 +349,29 @@ describe('addSessionMetrics', () => {
     assert.deepEqual(addSessionMetrics(task, { durationMs: 250, costUsd: 0.25 }).metrics, { durationMs: 1250, costUsd: 0.75 });
   });
 
+  it('sums token counts', () => {
+    const tokens = { inputTokens: 10, outputTokens: 20, cacheReadTokens: 300, cacheCreationTokens: 40 };
+    const task = taskIn('in_progress', { metrics: { durationMs: 1000, costUsd: 0.5, tokens } });
+    const delta = { inputTokens: 1, outputTokens: 2, cacheReadTokens: 3, cacheCreationTokens: 4 };
+    assert.deepEqual(addSessionMetrics(task, { durationMs: 250, costUsd: 0.25, tokens: delta }).metrics, {
+      durationMs: 1250,
+      costUsd: 0.75,
+      tokens: { inputTokens: 11, outputTokens: 22, cacheReadTokens: 303, cacheCreationTokens: 44 },
+    });
+  });
+
+  it('starts the token totals from zero on a total measured before tokens were tracked', () => {
+    const task = taskIn('in_progress', { metrics: { durationMs: 1000, costUsd: 0.5 } });
+    const tokens = { inputTokens: 1, outputTokens: 2, cacheReadTokens: 3, cacheCreationTokens: 4 };
+    assert.deepEqual(addSessionMetrics(task, { durationMs: 250, costUsd: 0.25, tokens }).metrics, { durationMs: 1250, costUsd: 0.75, tokens });
+  });
+
+  it('keeps the token totals when a report has none', () => {
+    const tokens = { inputTokens: 1, outputTokens: 2, cacheReadTokens: 3, cacheCreationTokens: 4 };
+    const task = taskIn('in_progress', { metrics: { durationMs: 1000, costUsd: 0.5, tokens } });
+    assert.deepEqual(addSessionMetrics(task, { durationMs: 250, costUsd: 0 }).metrics, { durationMs: 1250, costUsd: 0.5, tokens });
+  });
+
   it('is accepted in every status and changes nothing else', () => {
     const statuses: TaskStatus[] = ['draft', 'queued', 'in_progress', 'input_required', 'ready', 'done', 'failed'];
     for (const status of statuses) {

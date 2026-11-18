@@ -143,10 +143,20 @@ export interface Heartbeat {
   activity?: string;
 }
 
+/** Token counts of agent sessions; cache reads and writes are counted apart from fresh input. */
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+}
+
 /** Summed over every agent session of the task; unset until the first report. */
 export interface SessionMetrics {
   durationMs: number;
   costUsd: number;
+  /** Unset for tasks measured before tokens were tracked, and while the agent reported none. */
+  tokens?: TokenUsage;
 }
 
 /** Where an engineer reaches the agent's own web console, and its password. */

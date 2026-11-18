@@ -20,6 +20,7 @@ import type {
   TaskAgent,
   TaskModel,
   TaskStatus,
+  TokenUsage,
 } from './task.ts';
 
 // All operations are pure: they return a new Task and never touch `updatedAt`;
@@ -383,9 +384,26 @@ export const markDone = (task: Task): Task => transition(task, 'done');
 /** Adds one session's usage to the totals; accepted in every status, since reports may arrive late. */
 export function addSessionMetrics(task: Task, delta: SessionMetrics): Task {
   const total = task.metrics ?? { durationMs: 0, costUsd: 0 };
+  // Tokens used before they were tracked are unknown, so a total without them starts from zero.
+  const tokens = delta.tokens ? addTokens(total.tokens ?? noTokens, delta.tokens) : total.tokens;
   return {
     ...task,
-    metrics: { durationMs: total.durationMs + delta.durationMs, costUsd: total.costUsd + delta.costUsd },
+    metrics: {
+      durationMs: total.durationMs + delta.durationMs,
+      costUsd: total.costUsd + delta.costUsd,
+      ...(tokens && { tokens }),
+    },
+  };
+}
+
+const noTokens: TokenUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 };
+
+function addTokens(a: TokenUsage, b: TokenUsage): TokenUsage {
+  return {
+    inputTokens: a.inputTokens + b.inputTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+    cacheReadTokens: a.cacheReadTokens + b.cacheReadTokens,
+    cacheCreationTokens: a.cacheCreationTokens + b.cacheCreationTokens,
   };
 }
 

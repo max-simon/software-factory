@@ -1,4 +1,4 @@
-import { formatCost, formatDuration, type Project, type ProjectChange } from '@factory/core';
+import { formatCost, formatDuration, formatTokens, type Project, type ProjectChange } from '@factory/core';
 import { useEffect, useState } from 'react';
 import { api } from '../api.ts';
 import { Changelog } from '../components/Changelog.tsx';
@@ -134,7 +134,8 @@ function Metrics({ metrics }: { metrics: ProjectMetrics }) {
     {
       label: 'Cost (est.)',
       value: formatCost(metrics.costUsd),
-      title: 'Estimate at list prices, summed over all tasks; not a billed amount',
+      detail: `${formatTokens(metrics.tokens)} tokens`,
+      title: 'Estimate at list prices and tokens used, summed over all tasks; not a billed amount',
     },
   ];
   return (

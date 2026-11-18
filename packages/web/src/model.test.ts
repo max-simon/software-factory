@@ -188,11 +188,11 @@ test('pullRequestIndicator tells merged and closed pull requests with reviews fr
   });
 });
 
-test('projectMetrics counts tasks by status and sums cost, time and pull requests', () => {
+test('projectMetrics counts tasks by status and sums cost, time, tokens and pull requests', () => {
   const pr = (n: number, status: 'open' | 'merged' | 'closed') => ({ url: `https://github.com/o/r/pull/${n}`, title: 't', status, isUnderReview: false });
   const metrics = projectMetrics([
     task('a', 'in_progress', '2026-01-01T00:00:00Z', { metrics: { durationMs: 1000, costUsd: 0.5 }, pullRequests: [pr(1, 'open')] }),
-    task('b', 'done', '2026-01-01T00:00:00Z', { metrics: { durationMs: 2000, costUsd: 1.25 }, pullRequests: [pr(2, 'merged'), pr(3, 'closed')] }),
+    task('b', 'done', '2026-01-01T00:00:00Z', { metrics: { durationMs: 2000, costUsd: 1.25, tokens: { inputTokens: 1, outputTokens: 20, cacheReadTokens: 300, cacheCreationTokens: 4000 } }, pullRequests: [pr(2, 'merged'), pr(3, 'closed')] }),
     task('c', 'input_required', '2026-01-01T00:00:00Z'),
     task('d', 'failed', '2026-01-01T00:00:00Z'),
     task('e', 'draft', '2026-01-01T00:00:00Z'),
@@ -205,6 +205,7 @@ test('projectMetrics counts tasks by status and sums cost, time and pull request
     failed: 1,
     costUsd: 1.75,
     durationMs: 3000,
+    tokens: 4321,
     openPullRequests: 1,
     mergedPullRequests: 1,
   });

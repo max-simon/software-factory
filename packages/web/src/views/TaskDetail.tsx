@@ -1,4 +1,16 @@
-import { formatCost, formatDuration, hasStarted, isCancellable, isEditable, isRestartable, type Project, type TaskChange } from '@factory/core';
+import {
+  formatCost,
+  formatDuration,
+  formatTokens,
+  hasStarted,
+  isCancellable,
+  isEditable,
+  isRestartable,
+  type Project,
+  type SessionMetrics,
+  type TaskChange,
+  type TokenUsage,
+} from '@factory/core';
 import { useEffect, useState, type ReactNode } from 'react';
 import { api } from '../api.ts';
 import { AgentConsoleModal } from '../components/AgentConsoleModal.tsx';
@@ -14,7 +26,19 @@ import { HeartbeatNote, inputReviewLabel, prReviewLabel, Spinner, StatusLabel } 
 import { Timeline } from '../components/Timeline.tsx';
 import { useAction, usePolling } from '../hooks.ts';
 import { UserName } from '../components/UserName.tsx';
-import { agentLabels, canSendFollowUp, describeChange, href, openInput, pullRequestNumber, relativeTime, repoName, timeline, type TaskView } from '../model.ts';
+import {
+  agentLabels,
+  canSendFollowUp,
+  describeChange,
+  href,
+  openInput,
+  pullRequestNumber,
+  relativeTime,
+  repoName,
+  timeline,
+  totalTokens,
+  type TaskView,
+} from '../model.ts';
 
 export function TaskDetail({ id, projects }: { id: string; projects: Project[] | undefined }) {
   const { data: task, error, set } = usePolling(() => api.getTask(id), id);
@@ -101,6 +125,8 @@ export function TaskDetail({ id, projects }: { id: string; projects: Project[] |
           <Changelog changes={changes} describe={describeChange} />
         </Section>
       )}
+
+      {task.metrics && <Consumption metrics={task.metrics} />}
 
       {openArtifact && (
         <ArtifactModal
@@ -203,11 +229,6 @@ export function Header({ task, onChange }: { task: TaskView; onChange: (task: Ta
         <span>{task.autonomyMode}</span>
         <span>{task.model}</span>
         <span>{agentLabels[task.agent]}</span>
-        {task.metrics && (
-          <span title="Agent working time and estimated cost, summed over all sessions">
-            {formatDuration(task.metrics.durationMs)} · {formatCost(task.metrics.costUsd)} (est.)
-          </span>
-        )}
         {task.labels.map((label) => (
           <span key={label} className="label">
             {label}
@@ -342,6 +363,40 @@ function FollowUpForm({ task, onSent }: { task: TaskView; onSent: (task: TaskVie
     </form>
   );
 }
+
+/** Summed over every agent session of the task. */
+export function Consumption({ metrics }: { metrics: SessionMetrics }) {
+  const { tokens } = metrics;
+  return (
+    <Section title="Consumption">
+      <dl className="consumption">
+        <dt>Agent time</dt>
+        <dd>{formatDuration(metrics.durationMs)}</dd>
+        <dt>Cost</dt>
+        <dd>
+          {formatCost(metrics.costUsd)} <span className="muted">estimate at list prices, not a billed amount</span>
+        </dd>
+        <dt>Tokens</dt>
+        {tokens ? (
+          <dd>
+            {formatTokens(totalTokens(tokens))} <span className="muted">{tokenBreakdown(tokens)}</span>
+          </dd>
+        ) : (
+          // Tasks measured before tokens were tracked, or by an agent that reports none.
+          <dd className="muted">not recorded</dd>
+        )}
+      </dl>
+    </Section>
+  );
+}
+
+const tokenBreakdown = (tokens: TokenUsage): string =>
+  [
+    `${formatTokens(tokens.inputTokens)} input`,
+    `${formatTokens(tokens.outputTokens)} output`,
+    `${formatTokens(tokens.cacheReadTokens)} cache read`,
+    `${formatTokens(tokens.cacheCreationTokens)} cache write`,
+  ].join(' · ');
 
 export function PullRequestList({ pullRequests }: { pullRequests: TaskView['pullRequests'] }) {
   return (

@@ -2,6 +2,8 @@
 // The runner decides what to prompt and when; an adapter only runs one turn of
 // one long-lived session and says how it ended.
 
+import type { TokenUsage } from '@factory/core';
+
 export interface SessionTurn {
   prompt: string;
   sessionId: string;
@@ -14,6 +16,8 @@ export interface TurnOutcome {
   failure?: string;
   /** The session's running cost total after this turn; unset when the agent reported none. */
   totalCostUsd?: number;
+  /** The session's running token totals after this turn; unset when the agent reported none. */
+  totalTokens?: TokenUsage;
 }
 
 export interface AgentSession {

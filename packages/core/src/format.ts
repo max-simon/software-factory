@@ -16,4 +16,20 @@ export function formatCost(usd: number): string {
   return usd > 0 && usd < 0.01 ? '<$0.01' : `$${usd.toFixed(2)}`;
 }
 
+const tokenUnits: ReadonlyArray<[size: number, suffix: string]> = [
+  [1_000_000_000, 'B'],
+  [1_000_000, 'M'],
+  [1_000, 'k'],
+];
+
+/** `950`, `1.2k`, `340k`, `12M`; one decimal below ten of a unit, truncated like durations. */
+export function formatTokens(count: number): string {
+  for (const [size, suffix] of tokenUnits) {
+    if (count < size) continue;
+    const units = count < 10 * size ? Math.floor(count / (size / 10)) / 10 : Math.floor(count / size);
+    return `${units}${suffix}`;
+  }
+  return String(Math.floor(count));
+}
+
 const twoDigits = (n: number): string => String(n).padStart(2, '0');

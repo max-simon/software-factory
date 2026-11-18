@@ -1,11 +1,11 @@
-import type { Work } from '@factory/core';
+import type { TokenUsage, Work } from '@factory/core';
 import type { AgentClient } from './agent-client.ts';
-import type { AgentSession } from './agent-session.ts';
+import type { AgentSession, TurnOutcome } from './agent-session.ts';
 import type { Doorbell } from './doorbell.ts';
 import type { HeartbeatSender } from './heartbeat.ts';
 import { followUpPrompt, resumePrompt, taskPrompt } from './prompts.ts';
 import type { RunCommand } from './run-command.ts';
-import type { SessionState, SessionStore } from './session-state.ts';
+import { noTokens, type SessionState, type SessionStore } from './session-state.ts';
 
 export interface RepositorySetup {
   /** Unset: the agent works in an empty directory and opens no pull requests. */
@@ -111,6 +111,8 @@ interface PlannedTurn {
   isResume: boolean;
   /** The session's cost total before the turn. */
   costUsd: number;
+  /** The session's token totals before the turn. */
+  tokens: TokenUsage;
 }
 
 /** Without a session, the work starts over from the task; follow-ups sent meanwhile join it. */
@@ -118,13 +120,13 @@ async function freshTurn(deps: RunnerDeps, work: Work): Promise<PlannedTurn> {
   await setUpRepository(deps.run, deps.repository, deps.workDir);
   const [task, project] = await Promise.all([deps.client.getTask(), deps.client.getProject()]);
   const prompt = [taskPrompt(task, project), ...(work.followUps.length > 0 ? [followUpPrompt(work.followUps)] : [])];
-  return { prompt: prompt.join('\n\n'), sessionId: deps.newSessionId(), isResume: false, costUsd: 0 };
+  return { prompt: prompt.join('\n\n'), sessionId: deps.newSessionId(), isResume: false, costUsd: 0, tokens: noTokens };
 }
 
 async function resumeTurn(deps: RunnerDeps, work: Work, state: SessionState): Promise<PlannedTurn> {
   const task = await deps.client.getTask();
   const prompt = resumePrompt(task, new Set(work.inputIds), work.followUps);
-  return { prompt, sessionId: state.sessionId, isResume: true, costUsd: state.costUsd };
+  return { prompt, sessionId: state.sessionId, isResume: true, costUsd: state.costUsd, tokens: state.tokens };
 }
 
 /**
@@ -137,8 +139,8 @@ async function runTurn(deps: RunnerDeps, turn: PlannedTurn): Promise<SessionStat
   const started = deps.now();
   const { prompt, sessionId, isResume } = turn;
   const outcome = await deps.session.runTurn({ prompt, sessionId, isResume }, (activity) => heartbeat.setActivity(activity));
-  await recordMetrics(deps, deps.now() - started, turn.costUsd, outcome.totalCostUsd);
-  const next = { sessionId, costUsd: outcome.totalCostUsd ?? turn.costUsd };
+  await recordMetrics(deps, deps.now() - started, turn, outcome);
+  const next = { sessionId, costUsd: outcome.totalCostUsd ?? turn.costUsd, tokens: outcome.totalTokens ?? turn.tokens };
   if (outcome.failure === undefined || isResume) await deps.sessions.save(next);
   if (outcome.failure !== undefined) {
     await fail(deps, outcome.failure);
@@ -148,17 +150,31 @@ async function runTurn(deps: RunnerDeps, turn: PlannedTurn): Promise<SessionStat
 }
 
 /**
- * Reports one turn's duration and cost increase over the session's previous
- * total. A turn without a total reports no cost, and the next total catches up.
+ * Reports one turn's duration and its cost and token increase over the
+ * session's previous totals. A turn without a total reports no increase, and
+ * the next total catches up; a turn without token totals sends no tokens, so an
+ * agent that never reports them leaves them unrecorded instead of zero.
  * Metrics never fail the task, and a lost report is not resent.
  */
-async function recordMetrics(deps: RunnerDeps, durationMs: number, baseline: number, total: number | undefined): Promise<void> {
-  const costUsd = total === undefined ? 0 : Math.max(0, total - baseline);
+async function recordMetrics(deps: RunnerDeps, durationMs: number, baseline: PlannedTurn, outcome: TurnOutcome): Promise<void> {
+  const costUsd = increase(outcome.totalCostUsd ?? baseline.costUsd, baseline.costUsd);
+  const tokens = outcome.totalTokens && tokenIncrease(outcome.totalTokens, baseline.tokens);
   try {
-    await deps.client.reportMetrics({ durationMs, costUsd });
+    await deps.client.reportMetrics({ durationMs, costUsd, ...(tokens && { tokens }) });
   } catch (error) {
     deps.log(`could not report metrics: ${describe(error)}`);
   }
+}
+
+const increase = (total: number, baseline: number): number => Math.max(0, total - baseline);
+
+function tokenIncrease(total: TokenUsage, baseline: TokenUsage): TokenUsage {
+  return {
+    inputTokens: increase(total.inputTokens, baseline.inputTokens),
+    outputTokens: increase(total.outputTokens, baseline.outputTokens),
+    cacheReadTokens: increase(total.cacheReadTokens, baseline.cacheReadTokens),
+    cacheCreationTokens: increase(total.cacheCreationTokens, baseline.cacheCreationTokens),
+  };
 }
 
 /** Starts from a clean directory: a fresh turn may follow one whose set-up or session failed. */
