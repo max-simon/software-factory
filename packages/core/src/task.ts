@@ -187,14 +187,16 @@ export interface Worker {
   since: string;
 }
 
-/** A message from the engineer for the agent of a started task. */
+/** A message from the engineer, or from the control plane on its own, for the agent of a started task. */
 export interface FollowUp {
   id: string;
   /** When it was sent; stamped by the control plane. */
   createdAt: string;
   message: string;
-  /** The id of the user who sent it; unset for follow-ups stored before users existed. */
+  /** The id of the user who sent it; unset for the control plane's follow-ups and for follow-ups stored before users existed. */
   authorId?: string;
+  /** Set when the control plane sent it on its own, e.g. for a pull request review or merge conflict. */
+  bySystem?: true;
   /** Set once the runner accepted it for the agent session. */
   deliveredAt?: string;
 }

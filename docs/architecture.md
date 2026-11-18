@@ -56,12 +56,15 @@ Detail behind the [README](../README.md): packages, task lifecycle, the worker p
 - **Who did what:** the engineer API passes the request's `Principal` to the
   services, which record the user's id, never a name: `createdBy` on tasks and
   projects, `authorId` on follow-ups, `answeredBy` on answers, `reviewedBy` on
-  approvals. Agent, reviewer and system changes record no user. The web UI
+  approvals. Agent, reviewer and system changes record no user; a follow-up
+  the control plane sends on its own (a pull request review or merge
+  conflict) is marked `bySystem` and shown as "by the system". The web UI
   resolves these ids through `GET /users` (`id`, `username`, `displayName`,
   `disabled` of every user, for any signed-in caller) and shows the **current**
   display name, with username and id on hover; an id no user has shows as
   itself, and an engineer's change or input stored before users existed as
-  "engineer (unattributed)".
+  "engineer (unattributed)" (so are the system's follow-ups stored before
+  `bySystem` existed).
 - **Spec review:** see *Hooks* below. A draft the reviewer finds off topic or
   underspecified moves to `clarification_required` with its comment as the
   note, logged with actor `reviewer`.

@@ -69,6 +69,11 @@ export function ByUser({ id }: { id: string | undefined }) {
   );
 }
 
+/** Marks a follow-up the control plane sent on its own, e.g. for a pull request review. */
+export function BySystem() {
+  return <span className="by-system">by the system</span>;
+}
+
 /** Marks input the reviewer gave instead of the engineer, with its reason; renders nothing for the engineer's own. */
 export function ByReviewer({ note }: { note: ReviewerNote | undefined }) {
   if (!note) return null;

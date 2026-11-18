@@ -971,15 +971,17 @@ details[open] > summary {
   color: var(--muted);
 }
 
-/* The engineer who answered, reviewed or sent something; like the reviewer's mark. */
-.by-user {
+/* The engineer who answered, reviewed or sent something, or the system; like the reviewer's mark. */
+.by-user,
+.by-system {
   display: block;
   margin-top: 2px;
   font-size: 12px;
   color: var(--faint);
 }
 
-.delivery .by-user {
+.delivery .by-user,
+.delivery .by-system {
   display: inline;
   margin-top: 0;
 }
