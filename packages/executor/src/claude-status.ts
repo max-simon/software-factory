@@ -1,5 +1,5 @@
 // Turns the claude CLI's `--output-format stream-json` events into a short line
-// for the engineer, e.g. "Running Bash: yarn test". Only the runner reads these
+// for the engineer, e.g. "Running Bash: yarn test", or the start of a response. Only the runner reads these
 // events, so the agent spends no tokens on reporting what it is doing.
 //
 // The event shapes are the CLI's, not ours: every field is treated as optional
@@ -45,8 +45,10 @@ function describeBlock(block: Fields): string | undefined {
   switch (block.type) {
     case 'tool_use':
       return typeof block.name === 'string' ? describeTool(block.name, isFields(block.input) ? block.input : {}) : undefined;
-    case 'text':
-      return 'Writing response';
+    case 'text': {
+      const text = typeof block.text === 'string' ? block.text.trim().replace(/\s+/g, ' ') : '';
+      return text === '' ? 'Writing response' : `Writing: ${text}`;
+    }
     case 'thinking':
     case 'redacted_thinking':
       return 'Thinking';

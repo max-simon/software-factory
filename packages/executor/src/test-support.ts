@@ -49,6 +49,8 @@ export interface FakeAgentClient extends AgentClient {
   calls: string[];
   /** Kept apart from `calls`: heartbeats run alongside everything else. */
   heartbeats: Array<Omit<Heartbeat, 'at'>>;
+  /** Every activity batch, in order. */
+  activity: string[][];
   /** Every reported delta, in order. */
   metrics: SessionMetrics[];
 }
@@ -77,6 +79,7 @@ export function fakeAgentClient(task: AgentTaskView = sampleTask()): FakeAgentCl
     otherTasks: [],
     calls: [],
     heartbeats: [],
+    activity: [],
     metrics: [],
     getTask: async () => record('getTask', {}),
     reportPlan: async (plan) => record('reportPlan', { plan }),
@@ -108,6 +111,9 @@ export function fakeAgentClient(task: AgentTaskView = sampleTask()): FakeAgentCl
     reportFailure: async (failureReason) => record('reportFailure', { status: 'failed', failureReason }),
     sendHeartbeat: async (heartbeat) => {
       fake.heartbeats.push({ ...heartbeat });
+    },
+    sendActivity: async (entries) => {
+      fake.activity.push([...entries]);
     },
     // Like the control plane: no work idles the worker and fails a task still in progress.
     requestWork: async () => {

@@ -9,6 +9,7 @@ import {
   parseDecision,
   parseFailure,
   parseAcceptedWork,
+  parseActivity,
   parseHeartbeat,
   parseNewQuestion,
   parsePlan,
@@ -90,6 +91,16 @@ export function agentRoutes(tasks: TaskStore, agent: AgentService, projects: Pro
         }
         const work = agent.requestWork(task);
         return { status: 200, body: work === undefined ? {} : { work } };
+      },
+    },
+    {
+      // Batched by the runner every few seconds while the agent works; kept in memory for the engineer only.
+      method: 'POST',
+      path: '/agent/activity',
+      handle: ({ headers, body }) => {
+        const { id } = authenticate(headers);
+        agent.recordActivity(id, parseActivity(body));
+        return { status: 204 };
       },
     },
     route('POST', '/agent/work/accept', ({ id }, body) => agent.acceptWork(id, parseAcceptedWork(body))),

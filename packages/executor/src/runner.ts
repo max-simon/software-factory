@@ -1,4 +1,5 @@
 import type { TokenUsage, Work } from '@factory/core';
+import type { ActivityReporter } from './activity-reporter.ts';
 import type { AgentClient } from './agent-client.ts';
 import type { AgentSession, TurnOutcome } from './agent-session.ts';
 import type { Doorbell } from './doorbell.ts';
@@ -27,6 +28,7 @@ export interface RunnerDeps {
   /** A fresh id in the agent's format. */
   newSessionId: () => string;
   heartbeat: HeartbeatSender;
+  activity: ActivityReporter;
   /** Rung when work waits for the idle runner. */
   doorbell: Doorbell;
   /** Milliseconds clock that times each turn. */
@@ -138,7 +140,12 @@ async function runTurn(deps: RunnerDeps, turn: PlannedTurn): Promise<SessionStat
   heartbeat.setPhase('working');
   const started = deps.now();
   const { prompt, sessionId, isResume } = turn;
-  const outcome = await deps.session.runTurn({ prompt, sessionId, isResume }, (activity) => heartbeat.setActivity(activity));
+  const outcome = await deps.session.runTurn({ prompt, sessionId, isResume }, (activity) => {
+    heartbeat.setActivity(activity);
+    deps.activity.add(activity);
+  });
+  // Before the runner asks for work again: accepting the next piece starts a new turn's activity.
+  await deps.activity.flush();
   await recordMetrics(deps, deps.now() - started, turn, outcome);
   const next = { sessionId, costUsd: outcome.totalCostUsd ?? turn.costUsd, tokens: outcome.totalTokens ?? turn.tokens };
   if (outcome.failure === undefined || isResume) await deps.sessions.save(next);

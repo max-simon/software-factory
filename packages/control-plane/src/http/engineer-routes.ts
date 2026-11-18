@@ -110,6 +110,7 @@ export function engineerRoutes(
       handle: ({ params, principal }) => ({ status: 200, body: view(service.returnToDraft(params.id!, principalOf(principal))) }),
     },
     { method: 'GET', path: '/tasks/:id/changes', handle: ({ params }) => ({ status: 200, body: tasks.changes(params.id!) }) },
+    { method: 'GET', path: '/tasks/:id/activity', handle: ({ params }) => ({ status: 200, body: service.activity(params.id!) }) },
     {
       method: 'POST',
       path: '/tasks/:id/cancel',

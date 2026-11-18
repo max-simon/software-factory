@@ -22,6 +22,7 @@ import {
   type Task,
   type Work,
 } from '@factory/core';
+import type { ActivityFeed } from './activity-feed.ts';
 import { hashAgentToken } from './agent-token.ts';
 import type { TaskStore } from './task-store.ts';
 
@@ -35,9 +36,11 @@ type Reported<T> = Omit<T, 'id' | 'createdAt'>;
  */
 export class AgentService {
   readonly #tasks: TaskStore;
+  readonly #activity: ActivityFeed;
 
-  constructor(tasks: TaskStore) {
+  constructor(tasks: TaskStore, activity: ActivityFeed) {
     this.#tasks = tasks;
+    this.#activity = activity;
   }
 
   findByAgentToken(token: string): Task | undefined {
@@ -92,6 +95,12 @@ export class AgentService {
     this.#tasks.saveHeartbeat(task.id, execution!.lastHeartbeat!);
   }
 
+  /** Adds what the runner saw the agent do since its last report to the current turn. */
+  recordActivity(id: string, texts: readonly string[]): void {
+    const at = this.#tasks.now();
+    this.#activity.append(id, texts.map((text) => ({ at, text })));
+  }
+
   /**
    * Answers a runner that asks for work. With none pending its worker goes
    * idle, and a task still in progress fails: its agent ended the turn without
@@ -107,7 +116,10 @@ export class AgentService {
     return work;
   }
 
+  /** Accepted work starts a turn, so the activity of the previous one is dropped. */
   acceptWork(id: string, followUpIds: readonly string[]): Task {
-    return this.#tasks.update(id, 'agent', (task) => acceptWork(task, followUpIds, this.#tasks.now()));
+    const task = this.#tasks.update(id, 'agent', (current) => acceptWork(current, followUpIds, this.#tasks.now()));
+    this.#activity.startTurn(id);
+    return task;
   }
 }

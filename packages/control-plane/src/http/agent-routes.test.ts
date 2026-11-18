@@ -291,6 +291,25 @@ test('a heartbeat is stored with the control-plane time and leaves updatedAt alo
   assert.deepEqual((await call('GET', '/tasks/task-1')).json.execution.lastHeartbeat, { at: now, phase: 'working' });
 });
 
+test('activity is stamped with the control-plane time, shown to the engineer and dropped when work is accepted', async (t) => {
+  const call = await startApi(t);
+  const sent = await call('POST', '/agent/activity', { body: { entries: ['  Starting session ', 'x'.repeat(300)] } });
+  assert.equal(sent.status, 204);
+  await call('POST', '/agent/activity', { body: { entries: ['Thinking'] } });
+  const shown = await call('GET', '/tasks/task-1/activity');
+  assert.equal(shown.status, 200);
+  assert.deepEqual(shown.json, [
+    { at: fixedNow, text: 'Starting session' },
+    { at: fixedNow, text: 'x'.repeat(200) },
+    { at: fixedNow, text: 'Thinking' },
+  ]);
+  await call('POST', '/agent/work/accept', { body: { followUpIds: [] } });
+  assert.deepEqual((await call('GET', '/tasks/task-1/activity')).json, []);
+  assert.equal((await call('GET', '/tasks/task-1/activity', { cookie: null })).status, 401);
+  assert.equal((await call('GET', '/tasks/nope/activity')).status, 404);
+  assert.equal((await call('POST', '/agent/activity', { body: { entries: ['x'] }, authorization: null })).status, 401);
+});
+
 test('a runner awaiting work first gets the task itself, accepts it, then gets nothing and goes idle', async (t) => {
   const call = await startApi(t);
   const first = await call('POST', '/agent/heartbeat', { body: { phase: 'awaiting_work' } });
@@ -394,6 +413,12 @@ test('invalid bodies return 400 invalid_request', async (t) => {
     ['POST', '/agent/heartbeat', { phase: 'waiting_for_follow_up' }],
     ['POST', '/agent/heartbeat', { phase: 'working', activity: 7 }],
     ['POST', '/agent/heartbeat', { phase: 'working', at: fixedNow }],
+    ['POST', '/agent/activity', {}],
+    ['POST', '/agent/activity', { entries: 'Thinking' }],
+    ['POST', '/agent/activity', { entries: ['Thinking', ' '] }],
+    ['POST', '/agent/activity', { entries: [7] }],
+    ['POST', '/agent/activity', { entries: Array.from({ length: 201 }, () => 'x') }],
+    ['POST', '/agent/activity', { entries: [], at: fixedNow }],
     ['POST', '/agent/metrics', undefined],
     ['POST', '/agent/metrics', { durationMs: 1 }],
     ['POST', '/agent/metrics', { costUsd: 1 }],

@@ -15,6 +15,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { api } from '../api.ts';
 import { AgentConsoleModal } from '../components/AgentConsoleModal.tsx';
 import { Changelog } from '../components/Changelog.tsx';
+import { LiveActivity } from '../components/LiveActivity.tsx';
 import { DependenciesSection } from '../components/Dependencies.tsx';
 import { ErrorText } from '../components/ErrorText.tsx';
 import { ArtifactModal } from '../components/ArtifactModal.tsx';
@@ -106,6 +107,8 @@ export function TaskDetail({ id, projects }: { id: string; projects: Project[] |
           <PlanPipeline plan={task.plan} />
         </Section>
       )}
+
+      {task.execution && <LiveActivity taskId={task.id} />}
 
       <details className="box spec" open={isEditable(task.status)}>
         <summary className="section-title">Specification</summary>

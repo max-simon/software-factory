@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { agentConsolePort, doorbellPort } from '@factory/core';
+import { createActivityReporter } from './activity-reporter.ts';
 import { createAgentClient, type AgentClient } from './agent-client.ts';
 import type { AgentSession } from './agent-session.ts';
 import { createClaudeSession, mcpConfig } from './claude-session.ts';
@@ -19,6 +20,7 @@ import { runWorker } from './runner.ts';
 import { createSessionStore } from './session-state.ts';
 
 const heartbeatIntervalMs = 15_000;
+const activityDelayMs = 2_000;
 // About the control plane's startup timeout: a runner that cannot reach it for
 // longer is restarted anyway.
 const workRequestRetry = { attempts: 20, delayMs: 15_000 };
@@ -55,6 +57,7 @@ async function main(): Promise<number> {
       sessions: createSessionStore(join(homedir(), '.factory', 'session.json')),
       newSessionId: agent.newSessionId,
       heartbeat: createHeartbeat({ send: client.sendHeartbeat, intervalMs: heartbeatIntervalMs, log }),
+      activity: createActivityReporter({ send: client.sendActivity, delayMs: activityDelayMs, log }),
       doorbell,
       now: Date.now,
       retry: { ...workRequestRetry, sleep: (ms) => sleep(ms) },

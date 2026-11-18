@@ -317,6 +317,17 @@ export function parseHeartbeat(body: unknown): Omit<Heartbeat, 'at'> {
   return { phase, ...(shown && { activity: shown }) };
 }
 
+const maxActivityEntries = 200;
+
+/** A batch of activity lines, trimmed and shortened like a heartbeat's. */
+export function parseActivity(body: unknown): string[] {
+  const fields = object(body);
+  rejectUnknownFields(fields, ['entries']);
+  const entries = stringArray(fields, 'entries');
+  if (entries.length > maxActivityEntries) throw new ValidationError(`entries must list at most ${maxActivityEntries} lines`);
+  return entries.map((entry) => entry.trim().slice(0, maxActivityLength));
+}
+
 /** One session's usage, added to the task totals. */
 export function parseSessionMetrics(body: unknown): SessionMetrics {
   const fields = object(body);

@@ -143,6 +143,14 @@ export interface Heartbeat {
   activity?: string;
 }
 
+/** One step of the agent's current turn, as its runner saw it; kept in memory only. */
+export interface ActivityEntry {
+  /** When the control plane received it. */
+  at: string;
+  /** Like a heartbeat's activity. */
+  text: string;
+}
+
 /** Token counts of agent sessions; cache reads and writes are counted apart from fresh input. */
 export interface TokenUsage {
   inputTokens: number;
