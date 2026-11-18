@@ -129,8 +129,10 @@ more when the turn ends. The control plane keeps these in memory only
 (`ActivityFeed`): up to 300 lines per task and 50 tasks, the least recently
 active task dropped first. Accepting work starts a new turn and drops the
 previous one's lines. A control-plane restart loses them, and a failed batch
-is not resent. `GET /tasks/:id/activity` returns the current turn's lines;
-the task page polls it.
+is not resent. Finishing a task keeps its lines. `GET /tasks/:id/activity`
+returns the latest turn's lines; the task page polls it while the task has an
+execution server ("Live activity") and loads it once otherwise ("Last
+activity"), hiding the section when there are none.
 
 ## Pull request events
 

@@ -108,7 +108,7 @@ export function TaskDetail({ id, projects }: { id: string; projects: Project[] |
         </Section>
       )}
 
-      {task.execution && <LiveActivity taskId={task.id} />}
+      <LiveActivity taskId={task.id} isLive={task.execution !== undefined} />
 
       <details className="box spec" open={isEditable(task.status)}>
         <summary className="section-title">Specification</summary>
