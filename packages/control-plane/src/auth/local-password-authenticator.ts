@@ -4,17 +4,11 @@ import {
   normalizeUsername,
   type Authenticator,
   type Credentials,
+  type LocalPasswordStore,
   type PasswordHasher,
   type UserRepository,
 } from '@factory/core';
 import { passwordMaxLength } from './passwords.ts';
-
-/** Keeps the password hash of a user's `local` identity. */
-export interface LocalPasswordStore {
-  /** Sets the hash, linking the user's `local` identity when it is not linked yet. */
-  setPasswordHash(userId: string, hash: string): void;
-  getPasswordHash(userId: string): string | undefined;
-}
 
 export interface LocalPasswordAuthenticatorDeps {
   users: UserRepository;

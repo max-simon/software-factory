@@ -3,6 +3,7 @@ import type { Project } from './project.ts';
 import type { InputReview, InputReviewRequest, PrReview, PrReviewRequest, SpecReview, SpecReviewRequest } from './review.ts';
 import type { AgentConsole, Heartbeat, PullRequest, Task, TaskAgent, TaskModel, TaskStatus } from './task.ts';
 import type { AccessToken } from './access-token.ts';
+import type { Session } from './session.ts';
 import type { Credentials, ExternalIdentity, User } from './user.ts';
 
 export interface TaskRepository {
@@ -155,4 +156,25 @@ export interface AccessTokenRepository {
   delete(userId: string, id: string): boolean;
   /** Deletes every token of the user, e.g. when it is disabled. */
   deleteForUser(userId: string): void;
+}
+
+/** Keeps the password hash of a user's `local` identity. */
+export interface LocalPasswordStore {
+  /** Sets the hash, linking the user's `local` identity when it is not linked yet. */
+  setPasswordHash(userId: string, hash: string): void;
+  getPasswordHash(userId: string): string | undefined;
+}
+
+/** Browser sessions by the SHA-256 of their token; the token itself is never stored. */
+export interface SessionStore {
+  insert(session: Session): void;
+  get(idHash: string): Session | undefined;
+  touch(idHash: string, lastSeenAt: string): void;
+  delete(idHash: string): void;
+  /** Ends every session of the user, e.g. when it is disabled. */
+  deleteForUser(userId: string): void;
+  /** Ends every session of the user but the one with `keepIdHash`, e.g. after a password change. */
+  deleteForUserExcept(userId: string, keepIdHash: string): void;
+  /** Deletes sessions that ended at `now` or were last seen at `idleSince` or earlier. */
+  deleteExpired(now: string, idleSince: string): void;
 }

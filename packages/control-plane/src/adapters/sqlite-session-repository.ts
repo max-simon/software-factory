@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import type { Session, SessionStore } from '../auth/session-service.ts';
+import type { Session, SessionStore } from '@factory/core';
 
 // Only the token's SHA-256 is stored, so a copy of the database cannot be used to sign in.
 // No foreign key to users: the user CLI and tests may open the users table through another connection.

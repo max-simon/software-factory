@@ -2,9 +2,9 @@ import { normalizeUsername, type Authenticator, type Principal, type UserReposit
 import type { LoginThrottle } from '../auth/login-throttle.ts';
 import type { SessionService } from '../auth/session-service.ts';
 import type { UserAccountService } from '../user-account-service.ts';
+import { requireSession } from './authenticate.ts';
 import type { Response, Route } from './server.ts';
 import { clearedSessionCookie, readSessionToken, sessionCookie } from './session-cookie.ts';
-import { requireSession } from './token-routes.ts';
 import { parseDisplayNameChange, parsePasswordChange, ValidationError } from './validation.ts';
 
 export interface AuthRoutesDeps {

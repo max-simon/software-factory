@@ -123,3 +123,4 @@ export {
   type AccessToken,
   type NewAccessToken,
 } from './access-token.ts';
+export { type Session } from './session.ts';

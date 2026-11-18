@@ -1,6 +1,13 @@
 import { DatabaseSync } from 'node:sqlite';
-import { DomainError, localProvider, normalizeUsername, type ExternalIdentity, type User, type UserRepository } from '@factory/core';
-import type { LocalPasswordStore } from '../auth/local-password-authenticator.ts';
+import {
+  DomainError,
+  localProvider,
+  normalizeUsername,
+  type ExternalIdentity,
+  type LocalPasswordStore,
+  type User,
+  type UserRepository,
+} from '@factory/core';
 
 // The local password hash lives on the user's `local` identity row, so a user
 // signing in through an IdP only never has one.

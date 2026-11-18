@@ -1,6 +1,7 @@
-import type { AccessToken, Principal } from '@factory/core';
+import type { AccessToken } from '@factory/core';
 import type { AccessTokenService } from '../auth/access-token-service.ts';
-import type { Response, Route } from './server.ts';
+import { requireSession } from './authenticate.ts';
+import type { Route } from './server.ts';
 import { parseNewAccessToken } from './validation.ts';
 
 /** What the API shows of a token: never its hash, nor the token after creation. */
@@ -11,18 +12,6 @@ const toView = ({ id, name, createdAt, lastUsedAt, expiresAt }: AccessToken) => 
   ...(lastUsedAt !== undefined && { lastUsedAt }),
   ...(expiresAt !== undefined && { expiresAt }),
 });
-
-/**
- * 403 unless the caller signed in with a session: a token must not mint
- * further tokens or outlive its own revocation through another one.
- */
-export function requireSession(principal: Principal | undefined): Response | undefined {
-  if (principal?.via === 'session') return undefined;
-  return {
-    status: 403,
-    body: { error: { code: 'session_required', message: 'this needs a signed-in session; access tokens cannot use it' } },
-  };
-}
 
 /** A signed-in user lists, creates and revokes its own personal access tokens. */
 export function tokenRoutes(tokens: AccessTokenService): Route[] {

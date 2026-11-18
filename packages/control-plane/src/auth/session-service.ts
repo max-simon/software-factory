@@ -1,29 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import type { Principal, UserRepository } from '@factory/core';
-
-/** A browser session; the token itself is handed out once and never stored. */
-export interface Session {
-  /** SHA-256 of the token, hex. */
-  idHash: string;
-  userId: string;
-  createdAt: string;
-  lastSeenAt: string;
-  /** The absolute end of the session, however active it is. */
-  expiresAt: string;
-}
-
-export interface SessionStore {
-  insert(session: Session): void;
-  get(idHash: string): Session | undefined;
-  touch(idHash: string, lastSeenAt: string): void;
-  delete(idHash: string): void;
-  /** Ends every session of the user, e.g. when it is disabled. */
-  deleteForUser(userId: string): void;
-  /** Ends every session of the user but the one with `keepIdHash`, e.g. after a password change. */
-  deleteForUserExcept(userId: string, keepIdHash: string): void;
-  /** Deletes sessions that ended at `now` or were last seen at `idleSince` or earlier. */
-  deleteExpired(now: string, idleSince: string): void;
-}
+import type { Principal, SessionStore, UserRepository } from '@factory/core';
 
 export interface SessionServiceDeps {
   sessions: SessionStore;

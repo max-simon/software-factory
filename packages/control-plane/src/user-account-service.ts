@@ -10,14 +10,15 @@ import {
   parseUsername,
   renameUser,
   type AccessTokenRepository,
+  type LocalPasswordStore,
   type NewUser,
   type PasswordHasher,
+  type SessionStore,
   type User,
   type UserRepository,
 } from '@factory/core';
-import type { LocalPasswordStore } from './auth/local-password-authenticator.ts';
 import { parsePassword } from './auth/passwords.ts';
-import { hashSessionToken, type SessionStore } from './auth/session-service.ts';
+import { hashSessionToken } from './auth/session-service.ts';
 
 export interface UserAccountServiceDeps {
   users: UserRepository;
