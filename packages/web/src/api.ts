@@ -85,6 +85,7 @@ export const api = {
   moveTask: (id: string, move: { before?: string }) => call<TaskView[]>('POST', `${task(id)}/move`, move),
   startTask: (id: string) => call<TaskView>('POST', `${task(id)}/start`),
   requestClarification: (id: string, note: string) => call<TaskView>('POST', `${task(id)}/clarification`, { note }),
+  setAssignees: (id: string, assignees: string[]) => call<TaskView>('PUT', `${task(id)}/assignees`, { assignees }),
   returnToDraft: (id: string) => call<TaskView>('DELETE', `${task(id)}/clarification`),
   listChanges: (id: string) => call<TaskChange[]>('GET', `${task(id)}/changes`),
   listActivity: (id: string) => call<ActivityEntry[]>('GET', `${task(id)}/activity`),

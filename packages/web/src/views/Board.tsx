@@ -1,6 +1,7 @@
 import { unmetDependencies } from '@factory/core';
 import { useState, type DragEvent, type KeyboardEvent } from 'react';
 import { api } from '../api.ts';
+import { AssigneeBadges } from '../components/Assignees.tsx';
 import { ErrorText } from '../components/ErrorText.tsx';
 import { HeartbeatNote, Spinner, specReviewLabel, StatusDot } from '../components/Status.tsx';
 import { useAction } from '../hooks.ts';
@@ -161,6 +162,7 @@ function TaskCard({
         <Spinner isBusy={task.isSpecUnderReview} label={specReviewLabel} />
         <HeartbeatNote task={task} isCompact />
         <span className="card-time">{relativeTime(task.updatedAt)}</span>
+        <AssigneeBadges assignees={task.assignees} />
       </span>
       {(task.repoUrl || task.labels.length > 0) && (
         <span className="card-meta">
