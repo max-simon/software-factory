@@ -82,6 +82,18 @@ export class SqliteUserRepository implements UserRepository, LocalPasswordStore 
     );
   }
 
+  insertWithPassword(user: User, hash: string): void {
+    this.#db.exec('BEGIN');
+    try {
+      this.insert(user);
+      this.setPasswordHash(user.id, hash);
+      this.#db.exec('COMMIT');
+    } catch (error) {
+      this.#db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
   update(user: User): void {
     const result = this.#writeUser(user, () =>
       this.#db

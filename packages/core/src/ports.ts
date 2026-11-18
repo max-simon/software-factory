@@ -160,6 +160,11 @@ export interface AccessTokenRepository {
 
 /** Keeps the password hash of a user's `local` identity. */
 export interface LocalPasswordStore {
+  /**
+   * Inserts the user with its `local` identity and password hash in one
+   * transaction; throws a `DomainError` `duplicate_username` when the username is taken.
+   */
+  insertWithPassword(user: User, hash: string): void;
   /** Sets the hash, linking the user's `local` identity when it is not linked yet. */
   setPasswordHash(userId: string, hash: string): void;
   getPasswordHash(userId: string): string | undefined;

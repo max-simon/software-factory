@@ -6,7 +6,6 @@ import {
   disableUser,
   DomainError,
   isActiveUser,
-  localProvider,
   parseUsername,
   renameUser,
   type AccessTokenRepository,
@@ -59,9 +58,7 @@ export class UserAccountService {
     assertUsernameAvailable(username, this.#users.getByUsername(username));
     const user = createUser({ ...input, username }, { id: this.#newId(), now: this.#now() });
     const hash = await this.#hasher.hash(parsePassword(password));
-    this.#users.insert(user);
-    this.#users.linkIdentity({ provider: localProvider, subject: user.id, userId: user.id });
-    this.#passwords.setPasswordHash(user.id, hash);
+    this.#passwords.insertWithPassword(user, hash);
     return user;
   }
 
