@@ -12,9 +12,11 @@ function sendError(res: ServerResponse, status: number, message: string): void {
 
 /**
  * The caller's credentials, passed on to the engineer API on each of its
- * calls so the API sees the same user. Add a header name here to forward it too.
+ * calls so the API sees the same user: the session cookie of a browser, the
+ * `Authorization: Bearer fct_…` personal access token of an MCP client or script.
+ * Add a header name here to forward it too.
  */
-const forwardedHeaders = ['cookie'] as const;
+const forwardedHeaders = ['cookie', 'authorization'] as const;
 
 function pickForwardedHeaders(headers: IncomingHttpHeaders): Record<string, string> {
   const picked: Record<string, string> = {};

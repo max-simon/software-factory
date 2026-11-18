@@ -23,7 +23,9 @@ export type DomainErrorCode =
   | 'duplicate_username'
   | 'invalid_username'
   | 'invalid_display_name'
-  | 'invalid_password';
+  | 'invalid_password'
+  | 'invalid_token_name'
+  | 'invalid_token_expiry';
 
 export class DomainError extends Error {
   readonly code: DomainErrorCode;

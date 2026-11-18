@@ -1,9 +1,12 @@
 import type { IncomingHttpHeaders } from 'node:http';
 import { createUser, type Principal } from '@factory/core';
+import { SqliteAccessTokenRepository } from './adapters/sqlite-access-token-repository.ts';
 import { SqliteSessionRepository } from './adapters/sqlite-session-repository.ts';
 import { SqliteUserRepository } from './adapters/sqlite-user-repository.ts';
+import { AccessTokenService } from './auth/access-token-service.ts';
 import { SessionService } from './auth/session-service.ts';
-import { readSessionToken, sessionCookieName } from './http/session-cookie.ts';
+import { authenticateRequest } from './http/authenticate.ts';
+import { sessionCookieName } from './http/session-cookie.ts';
 import type { ItemPrefix } from './task-store.ts';
 
 /** Readable, predictable item ids for tests: `q1`, `q2`, `d1`, … counted per prefix across all tasks. */
@@ -21,16 +24,18 @@ export const ada: Principal = { userId: 'u1', via: 'session' };
 export const bob: Principal = { userId: 'u2', via: 'session' };
 
 export interface TestAuth {
-  /** For `createServer`: resolves the session cookie. */
+  /** For `createServer`: resolves the bearer token or else the session cookie. */
   authenticate: (headers: IncomingHttpHeaders) => Principal | undefined;
   /** A `Cookie` header with a session of the active user `ada`. */
   cookie: string;
   /** A `Cookie` header with a session of the active user `bob`. */
   bobCookie: string;
+  /** An `Authorization` header with a personal access token of `ada`. */
+  authorization: string;
   users: SqliteUserRepository;
 }
 
-/** In-memory users and sessions for servers under test, with `ada` and `bob` signed in. */
+/** In-memory users, sessions and access tokens for servers under test, with `ada` and `bob` signed in. */
 export function testAuth(): TestAuth {
   const users = new SqliteUserRepository(':memory:');
   users.insert(createUser({ username: 'ada' }, { id: ada.userId, now: '2026-11-12T10:00:00.000Z' }));
@@ -41,10 +46,12 @@ export function testAuth(): TestAuth {
     idleTimeoutMs: 12 * 3_600_000,
     maxLifetimeMs: 7 * 86_400_000,
   });
+  const tokens = new AccessTokenService({ tokens: new SqliteAccessTokenRepository(':memory:'), users });
   return {
-    authenticate: (headers) => sessions.resolve(readSessionToken(headers)),
+    authenticate: authenticateRequest(sessions, tokens),
     cookie: `${sessionCookieName}=${sessions.createSession(ada.userId).token}`,
     bobCookie: `${sessionCookieName}=${sessions.createSession(bob.userId).token}`,
+    authorization: `Bearer ${tokens.issue(ada.userId, { name: 'test' }).token}`,
     users,
   };
 }

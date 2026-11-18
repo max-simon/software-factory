@@ -239,12 +239,22 @@ test('rejects anything but POST', async () => {
   assert.equal(((await get.json()) as { error: { message: string } }).error.message, 'Method not allowed.');
 });
 
-test('makes the API client of each request with the caller cookie and no other header', async () => {
+test('makes the API client of each request with the caller cookie and bearer token and no other header', async () => {
   fake = fakeTaskClient([sampleTask()]);
   forwarded = [];
   const client = await connect({ cookie: 'factory_session=abc', authorization: 'Bearer xyz', 'x-other': '1' });
   await client.callTool({ name: 'get_task', arguments: { id: 't1' } });
   await client.close();
   assert.ok(forwarded.length > 0);
-  for (const headers of forwarded) assert.deepEqual(headers, { cookie: 'factory_session=abc' });
+  for (const headers of forwarded) assert.deepEqual(headers, { cookie: 'factory_session=abc', authorization: 'Bearer xyz' });
+});
+
+test('forwards a bearer token alone', async () => {
+  fake = fakeTaskClient([sampleTask()]);
+  forwarded = [];
+  const client = await connect({ authorization: 'Bearer fct_abc' });
+  await client.callTool({ name: 'get_task', arguments: { id: 't1' } });
+  await client.close();
+  assert.ok(forwarded.length > 0);
+  for (const headers of forwarded) assert.deepEqual(headers, { authorization: 'Bearer fct_abc' });
 });

@@ -35,7 +35,10 @@ class FakeRuntime implements ExecutionRuntime {
 type Call = (
   method: string,
   path: string,
-  /** `cookie` defaults to a signed-in engineer's outside `/agent/*` and to none on agent routes. */
+  /**
+   * `cookie` defaults to a signed-in engineer's outside `/agent/*` and to none on agent routes;
+   * `authorization` to the task's agent token on agent routes and to none elsewhere.
+   */
   options?: { body?: unknown; authorization?: string | null; cookie?: string | null },
 ) => Promise<{ status: number; json: any }>;
 
@@ -69,7 +72,7 @@ async function startApi(t: TestContext, input: NewTask = supervisedTask, now = (
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
-  return async (method, path, { body, authorization = `Bearer ${token}`, cookie = path.startsWith('/agent/') ? null : auth.cookie } = {}) => {
+  return async (method, path, { body, authorization = path.startsWith('/agent/') ? `Bearer ${token}` : null, cookie = path.startsWith('/agent/') ? null : auth.cookie } = {}) => {
     const response = await fetch(base + path, {
       method,
       headers: { ...(authorization !== null && { authorization }), ...(cookie !== null && { cookie }) },
@@ -535,4 +538,7 @@ test('agent routes need no session, and a session is no agent token', async (t) 
   const withoutToken = await call('GET', '/agent/task', { authorization: null, cookie: 'factory_session=x' });
   assert.equal(withoutToken.status, 401);
   assert.equal((await call('GET', '/tasks/task-1', { cookie: null })).status, 401);
+  // An agent token is no personal access token, and an invalid one does not fall back to the cookie.
+  assert.equal((await call('GET', '/tasks/task-1', { authorization: `Bearer ${token}`, cookie: null })).status, 401);
+  assert.equal((await call('GET', '/tasks/task-1', { authorization: `Bearer ${token}` })).status, 401);
 });

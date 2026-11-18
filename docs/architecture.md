@@ -6,12 +6,12 @@ Detail behind the [README](../README.md): packages, task lifecycle, the worker p
 
 | Package | Role |
 |---|---|
-| `packages/core` | Domain model and rules: task and project types (a started task carries its `Execution`: token hash, worker state, heartbeat, console), the views each audience gets (`TaskView`, `AgentTaskView`), the status machine, pure operations (`startTask`, `addDecision`, `markReady`, …) the worker lifecycle (`pendingWork`, `acceptWork`, `releaseWorker`, …), task and pull request events (`pullRequestEvents` derives the latter from two saved versions of a task), users and identity (`User`, `ExternalIdentity`, `Principal`, `createUser`, …), and the ports (`TaskRepository`, `ProjectRepository`, `UserRepository`, `Authenticator`, `PasswordHasher`, `ExecutionRuntime`, `PullRequestReader`, `PullRequestWriter`, `Reviewer`). No I/O. |
-| `packages/control-plane` | HTTP server on `127.0.0.1:4700`. Login (`/auth/*`), engineer API (`/projects`, `/tasks`) and MCP endpoint (`/mcp`), both behind a browser session; agent API (`/agent/*`, token-authenticated); static web UI. Reads go through the `TaskStore`; changes through one service per actor: `TaskService` (engineer), `AgentService` (agent and runner), `LifecycleService` (the dispatcher). Adapters: SQLite repositories (`node:sqlite`), `PodmanRuntime`, `PodmanReviewer` and `GitHubPullRequests` (REST API). The `Dispatcher` reconciles every 2 s; the `PullRequestObserver` polls GitHub every minute; `Hooks` react to task and pull request events. |
+| `packages/core` | Domain model and rules: task and project types (a started task carries its `Execution`: token hash, worker state, heartbeat, console), the views each audience gets (`TaskView`, `AgentTaskView`), the status machine, pure operations (`startTask`, `addDecision`, `markReady`, …) the worker lifecycle (`pendingWork`, `acceptWork`, `releaseWorker`, …), task and pull request events (`pullRequestEvents` derives the latter from two saved versions of a task), users and identity (`User`, `ExternalIdentity`, `Principal`, `createUser`, …), personal access token metadata and its validation (`AccessToken`, `parseAccessTokenName`, …), and the ports (`TaskRepository`, `ProjectRepository`, `UserRepository`, `AccessTokenRepository`, `Authenticator`, `PasswordHasher`, `ExecutionRuntime`, `PullRequestReader`, `PullRequestWriter`, `Reviewer`). No I/O. |
+| `packages/control-plane` | HTTP server on `127.0.0.1:4700`. Login (`/auth/*`), engineer API (`/projects`, `/tasks`) and MCP endpoint (`/mcp`), both behind a browser session or a personal access token; agent API (`/agent/*`, token-authenticated); static web UI. Reads go through the `TaskStore`; changes through one service per actor: `TaskService` (engineer), `AgentService` (agent and runner), `LifecycleService` (the dispatcher). Adapters: SQLite repositories (`node:sqlite`), `PodmanRuntime`, `PodmanReviewer` and `GitHubPullRequests` (REST API). The `Dispatcher` reconciles every 2 s; the `PullRequestObserver` polls GitHub every minute; `Hooks` react to task and pull request events. |
 | `packages/reviewer` | The reviewer image, with three roles picked by its first argument, each with its own system prompt. `spec` reads one task specification with its project and the project's other tasks; `input` reads a supervised task waiting for input, with its open questions and approval requests, and may read the repository and pull requests with `gh` and `git` for context; `pr` reads one pull request reference (URL, head commit, the task it was opened for) and lets the model read the pull request itself with `gh` and `git`. Each takes the request as JSON on stdin, runs one `claude -p` turn with structured output (without tools for `spec`), and prints the answer as JSON on stdout. |
 | `packages/executor` | The container image. Its runner asks the control plane for work, clones the repository, runs one agent turn per piece of work and, once there is none, waits for a nudge on its doorbell; the session state stays on the container's disk, so a restarted runner resumes it. Two agent adapters behind the `AgentSession` port: the `claude` CLI (one process per turn) and `opencode serve` (one HTTP session). The agent reports through a stdio MCP bridge (`report_plan`, `report_decision`, `ask_question`, `report_ready`, …). |
 | `packages/web` | React + Vite UI: project sidebar, per-project board and dashboard with its open pull requests, task detail with timeline, question and approval forms, follow-ups. Polls the engineer API. |
-| `packages/mcp` | Stateless Streamable HTTP MCP handler, mounted by the control plane at `/mcp`, that lets an MCP client create and inspect projects and tasks through the engineer API, passing the caller's session cookie on to it. |
+| `packages/mcp` | Stateless Streamable HTTP MCP handler, mounted by the control plane at `/mcp`, that lets an MCP client create and inspect projects and tasks through the engineer API, passing the caller's session cookie and `Authorization` header on to it. |
 
 ## Task lifecycle
 
@@ -268,7 +268,7 @@ example behind an HTTP endpoint.
 
 ## Users and identity
 
-Users are a core domain concept (`packages/core/src/user.ts`); their storage, the `yarn user` CLI, sessions and the login routes live in the control plane; a login page in the web UI comes in a later task.
+Users are a core domain concept (`packages/core/src/user.ts`); their storage, the `yarn user` CLI, sessions, personal access tokens and the login routes live in the control plane; a login page in the web UI comes in a later task.
 
 - **The id is the stable reference.** A `User` has an opaque `id`, generated by
   the control plane and never reused, plus a `username` (unique login handle,
@@ -304,10 +304,29 @@ Users are a core domain concept (`packages/core/src/user.ts`); their storage, th
   per username or per client address the login answers 429 with
   `retry-after` for 30 s, doubling per further failure up to 15 minutes, until
   a success resets it (in memory, so a restart forgets it).
+- **Personal access tokens are for clients without a browser.** MCP clients
+  and scripts send `Authorization: Bearer fct_…`; the `fct_` prefix makes a
+  leaked token easy to recognise. A token is `fct_` plus 32 random bytes
+  (base64url), shown once by `POST /auth/tokens` or `yarn user token`; the
+  `access_tokens` table (`id`, `user_id`, `name`, `token_hash`, `created_at`,
+  `last_used_at`, `expires_at`, created with `CREATE TABLE IF NOT EXISTS` like
+  every other table) keeps only its SHA-256. `last_used_at` is written at most
+  once a minute per token, like a session's `last_seen_at`. A token has an
+  optional expiry of 1–3650 days; an expired one stays listed until its owner
+  deletes it. `GET /auth/tokens` lists the caller's own tokens (never the
+  token or its hash), `DELETE /auth/tokens/:id` revokes one of them (404 for
+  anyone else's). These routes and `POST /auth/logout` need a session: a
+  token-authenticated request gets 403, so a leaked token cannot mint further
+  tokens that would outlive its revocation. Tokens of a disabled user are
+  refused at authentication, and `yarn user disable` deletes them as well.
 - **Services act for a `Principal`**, `{ userId, via: 'session' | 'token' }`,
-  resolved by the HTTP layer (a session guard in front of every route outside
+  resolved by the HTTP layer (a guard in front of every route outside
   `/agent/*` except the login, and in front of `/mcp`, puts it on the
-  request); they never receive a username. There are no roles
+  request). A request with an `Authorization` header is authenticated by that
+  header alone, as `via: 'token'`; an invalid one is a 401, not a fallback to
+  the cookie, so a client with a revoked token finds out. Without the header
+  the session cookie is used, as `via: 'session'`. Services never receive a
+  username. There are no roles
   yet: every active user can do everything an engineer can.
 
 ## Design decisions and reasoning
@@ -344,13 +363,17 @@ Users are a core domain concept (`packages/core/src/user.ts`); their storage, th
   for tasks that only produce artifacts). One GitHub token must therefore cover
   every repository a task may target.
 - **Loopback only, with login.** The engineer API and the MCP server listen on
-  `127.0.0.1` and need a session cookie from `POST /auth/login`; without one
+  `127.0.0.1` and need a session cookie from `POST /auth/login` or a personal
+  access token as `Authorization: Bearer`; without either
   they answer 401, also for paths that do not exist, so a signed-out caller
   learns nothing about the API. GET requests for web UI files stay open, so a
-  login page can load. Before the session check, requests whose `Host` or
+  login page can load. Before the session or token check, requests whose `Host` or
   `Origin` is not loopback are rejected to stop DNS rebinding and cross-site
-  requests. The MCP handler calls the engineer API over loopback with the
-  caller's `Cookie` header, so the API sees the same user.
+  requests; this holds for bearer requests too, so a token does not open the
+  API to other machines, and a web page cannot attach one anyway without a
+  CORS preflight, which the API does not answer. The MCP handler calls the
+  engineer API over loopback with the caller's `Cookie` and `Authorization`
+  headers, so the API sees the same user.
 - **Usage is tracked, not limited.** Each agent turn reports its wall-clock
   duration and the agent's cost estimate at list prices; the control plane sums
   them per task.
@@ -368,12 +391,12 @@ names the problem and the intended fix; only the first is mitigated so far.
    `Host: 127.0.0.1` could approve its own approval requests, turn on
    auto-merge, cancel, delete or follow up on other tasks, and read other
    tasks' agent console passwords, and the same held for `/mcp`. Now every
-   engineer route and `/mcp` need a session cookie, which containers do not
-   have; they can only try to log in, which is throttled. What remains: MCP
-   clients that cannot send the cookie (e.g. `claude mcp add --transport
-   http`) cannot use `/mcp` until personal access tokens exist, which
-   they will send as `Authorization` header and the MCP handler will pass on
-   like the cookie.
+   engineer route and `/mcp` need a session cookie or a personal access
+   token, which containers do not have; they can only try to log in, which is
+   throttled. An agent token sent to the engineer API is refused like any
+   unknown bearer token. MCP clients that cannot send the cookie (e.g. `claude
+   mcp add --transport http`) send a personal access token as `Authorization`
+   header, which the MCP handler passes on like the cookie.
 2. **Credentials are broader than a task needs.** Every agent and the reviewer
    get the factory's `GITHUB_TOKEN`, which may push to and merge in every
    repository it covers, and the reviewer gets write access while it reads

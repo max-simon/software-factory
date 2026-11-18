@@ -196,13 +196,39 @@ curl -b cookies.txt http://127.0.0.1:4700/auth/me
 ends the session, `GET /auth/me` names the signed-in user. Repeated failed
 logins for a username or from a client are locked out for a while (HTTP 429).
 
-MCP: `/mcp` requires the same session cookie, which MCP clients such as
-Claude Code do not send, so they cannot use it until personal access tokens
-land. For later:
+### Personal access tokens and MCP
+
+MCP clients and scripts cannot keep a browser cookie, so they act as a user
+with a personal access token instead: `Authorization: Bearer fct_...` on the
+engineer API and `/mcp`. Create one with the CLI (it is printed once; only its
+SHA-256 is stored):
 
 ```bash
-claude mcp add --transport http factory http://127.0.0.1:4700/mcp
+yarn user token alice laptop                       # never expires
+yarn user token alice ci --expires-in-days 90
 ```
+
+or, signed in with a session, with the API:
+
+```bash
+curl -b cookies.txt -H 'content-type: application/json' \
+  -d '{"name":"laptop","expiresInDays":90}' http://127.0.0.1:4700/auth/tokens
+curl -b cookies.txt http://127.0.0.1:4700/auth/tokens                # list your tokens
+curl -b cookies.txt -X DELETE http://127.0.0.1:4700/auth/tokens/<id>  # revoke one
+```
+
+Then add the MCP server to Claude Code; every tool call runs as that user:
+
+```bash
+claude mcp add --transport http factory http://127.0.0.1:4700/mcp \
+  --header "Authorization: Bearer fct_..."
+```
+
+A user sees and revokes only its own tokens, and managing tokens needs a
+session: a request authenticated by a token gets 403 there. A revoked or
+expired token, a token of a disabled user, and any invalid `Authorization`
+header get 401 (the cookie is not tried then). The `expiresInDays` limit is
+1–3650; names are 1–100 characters.
 
 ### Users
 
@@ -220,7 +246,8 @@ yarn user add alice --display-name "Alice"   # prompts for the password twice
 | `yarn user list` | Username, display name, status (active/disabled) and creation time of every user |
 | `yarn user passwd <username>` | Set a new password |
 | `yarn user rename <username> <display name...>` | Change the display name |
-| `yarn user disable <username>` | Disable the user for good and end its sessions; it keeps its id and history |
+| `yarn user disable <username>` | Disable the user for good, end its sessions and revoke its tokens; it keeps its id and history |
+| `yarn user token <username> <name...> [--expires-in-days <n>]` | Create a personal access token and print it once (only the token, so `$(...)` captures it) |
 
 Passwords are never taken from the command line. On a terminal they are
 prompted without echo; otherwise the first line of stdin is used, without
