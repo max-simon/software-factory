@@ -2,6 +2,7 @@ import type { TaskChange } from './changelog.ts';
 import type { Project } from './project.ts';
 import type { InputReview, InputReviewRequest, PrReview, PrReviewRequest, SpecReview, SpecReviewRequest } from './review.ts';
 import type { AgentConsole, Heartbeat, PullRequest, Task, TaskAgent, TaskModel, TaskStatus } from './task.ts';
+import type { Credentials, ExternalIdentity, User } from './user.ts';
 
 export interface TaskRepository {
   /** Writes the task and appends `changes` to its changelog in one transaction. */
@@ -100,4 +101,37 @@ export interface Reviewer {
   reviewInput(request: InputReviewRequest): Promise<InputReview>;
   /** How risky it is to merge a pull request without a human review. */
   reviewPr(request: PrReviewRequest): Promise<PrReview>;
+}
+
+/**
+ * Stores users and the external identities linked to them. Usernames are
+ * unique; callers look them up normalised (`normalizeUsername`).
+ */
+export interface UserRepository {
+  /** Throws a `DomainError` `duplicate_username` when the username is taken. */
+  insert(user: User): void;
+  /** Writes the user; throws `duplicate_username` when its new username is taken by another user. */
+  update(user: User): void;
+  get(id: string): User | undefined;
+  getByUsername(username: string): User | undefined;
+  /** Oldest first, disabled users included. */
+  list(): User[];
+  /** Links a provider's subject to a user; a `(provider, subject)` pair maps to exactly one user. */
+  linkIdentity(identity: ExternalIdentity): void;
+  findIdentity(provider: string, subject: string): ExternalIdentity | undefined;
+}
+
+/**
+ * Checks credentials against one identity source. Resolves the user id for
+ * valid credentials of an active user, `undefined` otherwise, without telling
+ * which part was wrong. An adapter ignores credential kinds it does not handle.
+ */
+export interface Authenticator {
+  authenticate(credentials: Credentials): Promise<string | undefined>;
+}
+
+/** One-way password hashing; the hash string encodes whatever the verifier needs (salt, parameters). */
+export interface PasswordHasher {
+  hash(password: string): Promise<string>;
+  verify(password: string, hash: string): Promise<boolean>;
 }

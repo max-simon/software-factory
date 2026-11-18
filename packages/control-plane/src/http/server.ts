@@ -55,6 +55,11 @@ const domainStatus: Record<DomainErrorCode, number> = {
   invalid_dependencies: 400,
   has_waiting_dependents: 409,
   no_execution: 409,
+  unknown_user: 404,
+  user_disabled: 409,
+  duplicate_username: 409,
+  invalid_username: 400,
+  invalid_display_name: 400,
 };
 
 export interface ServerOptions {

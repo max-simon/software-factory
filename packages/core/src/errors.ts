@@ -17,7 +17,12 @@ export type DomainErrorCode =
   | 'invalid_clarification'
   | 'invalid_dependencies'
   | 'has_waiting_dependents'
-  | 'no_execution';
+  | 'no_execution'
+  | 'unknown_user'
+  | 'user_disabled'
+  | 'duplicate_username'
+  | 'invalid_username'
+  | 'invalid_display_name';
 
 export class DomainError extends Error {
   readonly code: DomainErrorCode;
