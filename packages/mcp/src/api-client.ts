@@ -16,6 +16,14 @@ export class ConnectionError extends Error {
   override name = 'ConnectionError';
 }
 
+/** A user as `GET /users` lists it; tasks reference users by `id` only. */
+export interface UserSummary {
+  id: string;
+  username: string;
+  displayName: string;
+  disabled: boolean;
+}
+
 export interface ApiClient {
   createProject: (project: NewProject) => Promise<Project>;
   listProjects: () => Promise<Project[]>;
@@ -24,10 +32,12 @@ export interface ApiClient {
   getTask: (id: string) => Promise<TaskView>;
   startTask: (id: string) => Promise<TaskView>;
   editTask: (id: string, edit: TaskEdit) => Promise<TaskView>;
+  setAssignees: (id: string, assignees: string[]) => Promise<TaskView>;
   requestClarification: (id: string, note: string) => Promise<TaskView>;
   cancelTask: (id: string) => Promise<TaskView>;
   restartTask: (id: string) => Promise<TaskView>;
   deleteTask: (id: string) => Promise<void>;
+  listUsers: () => Promise<UserSummary[]>;
 }
 
 /** `headers` go on every request, e.g. the credentials of the caller the client acts for. */
@@ -63,12 +73,14 @@ export function createApiClient(baseUrl: string, headers: Record<string, string>
     getTask: (id) => request('GET', taskPath(id)),
     startTask: (id) => request('POST', `${taskPath(id)}/start`),
     editTask: (id, edit) => request('PATCH', taskPath(id), edit),
+    setAssignees: (id, assignees) => request('PUT', `${taskPath(id)}/assignees`, { assignees }),
     requestClarification: (id, note) => request('POST', `${taskPath(id)}/clarification`, { note }),
     cancelTask: (id) => request('POST', `${taskPath(id)}/cancel`),
     restartTask: (id) => request('POST', `${taskPath(id)}/restart`),
     deleteTask: async (id) => {
       await request('DELETE', taskPath(id));
     },
+    listUsers: () => request('GET', '/users'),
   };
 }
 

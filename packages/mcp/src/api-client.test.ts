@@ -65,6 +65,20 @@ test('cancelTask and restartTask post to their routes without a body', async () 
   assert.equal(`${seen.method} ${seen.url} ${seen.body}`, 'POST /tasks/t1/restart ');
 });
 
+test('setAssignees puts the complete list to the assignees route', async () => {
+  reply = { status: 200, body: { id: 'a/b' } };
+  await client.setAssignees('a/b', ['u1', 'u2']);
+  assert.equal(`${seen.method} ${seen.url}`, 'PUT /tasks/a%2Fb/assignees');
+  assert.deepEqual(JSON.parse(seen.body), { assignees: ['u1', 'u2'] });
+});
+
+test('listUsers uses GET /users', async () => {
+  const users = [{ id: 'u1', username: 'ada', displayName: 'Ada', disabled: false }];
+  reply = { status: 200, body: users };
+  assert.deepEqual(await client.listUsers(), users);
+  assert.equal(`${seen.method} ${seen.url}`, 'GET /users');
+});
+
 test('deleteTask sends DELETE and accepts an empty 204', async () => {
   reply = { status: 204, body: undefined };
   assert.equal(await client.deleteTask('a/b'), undefined);
