@@ -61,9 +61,10 @@ function main(): void {
     gitUserEmail: config.gitUserEmail,
     agentCredentials: config.agentCredentials,
   });
+  const users = new SqliteUserRepository(config.dbPath);
   // Hooks need the services, which publish to the hooks, so they are registered once the services exist.
   const hooks = new Hooks();
-  const { tasks, service, agent, lifecycle } = createServices({ repository, runtime, onEvent: (event) => void hooks.emit(event) });
+  const { tasks, service, agent, lifecycle } = createServices({ repository, runtime, users, onEvent: (event) => void hooks.emit(event) });
   const projects = new ProjectService({ repository: new SqliteProjectRepository(config.dbPath) });
   // One image, three roles: it reviews task specifications, the input agents ask for, and pull requests.
   const reviewer = new PodmanReviewer({
@@ -80,7 +81,6 @@ function main(): void {
   hooks.register(new PrReviewHook({ tasks, pullRequests, reviewer, projects, reviews }));
   hooks.register(new PullRequestReviewedHook({ lifecycle }));
   hooks.register(new PullRequestConflictedHook({ lifecycle }));
-  const users = new SqliteUserRepository(config.dbPath);
   const sessionStore = new SqliteSessionRepository(config.dbPath);
   const sessions = new SessionService({
     sessions: sessionStore,

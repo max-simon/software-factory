@@ -385,6 +385,7 @@ test('describeChange words each changelog entry on one line', () => {
   assert.equal(describeChange({ ...meta, field: 'labels', from: ['ui', 'old'], to: ['ui', 'new'] }), 'Labels +new −old');
   assert.equal(describeChange({ ...meta, field: 'labels', from: ['a', 'b'], to: ['b', 'a'] }), 'Labels reordered');
   assert.equal(describeChange({ ...meta, field: 'dependsOn', from: [], to: ['t1'] }), 'Changed the dependencies');
+  assert.equal(describeChange({ ...meta, field: 'assignees', from: [], to: ['u1'] }), 'Changed the assignees');
   assert.equal(
     describeChange({ ...meta, field: 'status', from: 'draft', to: 'clarification_required' }),
     'Draft → Needs clarification',

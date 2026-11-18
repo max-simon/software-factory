@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import type { ExecutionRuntime, PrReviewRequest, PullRequestWriter, Reviewer, RiskLevel } from '@factory/core';
 import { SqliteProjectRepository } from '../adapters/sqlite-project-repository.ts';
 import { SqliteTaskRepository } from '../adapters/sqlite-task-repository.ts';
+import { SqliteUserRepository } from '../adapters/sqlite-user-repository.ts';
 import { ProjectService } from '../project-service.ts';
 import { ReviewTracker } from '../review-tracker.ts';
 import { createServices } from '../services.ts';
@@ -71,6 +72,7 @@ function setup({ risks = { 1: 'low', 2: 'low' }, refusedMerges = new Set(), isCo
   const hooks = new Hooks((message) => logged.push(message));
   const { tasks, service, agent, lifecycle } = createServices({
     repository: new SqliteTaskRepository(':memory:'),
+    users: new SqliteUserRepository(':memory:'),
     runtime: {} as ExecutionRuntime,
     onEvent: (event) => void pending.push(hooks.emit(event)),
     newId: () => `t${++counter}`,

@@ -386,6 +386,8 @@ export function describeChange(change: TaskChange): string {
     }
     case 'dependsOn':
       return 'Changed the dependencies';
+    case 'assignees':
+      return 'Changed the assignees';
     case 'status':
       return `${statusLabel(change.from)} → ${statusLabel(change.to)}`;
   }

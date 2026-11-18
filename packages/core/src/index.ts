@@ -33,6 +33,7 @@ export {
   type SpecReviewRequest,
   type SpecVerdict,
 } from './review.ts';
+export { checkAssignees, setAssignees } from './assignees.ts';
 export { formatCost, formatDuration, formatTokens } from './format.ts';
 export {
   assertDeletable,
