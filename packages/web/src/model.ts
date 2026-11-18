@@ -4,6 +4,7 @@ import type {
   FollowUp,
   HeartbeatPhase,
   PullRequest,
+  PullRequestStatus,
   PullRequestView,
   Question,
   Task,
@@ -204,6 +205,35 @@ export function reviewDecision(pr: Pick<PullRequest, 'reviews'>): ReviewDecision
   const decisions = [...latest.values()];
   if (decisions.includes('changes_requested')) return 'changes_requested';
   return decisions.includes('approved') ? 'approved' : undefined;
+}
+
+export type PullRequestReviewMark = 'none' | ReviewDecision | 'commented';
+
+export interface PullRequestIndicator {
+  state: PullRequestStatus;
+  /** `none` until a review is submitted; `commented` while the reviews decide nothing. */
+  review: PullRequestReviewMark;
+  /** The full state in words, for the hover title and screen readers. */
+  label: string;
+}
+
+const openLabels: Record<PullRequestReviewMark, string> = {
+  none: 'Open · not reviewed',
+  approved: 'Open · approved',
+  changes_requested: 'Open · changes requested',
+  commented: 'Open · commented',
+};
+
+/** Where a pull request stands and how far its review got, for its state icon. */
+export function pullRequestIndicator(pr: Pick<PullRequest, 'status' | 'reviews'>): PullRequestIndicator {
+  const review: PullRequestReviewMark = (pr.reviews ?? []).length === 0 ? 'none' : (reviewDecision(pr) ?? 'commented');
+  const isReviewed = review !== 'none';
+  const labels: Record<PullRequestStatus, string> = {
+    open: openLabels[review],
+    merged: isReviewed ? 'Merged after review' : 'Merged without review',
+    closed: isReviewed ? 'Closed after review' : 'Closed',
+  };
+  return { state: pr.status, review, label: labels[pr.status] };
 }
 
 /** "owner/name" of a repository URL, or the URL itself when it has another shape. */
