@@ -54,6 +54,7 @@ async function setup(t: TestContext) {
       sessions,
       users,
       throttle: new LoginThrottle(),
+      clientThrottle: new LoginThrottle(),
       passwords: users,
       hasher: new ScryptPasswordHasher({ N: 2 ** 10 }),
     }),

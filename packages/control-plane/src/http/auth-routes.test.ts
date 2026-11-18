@@ -32,6 +32,7 @@ async function setup(t: TestContext) {
     sessions,
     users,
     throttle: new LoginThrottle({ now }),
+    clientThrottle: new LoginThrottle({ now, lockoutAfter: 50 }),
     passwords: users,
     hasher,
     now,
@@ -171,9 +172,15 @@ test('the sessions of a disabled user are refused', async (t) => {
   assert.equal((await call('GET', '/whoami', { cookie })).status, 401);
 });
 
-test('repeated failures from one client lock it out with 429 and retry-after, whichever username', async (t) => {
+test('failures for other usernames do not lock a user out, even from the same client', async (t) => {
+  const { login } = await setup(t);
+  for (const username of ['a1', 'a2', 'a3', 'a4', 'a5', 'a6']) assert.equal((await login(username)).status, 401);
+  assert.equal((await login()).status, 200);
+});
+
+test('many failures from one client lock it out with 429 and retry-after, whichever username', async (t) => {
   const { login, advance } = await setup(t);
-  for (const username of ['a1', 'a2', 'a3', 'a4', 'a5']) assert.equal((await login(username)).status, 401);
+  for (let i = 1; i <= 50; i++) assert.equal((await login(`a${i}`)).status, 401);
   const locked = await login();
   assert.equal(locked.status, 429);
   assert.equal(locked.headers.get('retry-after'), '30');
@@ -184,7 +191,7 @@ test('repeated failures from one client lock it out with 429 and retry-after, wh
   advance(1_000);
   assert.equal((await login()).status, 200);
   // The success reset the client: the next failure is not locked out.
-  assert.equal((await login('a6')).status, 401);
+  assert.equal((await login('a51')).status, 401);
   assert.equal((await login()).status, 200);
 });
 

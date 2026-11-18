@@ -20,9 +20,8 @@ interface Failures {
 const pruneAbove = 10_000;
 
 /**
- * In-memory exponential backoff for logins, per key: the caller passes one key
- * per username and one per client, and a login is refused while any of them is
- * locked. The `lockoutAfter`th failure in a row locks the key for
+ * In-memory exponential backoff for logins, per key: a login is refused while
+ * any of the keys the caller passes is locked. The `lockoutAfter`th failure in a row locks the key for
  * `baseLockoutMs`, each further one for twice as long, up to `maxLockoutMs`.
  * A success resets the keys, and so does `forgetAfterMs` without a failure.
  * State is lost on restart, which only shortens lockouts.

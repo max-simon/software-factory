@@ -328,9 +328,12 @@ Users are a core domain concept (`packages/core/src/user.ts`); their storage, th
   throttle), stores the new hash and ends every other session of the user.
   Both need a session. Failed logins get one
   generic 401 whether or not the username exists; after 5 failures in a row
-  per username or per client address the login answers 429 with
+  per username, or 50 per client address, the login answers 429 with
   `retry-after` for 30 s, doubling per further failure up to 15 minutes, until
-  a success resets it (in memory, so a restart forgets it).
+  a success resets it (in memory, so a restart forgets it). The client limit
+  is far higher because on loopback every client, agent containers included,
+  shares one address: it only caps password spraying across usernames, and
+  one person's typos lock out nobody else.
 - **Personal access tokens are for clients without a browser.** MCP clients
   and scripts send `Authorization: Bearer fct_…`; the `fct_` prefix makes a
   leaked token easy to recognise. A token is `fct_` plus 32 random bytes

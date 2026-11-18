@@ -37,6 +37,8 @@ import { createServices } from './services.ts';
 // Engineers sign in, but the API is not hardened for other machines yet (plain HTTP, no TLS), so it stays on loopback.
 const host = '127.0.0.1';
 const reconcileIntervalMs = 2000;
+// Far above the 5 failures that lock a username: on loopback every client shares one address.
+const clientLockoutAfter = 50;
 const pauseCheckIntervalMs = 1000;
 // Built by `yarn web:build`; without it the control plane serves the API only.
 const webDist = fileURLToPath(new URL('../../web/dist', import.meta.url));
@@ -92,6 +94,7 @@ function main(): void {
       sessions,
       users,
       throttle: new LoginThrottle(),
+      clientThrottle: new LoginThrottle({ lockoutAfter: clientLockoutAfter }),
       passwords: users,
       hasher,
     }),
