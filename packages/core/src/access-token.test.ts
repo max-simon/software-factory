@@ -15,7 +15,7 @@ test('a token name is trimmed and 1 to 100 characters long', () => {
 test('a token expiry is a whole number of days from 1 to 3650', () => {
   assert.equal(parseAccessTokenExpiry(1), 1);
   assert.equal(parseAccessTokenExpiry(3650), 3650);
-  for (const days of [0, -1, 1.5, 3651, '30', null, Number.NaN]) {
+  for (const days of [0, -1, 1.5, 3651, Number.NaN]) {
     assert.throws(() => parseAccessTokenExpiry(days), rejectsWith('invalid_token_expiry'), String(days));
   }
 });

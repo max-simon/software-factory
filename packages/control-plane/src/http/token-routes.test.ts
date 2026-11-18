@@ -9,7 +9,6 @@ import { SqliteSessionRepository } from '../adapters/sqlite-session-repository.t
 import { SqliteUserRepository } from '../adapters/sqlite-user-repository.ts';
 import { AccessTokenService, hashAccessToken } from '../auth/access-token-service.ts';
 import { LoginThrottle } from '../auth/login-throttle.ts';
-import { ScryptPasswordHasher } from '../auth/passwords.ts';
 import { SessionService } from '../auth/session-service.ts';
 import { authRoutes } from './auth-routes.ts';
 import { authenticateRequest } from './authenticate.ts';
@@ -52,10 +51,10 @@ async function setup(t: TestContext) {
     ...authRoutes({
       authenticator: { authenticate: async () => undefined },
       sessions,
+      accounts: { rename: () => assert.fail('not used'), changePassword: () => assert.fail('not used') },
       users,
       throttle: new LoginThrottle(),
-      passwords: users,
-      hasher: new ScryptPasswordHasher({ N: 2 ** 10 }),
+      clientThrottle: new LoginThrottle(),
     }),
     ...tokenRoutes(tokens),
     whoami,
@@ -210,7 +209,7 @@ test('validates the name and the expiry', async (t) => {
     [{ name: 'x'.repeat(101) }, /1 to 100 characters/],
     [{ name: 'ci', expiresInDays: 0 }, /whole number from 1 to 3650/],
     [{ name: 'ci', expiresInDays: 1.5 }, /whole number from 1 to 3650/],
-    [{ name: 'ci', expiresInDays: '30' }, /whole number from 1 to 3650/],
+    [{ name: 'ci', expiresInDays: '30' }, /expiresInDays must be a number/],
     [{ name: 'ci', expiresInDays: 3651 }, /whole number from 1 to 3650/],
     [{ name: 'ci', scope: 'all' }, /unknown fields: scope/],
     ['[]', /must be a JSON object/],

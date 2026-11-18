@@ -7,6 +7,7 @@ import { SqliteUserRepository } from './adapters/sqlite-user-repository.ts';
 import { AccessTokenService, hashAccessToken } from './auth/access-token-service.ts';
 import { ScryptPasswordHasher } from './auth/passwords.ts';
 import { hashSessionToken, SessionService } from './auth/session-service.ts';
+import { UserAccountService } from './user-account-service.ts';
 import { runUserCli, UsageError } from './user-cli.ts';
 
 const hasher = new ScryptPasswordHasher({ N: 2 ** 10 });
@@ -20,21 +21,19 @@ function setup() {
   let output = '';
   let ids = 0;
   let clock = 0;
+  const now = () => new Date(Date.UTC(2026, 10, 12, 10, clock++)).toISOString();
+  const newId = () => `id${++ids}`;
   const run = (...argv: string[]) =>
     runUserCli(argv, {
       users,
-      passwords: users,
-      sessions: sessionStore,
-      tokens: tokenStore,
-      hasher,
+      accounts: new UserAccountService({ users, passwords: users, hasher, sessions: sessionStore, tokens: tokenStore, now, newId }),
+      accessTokens: new AccessTokenService({ tokens: tokenStore, users, now: () => Date.parse(now()), newId }),
       readPassword: async () => {
         const next = passwords.shift();
         if (next === undefined) throw new Error('no password queued');
         return next;
       },
       stdout: { write: (text: string) => (output += text) },
-      now: () => new Date(Date.UTC(2026, 10, 12, 10, clock++)).toISOString(),
-      newId: () => `id${++ids}`,
     });
   return { users, sessionStore, tokenStore, passwords, run, output: () => output };
 }
@@ -152,8 +151,11 @@ test('token takes an optional expiry in whole days', async () => {
   await run('add', 'ada');
   await run('token', 'ada', 'ci', '--expires-in-days', '30');
   assert.equal(tokenStore.listForUser('id1')[0]!.expiresAt, '2026-12-12T10:01:00.000Z');
-  for (const days of ['0', '1.5', '7d', '3651']) {
+  for (const days of ['0', '3651']) {
     await assert.rejects(run('token', 'ada', 'ci', '--expires-in-days', days), rejectsWith('invalid_token_expiry'), days);
+  }
+  for (const days of ['1.5', '7d', '-1']) {
+    await assert.rejects(run('token', 'ada', 'ci', '--expires-in-days', days), (error) => error instanceof UsageError, days);
   }
   await assert.rejects(run('token', 'ada', ' '), rejectsWith('invalid_token_name'));
   assert.equal(tokenStore.listForUser('id1').length, 1);

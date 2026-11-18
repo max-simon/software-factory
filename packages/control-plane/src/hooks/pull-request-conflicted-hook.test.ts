@@ -44,6 +44,8 @@ test('a conflict becomes a follow-up from the system that names the base branch 
     `${url} has merge conflicts with its base branch \`main\`.\nUse the \`resolve-merge-conflict\` skill to resolve them.`,
   );
   assert.equal(f.tasks.changes('t1').at(-1)!.actor, 'system');
+  assert.equal(task.followUps[0]!.bySystem, true);
+  assert.equal(task.followUps[0]!.authorId, undefined);
 });
 
 test('the follow-up does without the base branch when it is unknown', () => {

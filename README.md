@@ -198,12 +198,13 @@ curl -b cookies.txt http://127.0.0.1:4700/auth/me
 
 `POST /auth/login` sets an `HttpOnly` session cookie, `POST /auth/logout`
 ends the session, `GET /auth/me` names the signed-in user. Repeated failed
-logins for a username or from a client are locked out for a while (HTTP 429).
+logins for a username (5), or many from one client address (50), are locked
+out for a while (HTTP 429).
 
 | Endpoint | Effect |
 |---|---|
 | `PATCH /auth/me` `{"displayName":"..."}` | Change your display name; returns `{id, username, displayName}` |
-| `POST /auth/password` `{"currentPassword":"...","newPassword":"..."}` | Change your password (12–256 characters); a wrong current one is 400 `wrong_password`. Ends your other sessions |
+| `POST /auth/password` `{"currentPassword":"...","newPassword":"..."}` | Change your password (12–256 characters); a wrong current one is 400 `wrong_password`. Ends your other sessions and revokes your access tokens |
 | `GET /users` | `[{id, username, displayName, disabled}]` of every user, so clients can show names for the user ids in records |
 
 The first two need a session, like token management below.

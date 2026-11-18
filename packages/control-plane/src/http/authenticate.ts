@@ -2,6 +2,7 @@ import type { IncomingHttpHeaders } from 'node:http';
 import type { Principal } from '@factory/core';
 import type { AccessTokenService } from '../auth/access-token-service.ts';
 import type { SessionService } from '../auth/session-service.ts';
+import type { Response } from './server.ts';
 import { readSessionToken } from './session-cookie.ts';
 
 /** The token of an `Authorization: Bearer <token>` header; undefined for any other scheme or none. */
@@ -22,4 +23,16 @@ export function authenticateRequest(
 ): (headers: IncomingHttpHeaders) => Principal | undefined {
   return (headers) =>
     headers.authorization !== undefined ? tokens.resolve(readBearerToken(headers)) : sessions.resolve(readSessionToken(headers));
+}
+
+/**
+ * 403 unless the caller signed in with a session: a token must not mint
+ * further tokens or outlive its own revocation through another one.
+ */
+export function requireSession(principal: Principal | undefined): Response | undefined {
+  if (principal?.via === 'session') return undefined;
+  return {
+    status: 403,
+    body: { error: { code: 'session_required', message: 'this needs a signed-in session; access tokens cannot use it' } },
+  };
 }

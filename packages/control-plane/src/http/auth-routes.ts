@@ -1,43 +1,31 @@
-import {
-  normalizeUsername,
-  renameUser,
-  type Authenticator,
-  type PasswordHasher,
-  type Principal,
-  type UserRepository,
-} from '@factory/core';
-import type { LocalPasswordStore } from '../auth/local-password-authenticator.ts';
+import { normalizeUsername, type Authenticator, type Principal, type UserRepository } from '@factory/core';
 import type { LoginThrottle } from '../auth/login-throttle.ts';
-import { parsePassword } from '../auth/passwords.ts';
 import type { SessionService } from '../auth/session-service.ts';
+import type { UserAccountService } from '../user-account-service.ts';
+import { requireSession } from './authenticate.ts';
 import type { Response, Route } from './server.ts';
 import { clearedSessionCookie, readSessionToken, sessionCookie } from './session-cookie.ts';
-import { requireSession } from './token-routes.ts';
-import { parseDisplayNameChange, parsePasswordChange, ValidationError } from './validation.ts';
+import { parseDisplayNameChange, parseLogin, parsePasswordChange } from './validation.ts';
 
 export interface AuthRoutesDeps {
   authenticator: Authenticator;
   sessions: SessionService;
+  accounts: Pick<UserAccountService, 'rename' | 'changePassword'>;
   users: UserRepository;
+  /** Throttles failed logins per username. */
   throttle: LoginThrottle;
-  /** Where `POST /auth/password` stores the new password's hash. */
-  passwords: LocalPasswordStore;
-  hasher: PasswordHasher;
-  /** Milliseconds since the epoch. */
-  now?: () => number;
+  /**
+   * Throttles failed logins per client address, with a far higher limit: on
+   * loopback every client shares one address, so this only caps password
+   * spraying across usernames instead of letting one person's typos lock
+   * everyone out.
+   */
+  clientThrottle: LoginThrottle;
 }
 
 // One message for an unknown username and a wrong password, so a login does not tell which usernames exist.
 const loginFailedMessage = 'wrong username or password';
 const throttledMessage = 'too many failed logins, try again later';
-
-function parseLogin(body: unknown): { username: string; password: string } {
-  const { username, password } = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
-  if (typeof username !== 'string' || typeof password !== 'string') {
-    throw new ValidationError('login needs a username and a password');
-  }
-  return { username, password };
-}
 
 const throttled = (retryAfterMs: number): Response => ({
   status: 429,
@@ -50,7 +38,31 @@ const throttled = (retryAfterMs: number): Response => ({
  * and the list of users. An IdP adapter adds its own login route that ends in
  * `sessions.createSession`.
  */
-export function authRoutes({ authenticator, sessions, users, throttle, passwords, hasher, now = Date.now }: AuthRoutesDeps): Route[] {
+export function authRoutes({
+  authenticator,
+  sessions,
+  accounts,
+  users,
+  throttle,
+  clientThrottle,
+}: AuthRoutesDeps): Route[] {
+  /** The throttle state of one attempt to prove `username`'s password from `clientAddress`. */
+  const attempt = (username: string, clientAddress: string) => {
+    const userKeys = [`user:${username}`];
+    const clientKeys = [`client:${clientAddress}`];
+    return {
+      retryAfterMs: () => Math.max(throttle.retryAfterMs(userKeys), clientThrottle.retryAfterMs(clientKeys)),
+      recordFailure: () => {
+        throttle.recordFailure(userKeys);
+        clientThrottle.recordFailure(clientKeys);
+      },
+      recordSuccess: () => {
+        throttle.recordSuccess(userKeys);
+        clientThrottle.recordSuccess(clientKeys);
+      },
+    };
+  };
+
   const me = (principal: Principal | undefined): Response => {
     const user = users.get(principal!.userId)!;
     return { status: 200, body: { id: user.id, username: user.username, displayName: user.displayName } };
@@ -63,15 +75,15 @@ export function authRoutes({ authenticator, sessions, users, throttle, passwords
       public: true,
       handle: async ({ body, clientAddress, secure }): Promise<Response> => {
         const { username, password } = parseLogin(body);
-        const keys = [`user:${normalizeUsername(username)}`, `client:${clientAddress}`];
-        const retryAfterMs = throttle.retryAfterMs(keys);
+        const throttling = attempt(normalizeUsername(username), clientAddress);
+        const retryAfterMs = throttling.retryAfterMs();
         if (retryAfterMs > 0) return throttled(retryAfterMs);
         const userId = await authenticator.authenticate({ kind: 'password', username, password });
         if (userId === undefined) {
-          throttle.recordFailure(keys);
+          throttling.recordFailure();
           return { status: 401, body: { error: { code: 'login_failed', message: loginFailedMessage } } };
         }
-        throttle.recordSuccess(keys);
+        throttling.recordSuccess();
         const { token } = sessions.createSession(userId);
         return {
           ...me({ userId, via: 'session' }),
@@ -97,8 +109,7 @@ export function authRoutes({ authenticator, sessions, users, throttle, passwords
       handle: ({ principal, body }) => {
         const forbidden = requireSession(principal);
         if (forbidden) return forbidden;
-        const renamed = renameUser(users.get(principal!.userId)!, parseDisplayNameChange(body));
-        users.update({ ...renamed, updatedAt: new Date(now()).toISOString() });
+        accounts.rename(principal!.userId, parseDisplayNameChange(body));
         return me(principal);
       },
     },
@@ -111,19 +122,16 @@ export function authRoutes({ authenticator, sessions, users, throttle, passwords
         const { currentPassword, newPassword } = parsePasswordChange(body);
         const user = users.get(principal!.userId)!;
         // A stolen session must not guess the password faster than a login could.
-        const keys = [`user:${user.username}`, `client:${clientAddress}`];
-        const retryAfterMs = throttle.retryAfterMs(keys);
+        const throttling = attempt(user.username, clientAddress);
+        const retryAfterMs = throttling.retryAfterMs();
         if (retryAfterMs > 0) return throttled(retryAfterMs);
-        const verified = await authenticator.authenticate({ kind: 'password', username: user.username, password: currentPassword });
-        if (verified !== user.id) {
-          throttle.recordFailure(keys);
+        const isChanged = await accounts.changePassword(user.id, currentPassword, newPassword, readSessionToken(headers)!);
+        if (!isChanged) {
+          throttling.recordFailure();
           // 400, not 401: the session is fine, and a 401 would send the web UI to its login.
           return { status: 400, body: { error: { code: 'wrong_password', message: 'the current password is wrong' } } };
         }
-        throttle.recordSuccess(keys);
-        passwords.setPasswordHash(user.id, await hasher.hash(parsePassword(newPassword)));
-        // Whoever else signed in with the old password is signed out; this browser stays signed in.
-        sessions.endOtherSessions(user.id, readSessionToken(headers)!);
+        throttling.recordSuccess();
         return { status: 204 };
       },
     },

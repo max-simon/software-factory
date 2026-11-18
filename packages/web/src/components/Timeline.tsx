@@ -1,7 +1,7 @@
 import { relativeTime, type TimelineEntry } from '../model.ts';
 import { DecisionBody } from './InputItems.tsx';
 import { Markdown } from './Markdown.tsx';
-import { ApprovalNote, ByReviewer, ByUser } from './Status.tsx';
+import { ApprovalNote, ByReviewer, BySystem, ByUser } from './Status.tsx';
 
 const kindLabels: Record<TimelineEntry['kind'], string> = {
   question: 'Question',
@@ -63,7 +63,7 @@ function EntryBody({ entry, onOpenArtifact }: { entry: TimelineEntry; onOpenArti
         <>
           <Markdown>{entry.item.message}</Markdown>
           <p className="delivery">
-            <ByUser id={entry.item.authorId} />
+            {entry.item.bySystem ? <BySystem /> : <ByUser id={entry.item.authorId} />}
             {entry.item.deliveredAt ? (
               <span className="delivered" title={entry.item.deliveredAt}>
                 Delivered {relativeTime(entry.item.deliveredAt)}

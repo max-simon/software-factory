@@ -1,6 +1,13 @@
 import { DatabaseSync } from 'node:sqlite';
-import { DomainError, localProvider, normalizeUsername, type ExternalIdentity, type User, type UserRepository } from '@factory/core';
-import type { LocalPasswordStore } from '../auth/local-password-authenticator.ts';
+import {
+  DomainError,
+  localProvider,
+  normalizeUsername,
+  type ExternalIdentity,
+  type LocalPasswordStore,
+  type User,
+  type UserRepository,
+} from '@factory/core';
 
 // The local password hash lives on the user's `local` identity row, so a user
 // signing in through an IdP only never has one.
@@ -73,6 +80,18 @@ export class SqliteUserRepository implements UserRepository, LocalPasswordStore 
         .prepare(`INSERT INTO users (${userColumns}) VALUES (?, ?, ?, ?, ?, ?)`)
         .run(user.id, user.username, user.displayName, user.createdAt, user.updatedAt, user.disabledAt ?? null),
     );
+  }
+
+  insertWithPassword(user: User, hash: string): void {
+    this.#db.exec('BEGIN');
+    try {
+      this.insert(user);
+      this.setPasswordHash(user.id, hash);
+      this.#db.exec('COMMIT');
+    } catch (error) {
+      this.#db.exec('ROLLBACK');
+      throw error;
+    }
   }
 
   update(user: User): void {

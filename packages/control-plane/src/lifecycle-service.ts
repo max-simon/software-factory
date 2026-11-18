@@ -64,7 +64,7 @@ export class LifecycleService {
   /** A message for the agent that the control plane sends on its own, e.g. when a pull request was reviewed. */
   addFollowUp(id: string, message: string): Task {
     return this.#tasks.update(id, 'system', (task) =>
-      addFollowUp(task, { id: this.#tasks.newItemId('f'), createdAt: this.#tasks.now(), message }),
+      addFollowUp(task, { id: this.#tasks.newItemId('f'), createdAt: this.#tasks.now(), message, bySystem: true }),
     );
   }
 }

@@ -9,6 +9,7 @@ const passwordMinLength = 12;
 
 /** The signed-in user's display name, password and personal access tokens. */
 export function Account({ me, onRenamed }: { me: CurrentUser | undefined; onRenamed: (user: CurrentUser) => void }) {
+  const tokens = usePolling(api.listTokens, 'tokens', tokenPollIntervalMs);
   useEffect(() => {
     document.title = 'Account · Factory';
   }, []);
@@ -24,8 +25,9 @@ export function Account({ me, onRenamed }: { me: CurrentUser | undefined; onRena
         </p>
       </header>
       <DisplayNameForm me={me} onRenamed={onRenamed} />
-      <PasswordForm />
-      <Tokens />
+      {/* A password change revokes every token. */}
+      <PasswordForm onChanged={tokens.reload} />
+      <Tokens tokens={tokens.data} loadError={tokens.error} reload={tokens.reload} />
     </article>
   );
 }
@@ -71,7 +73,7 @@ function DisplayNameForm({ me, onRenamed }: { me: CurrentUser; onRenamed: (user:
   );
 }
 
-function PasswordForm() {
+function PasswordForm({ onChanged }: { onChanged: () => void }) {
   const [isChanged, setChanged] = useState(false);
   const [mismatch, setMismatch] = useState<string>();
   const { isBusy, error, run } = useAction();
@@ -90,6 +92,7 @@ function PasswordForm() {
       await api.changePassword(String(form.get('currentPassword')), newPassword);
       formElement.reset();
       setChanged(true);
+      onChanged();
     });
   };
   return (
@@ -112,14 +115,21 @@ function PasswordForm() {
         <button className="button primary" disabled={isBusy}>
           Change password
         </button>
-        {isChanged && <span className="muted">Password changed. Your other sessions are signed out.</span>}
+        {isChanged && <span className="muted">Password changed. Your other sessions are signed out and your access tokens are revoked.</span>}
       </div>
     </form>
   );
 }
 
-function Tokens() {
-  const { data: tokens, error: loadError, reload } = usePolling(api.listTokens, 'tokens', tokenPollIntervalMs);
+function Tokens({
+  tokens,
+  loadError,
+  reload,
+}: {
+  tokens: AccessTokenView[] | undefined;
+  loadError: Error | undefined;
+  reload: () => void;
+}) {
   const [created, setCreated] = useState<{ id: string; token: string }>();
   const { isBusy, error, run } = useAction();
 
@@ -136,7 +146,7 @@ function Tokens() {
     <section className="box tokens">
       <h2 className="section-title">Personal access tokens</h2>
       <p className="muted">For MCP clients and scripts: a token acts as you on the engineer API and /mcp.</p>
-      {created && <NewToken token={created.token}onDismiss={() => setCreated(undefined)} />}
+      {created && <NewToken token={created.token} onDismiss={() => setCreated(undefined)} />}
       {!tokens ? (
         <p className="muted">{loadError ? loadError.message : 'Loading…'}</p>
       ) : tokens.length === 0 ? (

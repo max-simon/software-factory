@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { Session } from '../auth/session-service.ts';
+import type { Session } from '@factory/core';
 import { SqliteSessionRepository } from './sqlite-session-repository.ts';
 
 const session = (idHash: string, userId: string, lastSeenAt: string, expiresAt: string): Session => ({

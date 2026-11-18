@@ -56,12 +56,15 @@ Detail behind the [README](../README.md): packages, task lifecycle, the worker p
 - **Who did what:** the engineer API passes the request's `Principal` to the
   services, which record the user's id, never a name: `createdBy` on tasks and
   projects, `authorId` on follow-ups, `answeredBy` on answers, `reviewedBy` on
-  approvals. Agent, reviewer and system changes record no user. The web UI
+  approvals. Agent, reviewer and system changes record no user; a follow-up
+  the control plane sends on its own (a pull request review or merge
+  conflict) is marked `bySystem` and shown as "by the system". The web UI
   resolves these ids through `GET /users` (`id`, `username`, `displayName`,
   `disabled` of every user, for any signed-in caller) and shows the **current**
   display name, with username and id on hover; an id no user has shows as
   itself, and an engineer's change or input stored before users existed as
-  "engineer (unattributed)".
+  "engineer (unattributed)" (so are the system's follow-ups stored before
+  `bySystem` existed).
 - **Spec review:** see *Hooks* below. A draft the reviewer finds off topic or
   underspecified moves to `clarification_required` with its comment as the
   note, logged with actor `reviewer`.
@@ -309,7 +312,9 @@ Users are a core domain concept (`packages/core/src/user.ts`); their storage, th
   scrypt hash sits on the user's `local` identity row, and
   `LocalPasswordAuthenticator` checks it, hashing even for unknown or disabled
   users so timing does not reveal which usernames exist. Operators manage
-  users with `yarn user`.
+  users with `yarn user`. Both the account routes and that CLI go through
+  `UserAccountService` (create, rename, set or change a password, disable),
+  so neither adapter holds account logic of its own.
 - **Sessions are the factory's own, however a user signed in.** `POST
   /auth/login` checks `{ username, password }` with the `Authenticator` and
   ends in `SessionService.createSession(userId)`, which an IdP's login route
@@ -322,15 +327,20 @@ Users are a core domain concept (`packages/core/src/user.ts`); their storage, th
   the guard refuses them anyway); ended sessions are pruned on login and on
   lookup. `GET /auth/me` names the signed-in user, `PATCH /auth/me`
   `{ displayName }` renames it. `POST /auth/password`
-  `{ currentPassword, newPassword }` checks the current password through the
-  `Authenticator` (a wrong one is 400 `wrong_password`, not 401, so the web
+  `{ currentPassword, newPassword }` checks the new password's length, then
+  the current password against the user's `local` hash (a wrong one is 400 `wrong_password`, not 401, so the web
   UI does not take it for an ended session; failures count towards the login
-  throttle), stores the new hash and ends every other session of the user.
+  throttle), stores the new hash, ends every other session of the user and
+  revokes all its access tokens, so whoever knew the old password keeps no
+  token minted with it.
   Both need a session. Failed logins get one
   generic 401 whether or not the username exists; after 5 failures in a row
-  per username or per client address the login answers 429 with
+  per username, or 50 per client address, the login answers 429 with
   `retry-after` for 30 s, doubling per further failure up to 15 minutes, until
-  a success resets it (in memory, so a restart forgets it).
+  a success resets it (in memory, so a restart forgets it). The client limit
+  is far higher because on loopback every client, agent containers included,
+  shares one address: it only caps password spraying across usernames, and
+  one person's typos lock out nobody else.
 - **Personal access tokens are for clients without a browser.** MCP clients
   and scripts send `Authorization: Bearer fct_…`; the `fct_` prefix makes a
   leaked token easy to recognise. A token is `fct_` plus 32 random bytes

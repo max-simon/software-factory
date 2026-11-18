@@ -61,6 +61,18 @@ test('links identities and keeps the local password hash', () => {
   assert.throws(() => repo.setPasswordHash('missing', 'hash'));
 });
 
+test('inserts a user with its local password in one transaction', () => {
+  const repo = new SqliteUserRepository(':memory:');
+  const now = '2026-11-12T10:00:00.000Z';
+  repo.insertWithPassword(user('u1', 'ada', now), 'hash-1');
+  assert.equal(repo.get('u1')!.username, 'ada');
+  assert.deepEqual(repo.findIdentity(localProvider, 'u1'), { provider: localProvider, subject: 'u1', userId: 'u1' });
+  assert.equal(repo.getPasswordHash('u1'), 'hash-1');
+  assert.throws(() => repo.insertWithPassword(user('u2', 'ada', now), 'hash-2'), isDuplicateUsername);
+  assert.equal(repo.get('u2'), undefined);
+  assert.equal(repo.getPasswordHash('u2'), undefined);
+});
+
 test('keeps users in a database file across connections', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'factory-users-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));

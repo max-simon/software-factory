@@ -124,6 +124,18 @@ test('the agent, reviewer and system keep their labels, and the reviewer’s inp
   expect(html).not.toContain('user-name');
 });
 
+test('a follow-up the system sent shows as by the system, not as an engineer', () => {
+  const html = withUsers(
+    [ada('Ada')],
+    <Timeline
+      entries={timeline(task({ questions: [], decisions: [], followUps: [{ id: 'f1', createdAt: at, message: 'Resolve it', bySystem: true }] }))}
+      onOpenArtifact={() => {}}
+    />,
+  );
+  expect(html).toContain('<span class="by-system">by the system</span>');
+  expect(html).not.toContain('user-name');
+});
+
 test('the project changelog names users the same way', () => {
   const projectChanges: ProjectChange[] = [{ at, actor: 'user', userId: 'u1', field: 'autoMerge', from: false, to: true }];
   const html = withUsers([ada('Ada Lovelace')], <Changelog changes={projectChanges} describe={describeProjectChange} />);

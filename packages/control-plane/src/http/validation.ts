@@ -23,6 +23,8 @@ import type {
   TaskAgent,
   TaskModel,
 } from '@factory/core';
+import { usernameMaxLength } from '@factory/core';
+import { passwordMaxLength } from '../auth/passwords.ts';
 
 export class ValidationError extends Error {
   override name = 'ValidationError';
@@ -352,13 +354,30 @@ export function parseAcceptedWork(body: unknown): string[] {
   return ids;
 }
 
-/** Shape only; the service checks the name's length and the expiry's range. */
+/** Shape only; the service checks the name's length and that the expiry is whole days in range. */
 export function parseNewAccessToken(body: unknown): NewAccessToken {
   const fields = object(body);
   rejectUnknownFields(fields, ['name', 'expiresInDays']);
   if (typeof fields.name !== 'string') throw new ValidationError('name must be a string');
   const expiresInDays = fields.expiresInDays;
-  return { name: fields.name, ...(expiresInDays !== undefined && { expiresInDays: expiresInDays as number }) };
+  if (expiresInDays !== undefined && typeof expiresInDays !== 'number') throw new ValidationError('expiresInDays must be a number');
+  return { name: fields.name, ...(expiresInDays !== undefined && { expiresInDays }) };
+}
+
+/**
+ * Shape, and lengths no account can have, so an oversized username never
+ * becomes a throttle key; whether the account exists is the authenticator's to say.
+ */
+export function parseLogin(body: unknown): { username: string; password: string } {
+  const fields = object(body);
+  rejectUnknownFields(fields, ['username', 'password']);
+  const { username, password } = fields;
+  if (typeof username !== 'string' || typeof password !== 'string') {
+    throw new ValidationError('login needs a username and a password');
+  }
+  if (username.trim().length > usernameMaxLength) throw new ValidationError(`username must be at most ${usernameMaxLength} characters long`);
+  if (password.length > passwordMaxLength) throw new ValidationError(`password must be at most ${passwordMaxLength} characters long`);
+  return { username, password };
 }
 
 /** Shape only; `renameUser` checks the name's length. */

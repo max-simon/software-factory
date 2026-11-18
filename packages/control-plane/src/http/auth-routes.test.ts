@@ -2,12 +2,15 @@ import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import { createUser, disableUser, type Principal } from '@factory/core';
+import { SqliteAccessTokenRepository } from '../adapters/sqlite-access-token-repository.ts';
 import { SqliteSessionRepository } from '../adapters/sqlite-session-repository.ts';
 import { SqliteUserRepository } from '../adapters/sqlite-user-repository.ts';
+import { AccessTokenService } from '../auth/access-token-service.ts';
 import { LocalPasswordAuthenticator } from '../auth/local-password-authenticator.ts';
 import { LoginThrottle } from '../auth/login-throttle.ts';
 import { ScryptPasswordHasher } from '../auth/passwords.ts';
 import { hashSessionToken, SessionService } from '../auth/session-service.ts';
+import { UserAccountService } from '../user-account-service.ts';
 import { authRoutes } from './auth-routes.ts';
 import { createServer, type Request, type Route } from './server.ts';
 import { readSessionToken } from './session-cookie.ts';
@@ -27,14 +30,23 @@ async function setup(t: TestContext) {
   }
   const store = new SqliteSessionRepository(':memory:');
   const sessions = new SessionService({ sessions: store, users, idleTimeoutMs: 12 * hour, maxLifetimeMs: 7 * day, now });
+  const tokenStore = new SqliteAccessTokenRepository(':memory:');
+  const accessTokens = new AccessTokenService({ tokens: tokenStore, users, now });
+  const accounts = new UserAccountService({
+    users,
+    passwords: users,
+    hasher,
+    sessions: store,
+    tokens: tokenStore,
+    now: () => new Date(now()).toISOString(),
+  });
   const routes = authRoutes({
     authenticator: new LocalPasswordAuthenticator({ users, passwords: users, hasher }),
     sessions,
+    accounts,
     users,
     throttle: new LoginThrottle({ now }),
-    passwords: users,
-    hasher,
-    now,
+    clientThrottle: new LoginThrottle({ now, lockoutAfter: 50 }),
   });
   // Stands in for the engineer routes.
   const whoami: Route = { method: 'GET', path: '/whoami', handle: ({ principal }) => ({ status: 200, body: principal }) };
@@ -72,7 +84,7 @@ async function setup(t: TestContext) {
       clientAddress: '127.0.0.1',
       secure: false,
     });
-  return { users, store, call, login, loginFrom, handle, advance: (ms: number) => (clock += ms) };
+  return { users, store, accessTokens, call, login, loginFrom, handle, advance: (ms: number) => (clock += ms) };
 }
 
 test('login sets a session cookie that signs the user in', async (t) => {
@@ -109,6 +121,18 @@ test('a wrong password, an unknown username and a disabled user get the same 401
     assert.deepEqual(reply.json, { error: { code: 'login_failed', message: 'wrong username or password' } });
   }
   assert.equal((await call('POST', '/auth/login', { body: { username: 'ada' } })).status, 400);
+});
+
+test('a login body no account could match is a 400 that does not count as a failure', async (t) => {
+  const { call, login } = await setup(t);
+  for (const body of [
+    { username: 'a'.repeat(33), password },
+    { username: 'ada', password: 'x'.repeat(257) },
+    { username: 'ada', password, remember: true },
+  ]) {
+    for (let i = 0; i < 5; i++) assert.equal((await call('POST', '/auth/login', { body })).status, 400, JSON.stringify(body));
+  }
+  assert.equal((await login()).status, 200);
 });
 
 test('only the login is open without a session', async (t) => {
@@ -171,9 +195,15 @@ test('the sessions of a disabled user are refused', async (t) => {
   assert.equal((await call('GET', '/whoami', { cookie })).status, 401);
 });
 
-test('repeated failures from one client lock it out with 429 and retry-after, whichever username', async (t) => {
+test('failures for other usernames do not lock a user out, even from the same client', async (t) => {
+  const { login } = await setup(t);
+  for (const username of ['a1', 'a2', 'a3', 'a4', 'a5', 'a6']) assert.equal((await login(username)).status, 401);
+  assert.equal((await login()).status, 200);
+});
+
+test('many failures from one client lock it out with 429 and retry-after, whichever username', async (t) => {
   const { login, advance } = await setup(t);
-  for (const username of ['a1', 'a2', 'a3', 'a4', 'a5']) assert.equal((await login(username)).status, 401);
+  for (let i = 1; i <= 50; i++) assert.equal((await login(`a${i}`)).status, 401);
   const locked = await login();
   assert.equal(locked.status, 429);
   assert.equal(locked.headers.get('retry-after'), '30');
@@ -184,7 +214,7 @@ test('repeated failures from one client lock it out with 429 and retry-after, wh
   advance(1_000);
   assert.equal((await login()).status, 200);
   // The success reset the client: the next failure is not locked out.
-  assert.equal((await login('a6')).status, 401);
+  assert.equal((await login('a51')).status, 401);
   assert.equal((await login()).status, 200);
 });
 
@@ -267,6 +297,18 @@ test('POST /auth/password needs the current password and ends the other sessions
   assert.equal((await call('GET', '/auth/me', { cookie: bob })).status, 200);
   assert.equal((await login('ada', password)).status, 401);
   assert.equal((await login('ada', newPassword)).status, 200);
+});
+
+test('POST /auth/password revokes the user\'s access tokens, not anyone else\'s', async (t) => {
+  const { accessTokens, call, login } = await setup(t);
+  const { cookie } = await login();
+  const ada = accessTokens.issue('u1', { name: 'laptop' }).token;
+  const bob = accessTokens.issue('u2', { name: 'laptop' }).token;
+  const changed = await call('POST', '/auth/password', { cookie, body: { currentPassword: password, newPassword: 'a brand new password' } });
+  assert.equal(changed.status, 204);
+  assert.equal(accessTokens.resolve(ada), undefined);
+  assert.deepEqual(accessTokens.list('u1'), []);
+  assert.deepEqual(accessTokens.resolve(bob), { userId: 'u2', via: 'token' });
 });
 
 test('wrong current passwords are throttled like failed logins', async (t) => {
