@@ -145,6 +145,21 @@ test('reads tasks stored before dependencies existed with none', () => {
   assert.deepEqual(repo.get('new')?.dependsOn, ['old']);
 });
 
+test('round-trips assignees, and reads tasks stored without them as unassigned', () => {
+  const repo = repository();
+  repo.insert(draft('old'));
+  repo.insert({ ...draft('new'), assignees: ['u2', 'u1'] });
+  assert.equal('assignees' in repo.get('old')!, false);
+  assert.deepEqual(repo.get('new')?.assignees, ['u2', 'u1']);
+  repo.save({ ...draft('new'), assignees: ['u1'] }, [
+    { at: '2026-11-13T10:00:00.000Z', actor: 'user', userId: 'u1', field: 'assignees', from: ['u2', 'u1'], to: ['u1'] },
+  ]);
+  assert.deepEqual(repo.get('new')?.assignees, ['u1']);
+  assert.deepEqual(repo.listChanges('new'), [
+    { at: '2026-11-13T10:00:00.000Z', actor: 'user', userId: 'u1', field: 'assignees', from: ['u2', 'u1'], to: ['u1'] },
+  ]);
+});
+
 test('reads pull requests stored before statuses existed as merged on done tasks, open otherwise', () => {
   const repo = repository();
   const legacy = { url: 'https://github.com/o/r/pull/1', title: 'pr' };

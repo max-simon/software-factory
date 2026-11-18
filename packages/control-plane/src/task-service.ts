@@ -6,6 +6,7 @@ import {
   assertDeletable,
   assertValidDependencies,
   cancelTask,
+  checkAssignees,
   createTask,
   editTask,
   moveTask,
@@ -14,6 +15,7 @@ import {
   restartTask,
   returnToDraft,
   reviewItem,
+  setAssignees,
   startTask,
   type ActivityEntry,
   type ChangeAuthor,
@@ -25,6 +27,8 @@ import {
   type ReviewerNote,
   type Task,
   type TaskEdit,
+  type User,
+  type UserRepository,
 } from '@factory/core';
 import type { ActivityFeed } from './activity-feed.ts';
 import type { TaskStore } from './task-store.ts';
@@ -33,6 +37,7 @@ export interface TaskServiceDeps {
   tasks: TaskStore;
   activity: ActivityFeed;
   runtime: ExecutionRuntime;
+  users: UserRepository;
   newId?: () => string;
 }
 
@@ -49,12 +54,14 @@ export class TaskService {
   readonly #tasks: TaskStore;
   readonly #activity: ActivityFeed;
   readonly #runtime: ExecutionRuntime;
+  readonly #users: UserRepository;
   readonly #newId: () => string;
 
   constructor(deps: TaskServiceDeps) {
     this.#tasks = deps.tasks;
     this.#activity = deps.activity;
     this.#runtime = deps.runtime;
+    this.#users = deps.users;
     this.#newId = deps.newId ?? (() => randomBytes(5).toString('hex'));
   }
 
@@ -141,6 +148,18 @@ export class TaskService {
   addFollowUp(id: string, message: string, by: Principal): Task {
     return this.#tasks.update(id, by, (task) =>
       addFollowUp(task, { id: this.#tasks.newItemId('f'), createdAt: this.#tasks.now(), message, authorId: by.userId }),
+    );
+  }
+
+  /** Replaces who is assigned to the task, in any status; an empty list unassigns everyone. */
+  setAssignees(id: string, assignees: readonly string[], by: Principal): Task {
+    const users = new Map<string, User>();
+    for (const userId of assignees) {
+      const user = this.#users.get(userId);
+      if (user !== undefined) users.set(userId, user);
+    }
+    return this.#tasks.update(id, by, (task) =>
+      setAssignees(task, checkAssignees(task.assignees ?? [], assignees, users)),
     );
   }
 

@@ -5,6 +5,7 @@ import {
   addDecision,
   addPullRequest,
   detachExecution,
+  disableUser,
   askQuestion,
   markFailed,
   markInProgress,
@@ -63,9 +64,11 @@ async function startApi(t: TestContext, unavailableAgent?: (agent: TaskAgent) =>
   const repository = new SqliteTaskRepository(':memory:');
   const runtime = new FakeRuntime();
   let counter = 0;
+  const { authenticate, cookie, bobCookie, users } = testAuth();
   const { tasks, service } = createServices({
     repository,
     runtime,
+    users,
     newId: () => `task-${++counter}`,
     newItemId: sequentialItemIds(),
     now: () => fixedNow,
@@ -77,7 +80,6 @@ async function startApi(t: TestContext, unavailableAgent?: (agent: TaskAgent) =>
     now: () => fixedNow,
   });
   projects.create({ title: 'Login', description: 'Sign-in for the app' }, ada);
-  const { authenticate, cookie, bobCookie, users } = testAuth();
   const server = createServer(engineerRoutes(tasks, service, projects, unavailableAgent, reviews), { authenticate }).listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', resolve));
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
@@ -575,6 +577,61 @@ test('dependencies are set on create, replaced until the task starts, and valida
   assert.equal(cleared.status, 200);
   assert.equal(cleared.json.status, 'queued');
   assert.deepEqual(cleared.json.dependsOn, []);
+});
+
+test('assignees are replaced in any status, deduplicated and logged with the user', async (t) => {
+  const { call } = await startApi(t);
+  const created = await call('POST', '/tasks', validTask);
+  assert.equal('assignees' in created.json, false);
+  await call('POST', '/tasks/task-1/start');
+  await call('POST', '/tasks/task-1/cancel');
+
+  const assigned = await call('PUT', '/tasks/task-1/assignees', { assignees: ['u2', 'u1', 'u2'] });
+  assert.equal(assigned.status, 200);
+  assert.equal(assigned.json.status, 'failed');
+  assert.deepEqual(assigned.json.assignees, ['u2', 'u1']);
+  assert.deepEqual((await call('GET', '/tasks/task-1')).json.assignees, ['u2', 'u1']);
+  assert.deepEqual((await call('GET', '/tasks/task-1/changes')).json.at(-1), {
+    at: fixedNow,
+    actor: 'user',
+    userId: 'u1',
+    field: 'assignees',
+    from: [],
+    to: ['u2', 'u1'],
+  });
+
+  const cleared = await call('PUT', '/tasks/task-1/assignees', { assignees: [] });
+  assert.equal(cleared.status, 200);
+  assert.equal('assignees' in cleared.json, false);
+});
+
+test('assignees refuse malformed bodies with 400', async (t) => {
+  const { call } = await startApi(t);
+  await call('POST', '/tasks', validTask);
+  for (const body of [{}, { assignees: 'u1' }, { assignees: [''] }, { assignees: [1] }, { assignees: ['u1'], extra: true }, []]) {
+    const { status, json } = await call('PUT', '/tasks/task-1/assignees', body);
+    assert.equal(status, 400, JSON.stringify(body));
+    assert.equal(json.error.code, 'invalid_request');
+  }
+});
+
+test('assignees refuse unknown users with 404 and newly assigned disabled users with 409', async (t) => {
+  const api = await startApi(t);
+  await api.call('POST', '/tasks', validTask);
+  const unknown = await api.call('PUT', '/tasks/task-1/assignees', { assignees: ['u1', 'nobody'] });
+  assert.equal(unknown.status, 404);
+  assert.equal(unknown.json.error.code, 'unknown_user');
+  assert.equal('assignees' in (await api.call('GET', '/tasks/task-1')).json, false);
+
+  await api.call('PUT', '/tasks/task-1/assignees', { assignees: ['u1', 'u2'] });
+  api.users.update(disableUser(api.users.get('u2')!, fixedNow));
+  await api.call('POST', '/tasks', validTask);
+  const refused = await api.call('PUT', '/tasks/task-2/assignees', { assignees: ['u2'] });
+  assert.equal(refused.status, 409);
+  assert.equal(refused.json.error.code, 'user_disabled');
+  const kept = await api.call('PUT', '/tasks/task-1/assignees', { assignees: ['u2'] });
+  assert.equal(kept.status, 200);
+  assert.deepEqual(kept.json.assignees, ['u2']);
 });
 
 test('delete is refused while a task that has not started depends on it', async (t) => {

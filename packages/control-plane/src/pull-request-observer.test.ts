@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { NewTask, PullRequest, PullRequestReader, PullRequestReview, TaskEvent } from '@factory/core';
 import { SqliteTaskRepository } from './adapters/sqlite-task-repository.ts';
+import { SqliteUserRepository } from './adapters/sqlite-user-repository.ts';
 import { PullRequestObserver } from './pull-request-observer.ts';
 import { createServices } from './services.ts';
 import { ada, sequentialItemIds } from './test-support.ts';
@@ -26,6 +27,7 @@ function setup() {
   let counter = 0;
   const services = createServices({
     repository: new SqliteTaskRepository(':memory:'),
+    users: new SqliteUserRepository(':memory:'),
     runtime: { start: async () => ({ executionId: 'x' }), notify: async () => ({}), restart: async () => ({}), remove: async () => {}, listExecutions: async () => [] },
     newId: () => `t${++counter}`,
     newItemId: sequentialItemIds(),

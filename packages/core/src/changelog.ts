@@ -31,7 +31,7 @@ export type TaskChange = ChangeMeta &
   (
     | { field: 'created' }
     | { field: 'title' | 'specification'; from: string; to: string }
-    | { field: 'labels' | 'dependsOn'; from: string[]; to: string[] }
+    | { field: 'labels' | 'dependsOn' | 'assignees'; from: string[]; to: string[] }
     | { field: 'status'; from: TaskStatus; to: TaskStatus }
   );
 
@@ -50,6 +50,10 @@ export function taskChanges(before: Task, after: Task, meta: ChangeMeta): TaskCh
   }
   if (!sameList(before.dependsOn, after.dependsOn)) {
     changes.push({ ...meta, field: 'dependsOn', from: [...before.dependsOn], to: [...after.dependsOn] });
+  }
+  const [assigneesBefore, assigneesAfter] = [before.assignees ?? [], after.assignees ?? []];
+  if (!sameList(assigneesBefore, assigneesAfter)) {
+    changes.push({ ...meta, field: 'assignees', from: [...assigneesBefore], to: [...assigneesAfter] });
   }
   if (before.status !== after.status) changes.push({ ...meta, field: 'status', from: before.status, to: after.status });
   return changes;

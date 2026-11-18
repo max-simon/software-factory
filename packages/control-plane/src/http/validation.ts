@@ -145,6 +145,17 @@ export function parseTaskEdit(body: unknown): TaskEdit {
   };
 }
 
+const maxAssignees = 100;
+
+/** Shape only; the service checks that every id is a user who may be assigned. */
+export function parseAssignees(body: unknown): string[] {
+  const fields = object(body);
+  rejectUnknownFields(fields, ['assignees']);
+  const ids = stringArray(fields, 'assignees');
+  if (ids.length > maxAssignees) throw new ValidationError(`assignees must list at most ${maxAssignees} users`);
+  return ids;
+}
+
 /** Any string, including an empty one, so a description can be cleared. */
 function optionalText(fields: Fields, key: string): string | undefined {
   const value = fields[key];

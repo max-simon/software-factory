@@ -12,6 +12,7 @@ import {
   type TaskAgent,
 } from '@factory/core';
 import { SqliteTaskRepository } from './adapters/sqlite-task-repository.ts';
+import { SqliteUserRepository } from './adapters/sqlite-user-repository.ts';
 import { hashAgentToken } from './agent-token.ts';
 import { Dispatcher, orphanSweepIntervalMs, type DispatcherDeps, startupTimeoutMs } from './dispatcher.ts';
 import { createServices } from './services.ts';
@@ -87,6 +88,7 @@ function setup(maxRunning = 10) {
   let now = Date.parse('2026-11-12T10:00:00.000Z');
   const { tasks, service, agent, lifecycle } = createServices({
     repository: new SqliteTaskRepository(':memory:'),
+    users: new SqliteUserRepository(':memory:'),
     runtime,
     newId: () => `t${++counter}`,
     newItemId: sequentialItemIds(),
