@@ -66,6 +66,10 @@ export class SqliteSessionRepository implements SessionStore {
     this.#db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
   }
 
+  deleteForUserExcept(userId: string, keepIdHash: string): void {
+    this.#db.prepare('DELETE FROM sessions WHERE user_id = ? AND id_hash != ?').run(userId, keepIdHash);
+  }
+
   deleteExpired(now: string, idleSince: string): void {
     this.#db.prepare('DELETE FROM sessions WHERE expires_at <= ? OR last_seen_at <= ?').run(now, idleSince);
   }

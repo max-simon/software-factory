@@ -31,6 +31,15 @@ test('inserts, gets, touches and deletes sessions', () => {
   assert.ok(repo.get('h3'));
 });
 
+test('deletes every session of a user but one', () => {
+  const repo = new SqliteSessionRepository(':memory:');
+  for (const [idHash, userId] of [['h1', 'u1'], ['h2', 'u1'], ['h3', 'u2']] as const) {
+    repo.insert(session(idHash, userId, '2026-11-12T10:00:00.000Z', '2026-11-19T10:00:00.000Z'));
+  }
+  repo.deleteForUserExcept('u1', 'h2');
+  assert.deepEqual(['h1', 'h2', 'h3'].filter((id) => repo.get(id)), ['h2', 'h3']);
+});
+
 test('deletes sessions that ended or went idle', () => {
   const repo = new SqliteSessionRepository(':memory:');
   repo.insert(session('ended', 'u1', '2026-11-12T10:00:00.000Z', '2026-11-12T12:00:00.000Z'));

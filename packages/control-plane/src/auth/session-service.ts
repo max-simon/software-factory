@@ -19,6 +19,8 @@ export interface SessionStore {
   delete(idHash: string): void;
   /** Ends every session of the user, e.g. when it is disabled. */
   deleteForUser(userId: string): void;
+  /** Ends every session of the user but the one with `keepIdHash`, e.g. after a password change. */
+  deleteForUserExcept(userId: string, keepIdHash: string): void;
   /** Deletes sessions that ended at `now` or were last seen at `idleSince` or earlier. */
   deleteExpired(now: string, idleSince: string): void;
 }
@@ -95,6 +97,11 @@ export class SessionService {
     }
     if (now - lastSeen >= touchIntervalMs) this.#sessions.touch(idHash, iso(now));
     return { userId: session.userId, via: 'session' };
+  }
+
+  /** Ends every session of the user except the one of `token`, e.g. after the user changed its password. */
+  endOtherSessions(userId: string, token: string): void {
+    this.#sessions.deleteForUserExcept(userId, hashSessionToken(token));
   }
 
   /** Ends the session; harmless for an unknown token. */

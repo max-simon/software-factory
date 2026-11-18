@@ -1,7 +1,7 @@
 import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
-import { createUser, disableUser, localProvider } from '@factory/core';
+import { createUser, disableUser, type Principal } from '@factory/core';
 import { SqliteSessionRepository } from '../adapters/sqlite-session-repository.ts';
 import { SqliteUserRepository } from '../adapters/sqlite-user-repository.ts';
 import { LocalPasswordAuthenticator } from '../auth/local-password-authenticator.ts';
@@ -32,6 +32,9 @@ async function setup(t: TestContext) {
     sessions,
     users,
     throttle: new LoginThrottle({ now }),
+    passwords: users,
+    hasher,
+    now,
   });
   // Stands in for the engineer routes.
   const whoami: Route = { method: 'GET', path: '/whoami', handle: ({ principal }) => ({ status: 200, body: principal }) };
@@ -59,7 +62,17 @@ async function setup(t: TestContext) {
   /** Calls the login route's handler directly, as from `clientAddress`. */
   const loginFrom = (clientAddress: string, username: string, pw: string, secure = false) =>
     routes[0]!.handle({ params: {}, headers: {}, body: { username, password: pw }, clientAddress, secure } satisfies Request);
-  return { users, store, call, login, loginFrom, advance: (ms: number) => (clock += ms) };
+  /** Calls a route's handler directly, as a request with `principal`. */
+  const handle = (method: string, path: string, principal: Principal, body?: unknown) =>
+    routes.find((route) => route.method === method && route.path === path)!.handle({
+      params: {},
+      headers: {},
+      body,
+      principal,
+      clientAddress: '127.0.0.1',
+      secure: false,
+    });
+  return { users, store, call, login, loginFrom, handle, advance: (ms: number) => (clock += ms) };
 }
 
 test('login sets a session cookie that signs the user in', async (t) => {
@@ -186,4 +199,82 @@ test('repeated failures for one username lock it out from every client, and a su
   assert.equal((await loginFrom('10.0.0.9', 'ada', password)).status, 200);
   assert.equal((await loginFrom('10.0.0.1', 'ada', 'wrong password!')).status, 401);
   assert.equal((await loginFrom('10.0.0.1', 'ada', password)).status, 200);
+});
+
+test('GET /users lists every user with its current name, disabled ones included', async (t) => {
+  const { users, call, login } = await setup(t);
+  users.update(disableUser(users.get('u2')!, '2026-11-12T11:00:00.000Z'));
+  const { cookie } = await login();
+  assert.equal((await call('GET', '/users')).status, 401);
+  const { status, json } = await call('GET', '/users', { cookie });
+  assert.equal(status, 200);
+  assert.deepEqual(json, [
+    { id: 'u1', username: 'ada', displayName: 'ADA', disabled: false },
+    { id: 'u2', username: 'bob', displayName: 'BOB', disabled: true },
+  ]);
+});
+
+test('PATCH /auth/me changes the display name, which every later read shows', async (t) => {
+  const { users, call, login, advance } = await setup(t);
+  const { cookie } = await login();
+  advance(hour);
+  const renamed = await call('PATCH', '/auth/me', { cookie, body: { displayName: '  Ada Lovelace ' } });
+  assert.equal(renamed.status, 200);
+  assert.deepEqual(renamed.json, { id: 'u1', username: 'ada', displayName: 'Ada Lovelace' });
+  assert.equal(users.get('u1')!.updatedAt, '2026-11-12T11:00:00.000Z');
+  assert.equal((await call('GET', '/users', { cookie })).json[0].displayName, 'Ada Lovelace');
+  assert.equal((await call('GET', '/auth/me', { cookie })).json.displayName, 'Ada Lovelace');
+  const empty = await call('PATCH', '/auth/me', { cookie, body: { displayName: '  ' } });
+  assert.deepEqual([empty.status, empty.json.error.code], [400, 'invalid_display_name']);
+  const unknown = await call('PATCH', '/auth/me', { cookie, body: { displayName: 'A', username: 'x' } });
+  assert.deepEqual([unknown.status, unknown.json.error.code], [400, 'invalid_request']);
+  assert.equal((await call('PATCH', '/auth/me', { body: { displayName: 'A' } })).status, 401);
+});
+
+test('a token cannot change the display name or the password', async (t) => {
+  const { handle } = await setup(t);
+  const token: Principal = { userId: 'u1', via: 'token' };
+  for (const [method, path, body] of [
+    ['PATCH', '/auth/me', { displayName: 'Mallory' }],
+    ['POST', '/auth/password', { currentPassword: password, newPassword: 'a brand new password' }],
+  ] as const) {
+    const reply = await handle(method, path, token, body);
+    assert.equal(reply.status, 403, path);
+    assert.deepEqual((reply.body as { error: { code: string } }).error.code, 'session_required');
+  }
+});
+
+test('POST /auth/password needs the current password and ends the other sessions only', async (t) => {
+  const { call, login } = await setup(t);
+  const { cookie } = await login();
+  const other = (await login()).cookie;
+  const bob = (await login('bob')).cookie;
+  const newPassword = 'a brand new password';
+
+  const wrong = await call('POST', '/auth/password', { cookie, body: { currentPassword: 'not it at all', newPassword } });
+  assert.equal(wrong.status, 400);
+  assert.equal(wrong.json.error.code, 'wrong_password');
+  const short = await call('POST', '/auth/password', { cookie, body: { currentPassword: password, newPassword: 'short' } });
+  assert.deepEqual([short.status, short.json.error.code], [400, 'invalid_password']);
+  const unknown = await call('POST', '/auth/password', { cookie, body: { currentPassword: password, newPassword, extra: 1 } });
+  assert.deepEqual([unknown.status, unknown.json.error.code], [400, 'invalid_request']);
+  assert.equal((await call('GET', '/auth/me', { cookie: other })).status, 200);
+
+  const changed = await call('POST', '/auth/password', { cookie, body: { currentPassword: password, newPassword } });
+  assert.equal(changed.status, 204);
+  assert.equal((await call('GET', '/auth/me', { cookie })).status, 200);
+  assert.equal((await call('GET', '/auth/me', { cookie: other })).status, 401);
+  assert.equal((await call('GET', '/auth/me', { cookie: bob })).status, 200);
+  assert.equal((await login('ada', password)).status, 401);
+  assert.equal((await login('ada', newPassword)).status, 200);
+});
+
+test('wrong current passwords are throttled like failed logins', async (t) => {
+  const { call, login } = await setup(t);
+  const { cookie } = await login();
+  const body = { currentPassword: 'not it at all', newPassword: 'a brand new password' };
+  for (let i = 0; i < 5; i++) assert.equal((await call('POST', '/auth/password', { cookie, body })).status, 400);
+  const locked = await call('POST', '/auth/password', { cookie, body: { ...body, currentPassword: password } });
+  assert.equal(locked.status, 429);
+  assert.equal(locked.json.error.code, 'too_many_attempts');
 });

@@ -360,3 +360,22 @@ export function parseNewAccessToken(body: unknown): NewAccessToken {
   const expiresInDays = fields.expiresInDays;
   return { name: fields.name, ...(expiresInDays !== undefined && { expiresInDays: expiresInDays as number }) };
 }
+
+/** Shape only; `renameUser` checks the name's length. */
+export function parseDisplayNameChange(body: unknown): string {
+  const fields = object(body);
+  rejectUnknownFields(fields, ['displayName']);
+  if (typeof fields.displayName !== 'string') throw new ValidationError('displayName must be a string');
+  return fields.displayName;
+}
+
+/** Shape only; the new password's length is checked by `parsePassword`. */
+export function parsePasswordChange(body: unknown): { currentPassword: string; newPassword: string } {
+  const fields = object(body);
+  rejectUnknownFields(fields, ['currentPassword', 'newPassword']);
+  const { currentPassword, newPassword } = fields;
+  if (typeof currentPassword !== 'string' || typeof newPassword !== 'string') {
+    throw new ValidationError('currentPassword and newPassword must be strings');
+  }
+  return { currentPassword, newPassword };
+}

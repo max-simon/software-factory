@@ -13,7 +13,8 @@ import { PullRequestIndicator } from '../components/PullRequestIndicator.tsx';
 import { HeartbeatNote, inputReviewLabel, prReviewLabel, Spinner, StatusLabel } from '../components/Status.tsx';
 import { Timeline } from '../components/Timeline.tsx';
 import { useAction, usePolling } from '../hooks.ts';
-import { agentLabels, canSendFollowUp, href, openInput, pullRequestNumber, relativeTime, repoName, timeline, type TaskView } from '../model.ts';
+import { UserName } from '../components/UserName.tsx';
+import { agentLabels, canSendFollowUp, describeChange, href, openInput, pullRequestNumber, relativeTime, repoName, timeline, type TaskView } from '../model.ts';
 
 export function TaskDetail({ id, projects }: { id: string; projects: Project[] | undefined }) {
   const { data: task, error, set } = usePolling(() => api.getTask(id), id);
@@ -97,7 +98,7 @@ export function TaskDetail({ id, projects }: { id: string; projects: Project[] |
 
       {changes.length > 0 && (
         <Section title="Changelog" className="changelog-box">
-          <Changelog changes={changes} />
+          <Changelog changes={changes} describe={describeChange} />
         </Section>
       )}
 
@@ -212,6 +213,9 @@ export function Header({ task, onChange }: { task: TaskView; onChange: (task: Ta
             {label}
           </span>
         ))}
+        <span className="created-by">
+          created by <UserName id={task.createdBy} />
+        </span>
         <span title={task.updatedAt}>updated {relativeTime(task.updatedAt)}</span>
         <span className="mono">{task.id}</span>
       </p>

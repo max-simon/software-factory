@@ -15,6 +15,9 @@ export default defineConfig({
       '/auth': toControlPlane,
       '/projects': toControlPlane,
       '/tasks': toControlPlane,
+      '/users': toControlPlane,
+      // So the `claude mcp add` command the account page shows works against the dev server too.
+      '/mcp': toControlPlane,
     },
   },
 });

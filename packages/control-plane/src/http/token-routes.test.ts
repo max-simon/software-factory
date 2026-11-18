@@ -9,6 +9,7 @@ import { SqliteSessionRepository } from '../adapters/sqlite-session-repository.t
 import { SqliteUserRepository } from '../adapters/sqlite-user-repository.ts';
 import { AccessTokenService, hashAccessToken } from '../auth/access-token-service.ts';
 import { LoginThrottle } from '../auth/login-throttle.ts';
+import { ScryptPasswordHasher } from '../auth/passwords.ts';
 import { SessionService } from '../auth/session-service.ts';
 import { authRoutes } from './auth-routes.ts';
 import { authenticateRequest } from './authenticate.ts';
@@ -48,7 +49,14 @@ async function setup(t: TestContext) {
     },
   };
   const routes = [
-    ...authRoutes({ authenticator: { authenticate: async () => undefined }, sessions, users, throttle: new LoginThrottle() }),
+    ...authRoutes({
+      authenticator: { authenticate: async () => undefined },
+      sessions,
+      users,
+      throttle: new LoginThrottle(),
+      passwords: users,
+      hasher: new ScryptPasswordHasher({ N: 2 ** 10 }),
+    }),
     ...tokenRoutes(tokens),
     whoami,
     projects,
