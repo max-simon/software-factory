@@ -22,7 +22,8 @@ export type DomainErrorCode =
   | 'user_disabled'
   | 'duplicate_username'
   | 'invalid_username'
-  | 'invalid_display_name';
+  | 'invalid_display_name'
+  | 'invalid_password';
 
 export class DomainError extends Error {
   readonly code: DomainErrorCode;
