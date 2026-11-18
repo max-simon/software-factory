@@ -74,6 +74,11 @@ export class AccessTokenService {
     return this.#tokens.delete(userId, id);
   }
 
+  /** Deletes every token of the user, e.g. after its password changed. */
+  revokeAll(userId: string): void {
+    this.#tokens.deleteForUser(userId);
+  }
+
   /** The principal of an unexpired token of an active user, or undefined. */
   resolve(token: string | undefined): Principal | undefined {
     if (!token?.startsWith(accessTokenPrefix)) return undefined;

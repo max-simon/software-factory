@@ -6,6 +6,7 @@ import {
   type Principal,
   type UserRepository,
 } from '@factory/core';
+import type { AccessTokenService } from '../auth/access-token-service.ts';
 import type { LocalPasswordStore } from '../auth/local-password-authenticator.ts';
 import type { LoginThrottle } from '../auth/login-throttle.ts';
 import { parsePassword } from '../auth/passwords.ts';
@@ -18,6 +19,8 @@ import { parseDisplayNameChange, parsePasswordChange, ValidationError } from './
 export interface AuthRoutesDeps {
   authenticator: Authenticator;
   sessions: SessionService;
+  /** Revoked on a password change. */
+  accessTokens: Pick<AccessTokenService, 'revokeAll'>;
   users: UserRepository;
   /** Throttles failed logins per username. */
   throttle: LoginThrottle;
@@ -61,6 +64,7 @@ const throttled = (retryAfterMs: number): Response => ({
 export function authRoutes({
   authenticator,
   sessions,
+  accessTokens,
   users,
   throttle,
   clientThrottle,
@@ -156,8 +160,10 @@ export function authRoutes({
         }
         throttling.recordSuccess();
         passwords.setPasswordHash(user.id, await hasher.hash(parsePassword(newPassword)));
-        // Whoever else signed in with the old password is signed out; this browser stays signed in.
+        // Whoever else signed in with the old password is signed out, and tokens they may have
+        // minted with it stop working; this browser stays signed in.
         sessions.endOtherSessions(user.id, readSessionToken(headers)!);
+        accessTokens.revokeAll(user.id);
         return { status: 204 };
       },
     },

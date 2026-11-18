@@ -52,6 +52,7 @@ async function setup(t: TestContext) {
     ...authRoutes({
       authenticator: { authenticate: async () => undefined },
       sessions,
+      accessTokens: tokens,
       users,
       throttle: new LoginThrottle(),
       clientThrottle: new LoginThrottle(),

@@ -325,7 +325,9 @@ Users are a core domain concept (`packages/core/src/user.ts`); their storage, th
   `{ currentPassword, newPassword }` checks the current password through the
   `Authenticator` (a wrong one is 400 `wrong_password`, not 401, so the web
   UI does not take it for an ended session; failures count towards the login
-  throttle), stores the new hash and ends every other session of the user.
+  throttle), stores the new hash, ends every other session of the user and
+  revokes all its access tokens, so whoever knew the old password keeps no
+  token minted with it.
   Both need a session. Failed logins get one
   generic 401 whether or not the username exists; after 5 failures in a row
   per username, or 50 per client address, the login answers 429 with

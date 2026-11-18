@@ -2,8 +2,10 @@ import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import { createUser, disableUser, type Principal } from '@factory/core';
+import { SqliteAccessTokenRepository } from '../adapters/sqlite-access-token-repository.ts';
 import { SqliteSessionRepository } from '../adapters/sqlite-session-repository.ts';
 import { SqliteUserRepository } from '../adapters/sqlite-user-repository.ts';
+import { AccessTokenService } from '../auth/access-token-service.ts';
 import { LocalPasswordAuthenticator } from '../auth/local-password-authenticator.ts';
 import { LoginThrottle } from '../auth/login-throttle.ts';
 import { ScryptPasswordHasher } from '../auth/passwords.ts';
@@ -27,9 +29,11 @@ async function setup(t: TestContext) {
   }
   const store = new SqliteSessionRepository(':memory:');
   const sessions = new SessionService({ sessions: store, users, idleTimeoutMs: 12 * hour, maxLifetimeMs: 7 * day, now });
+  const accessTokens = new AccessTokenService({ tokens: new SqliteAccessTokenRepository(':memory:'), users, now });
   const routes = authRoutes({
     authenticator: new LocalPasswordAuthenticator({ users, passwords: users, hasher }),
     sessions,
+    accessTokens,
     users,
     throttle: new LoginThrottle({ now }),
     clientThrottle: new LoginThrottle({ now, lockoutAfter: 50 }),
@@ -73,7 +77,7 @@ async function setup(t: TestContext) {
       clientAddress: '127.0.0.1',
       secure: false,
     });
-  return { users, store, call, login, loginFrom, handle, advance: (ms: number) => (clock += ms) };
+  return { users, store, accessTokens, call, login, loginFrom, handle, advance: (ms: number) => (clock += ms) };
 }
 
 test('login sets a session cookie that signs the user in', async (t) => {
@@ -274,6 +278,18 @@ test('POST /auth/password needs the current password and ends the other sessions
   assert.equal((await call('GET', '/auth/me', { cookie: bob })).status, 200);
   assert.equal((await login('ada', password)).status, 401);
   assert.equal((await login('ada', newPassword)).status, 200);
+});
+
+test('POST /auth/password revokes the user\'s access tokens, not anyone else\'s', async (t) => {
+  const { accessTokens, call, login } = await setup(t);
+  const { cookie } = await login();
+  const ada = accessTokens.issue('u1', { name: 'laptop' }).token;
+  const bob = accessTokens.issue('u2', { name: 'laptop' }).token;
+  const changed = await call('POST', '/auth/password', { cookie, body: { currentPassword: password, newPassword: 'a brand new password' } });
+  assert.equal(changed.status, 204);
+  assert.equal(accessTokens.resolve(ada), undefined);
+  assert.deepEqual(accessTokens.list('u1'), []);
+  assert.deepEqual(accessTokens.resolve(bob), { userId: 'u2', via: 'token' });
 });
 
 test('wrong current passwords are throttled like failed logins', async (t) => {

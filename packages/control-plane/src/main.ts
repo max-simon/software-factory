@@ -92,6 +92,7 @@ function main(): void {
     ...authRoutes({
       authenticator: new LocalPasswordAuthenticator({ users, passwords: users, hasher }),
       sessions,
+      accessTokens,
       users,
       throttle: new LoginThrottle(),
       clientThrottle: new LoginThrottle({ lockoutAfter: clientLockoutAfter }),
