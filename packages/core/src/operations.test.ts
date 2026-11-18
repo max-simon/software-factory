@@ -57,6 +57,8 @@ const rejectsWith = (code: DomainErrorCode) => (error: unknown) =>
 
 const frozen = (task: Task): Task => structuredClone(task);
 
+const ada = { userId: 'u1' };
+
 describe('createTask', () => {
   const meta = { id: 'abc', now: '2026-01-01T00:00:00Z', rank: 3 };
 
@@ -502,49 +504,51 @@ describe('answerQuestion', () => {
   const inputRequired = (...questions: Question[]) => supervised('input_required', questions);
 
   it('stores the answer and returns to in_progress when none are open', () => {
-    const task = answerQuestion(inputRequired(question('q1', 'text')), 'q1', ['yes']);
+    const task = answerQuestion(inputRequired(question('q1', 'text')), 'q1', ['yes'], ada);
     assert.deepEqual(task.questions[0]!.answer, ['yes']);
+    assert.equal(task.questions[0]!.answeredBy, 'u1');
     assert.equal(task.status, 'in_progress');
   });
 
   it('stays input_required while another question is open', () => {
-    const task = answerQuestion(inputRequired(question('q1', 'text'), question('q2', 'text')), 'q1', ['a']);
+    const task = answerQuestion(inputRequired(question('q1', 'text'), question('q2', 'text')), 'q1', ['a'], ada);
     assert.equal(task.status, 'input_required');
     assert.equal(task.questions[1]!.answer, undefined);
   });
 
   it('returns to in_progress after answering the last open question', () => {
     const start = inputRequired(question('q1', 'text'), question('q2', 'text'));
-    const task = answerQuestion(answerQuestion(start, 'q1', ['a']), 'q2', ['b']);
+    const task = answerQuestion(answerQuestion(start, 'q1', ['a'], ada), 'q2', ['b'], ada);
     assert.equal(task.status, 'in_progress');
   });
 
   it('accepts valid radio and checkbox answers', () => {
     const radio = inputRequired(question('q1', 'radio', ['a', 'b']));
-    assert.deepEqual(answerQuestion(radio, 'q1', ['b']).questions[0]!.answer, ['b']);
+    assert.deepEqual(answerQuestion(radio, 'q1', ['b'], ada).questions[0]!.answer, ['b']);
     const checkbox = inputRequired(question('q1', 'checkbox', ['a', 'b', 'c']));
-    assert.deepEqual(answerQuestion(checkbox, 'q1', ['a', 'c']).questions[0]!.answer, ['a', 'c']);
+    assert.deepEqual(answerQuestion(checkbox, 'q1', ['a', 'c'], ada).questions[0]!.answer, ['a', 'c']);
   });
 
   it('marks an answer the input reviewer gave with its rationale', () => {
-    const task = answerQuestion(inputRequired(question('q1', 'text')), 'q1', ['yes'], { rationale: 'The spec says so.' });
+    const task = answerQuestion(inputRequired(question('q1', 'text')), 'q1', ['yes'], { reviewer: { rationale: 'The spec says so.' } });
     assert.deepEqual(task.questions[0]!.byReviewer, { rationale: 'The spec says so.' });
-    assert.equal(answerQuestion(inputRequired(question('q1', 'text')), 'q1', ['yes']).questions[0]!.byReviewer, undefined);
+    assert.equal('answeredBy' in task.questions[0]!, false);
+    assert.equal(answerQuestion(inputRequired(question('q1', 'text')), 'q1', ['yes'], ada).questions[0]!.byReviewer, undefined);
   });
 
   it('accepts a checkbox answer with zero options', () => {
-    const task = answerQuestion(inputRequired(question('q1', 'checkbox', ['a'])), 'q1', []);
+    const task = answerQuestion(inputRequired(question('q1', 'checkbox', ['a'])), 'q1', [], ada);
     assert.deepEqual(task.questions[0]!.answer, []);
     assert.equal(task.status, 'in_progress');
   });
 
   it('rejects an unknown question id', () => {
-    assert.throws(() => answerQuestion(inputRequired(question('q1', 'text')), 'nope', ['x']), rejectsWith('unknown_question'));
+    assert.throws(() => answerQuestion(inputRequired(question('q1', 'text')), 'nope', ['x'], ada), rejectsWith('unknown_question'));
   });
 
   it('rejects an already answered question', () => {
     const task = inputRequired(question('q1', 'text', [], ['a']), question('q2', 'text'));
-    assert.throws(() => answerQuestion(task, 'q1', ['b']), rejectsWith('invalid_answer'));
+    assert.throws(() => answerQuestion(task, 'q1', ['b'], ada), rejectsWith('invalid_answer'));
   });
 
   it('rejects invalid answers', () => {
@@ -559,20 +563,20 @@ describe('answerQuestion', () => {
       ['checkbox with repeated option', question('q1', 'checkbox', ['a', 'b']), ['a', 'a']],
     ];
     for (const [name, q, answer] of cases) {
-      assert.throws(() => answerQuestion(inputRequired(q), 'q1', answer), rejectsWith('invalid_answer'), name);
+      assert.throws(() => answerQuestion(inputRequired(q), 'q1', answer, ada), rejectsWith('invalid_answer'), name);
     }
   });
 
   it('rejects answering when the task is not input_required', () => {
     const task = supervised('in_progress', [question('q1', 'text')]);
-    assert.throws(() => answerQuestion(task, 'q1', ['a']), rejectsWith('invalid_transition'));
+    assert.throws(() => answerQuestion(task, 'q1', ['a'], ada), rejectsWith('invalid_transition'));
   });
 
   it('does not mutate its input or the answer array', () => {
     const task = inputRequired(question('q1', 'checkbox', ['a']));
     const before = frozen(task);
     const answer = ['a'];
-    const result = answerQuestion(task, 'q1', answer);
+    const result = answerQuestion(task, 'q1', answer, ada);
     answer.push('mutated');
     assert.deepEqual(task, before);
     assert.deepEqual(result.questions[0]!.answer, ['a']);
@@ -620,55 +624,55 @@ describe('reviewItem', () => {
     });
 
   it('approves with an optional comment and stays input_required while another item is pending', () => {
-    const task = reviewItem(awaiting(), 'd1', { verdict: 'approved', comment: ' ok ' });
-    assert.deepEqual(task.decisions[0]!.approval, { status: 'approved', comment: 'ok' });
+    const task = reviewItem(awaiting(), 'd1', { verdict: 'approved', comment: ' ok ' }, ada);
+    assert.deepEqual(task.decisions[0]!.approval, { status: 'approved', comment: 'ok', reviewedBy: 'u1' });
     assert.equal(task.status, 'input_required');
   });
 
   it('marks a review by the input reviewer with its rationale', () => {
-    const task = reviewItem(awaiting(), 'd1', { verdict: 'approved' }, { rationale: 'Matches the spec.' });
+    const task = reviewItem(awaiting(), 'd1', { verdict: 'approved' }, { reviewer: { rationale: 'Matches the spec.' } });
     assert.deepEqual(task.decisions[0]!.approval, { status: 'approved', byReviewer: { rationale: 'Matches the spec.' } });
   });
 
   it('returns to in_progress once nothing is open', () => {
-    const once = reviewItem(awaiting(), 'd1', { verdict: 'approved' });
-    const task = reviewItem(once, 'a1', { verdict: 'changes_requested', comment: 'shorter' });
-    assert.deepEqual(task.artifacts[0]!.approval, { status: 'changes_requested', comment: 'shorter' });
+    const once = reviewItem(awaiting(), 'd1', { verdict: 'approved' }, ada);
+    const task = reviewItem(once, 'a1', { verdict: 'changes_requested', comment: 'shorter' }, ada);
+    assert.deepEqual(task.artifacts[0]!.approval, { status: 'changes_requested', comment: 'shorter', reviewedBy: 'u1' });
     assert.equal(task.status, 'in_progress');
   });
 
   it('stays input_required while a question is open', () => {
-    const task = reviewItem(awaiting({ artifacts: [], questions: [question('q1', 'text')] }), 'd1', { verdict: 'approved' });
+    const task = reviewItem(awaiting({ artifacts: [], questions: [question('q1', 'text')] }), 'd1', { verdict: 'approved' }, ada);
     assert.equal(task.status, 'input_required');
   });
 
   it('stores annotations and accepts them instead of an overall comment when requesting changes', () => {
     const annotations = [{ quote: 'c', comment: 'expand this' }];
-    const task = reviewItem(awaiting(), 'a1', { verdict: 'changes_requested', annotations });
-    assert.deepEqual(task.artifacts[0]!.approval, { status: 'changes_requested', annotations });
+    const task = reviewItem(awaiting(), 'a1', { verdict: 'changes_requested', annotations }, ada);
+    assert.deepEqual(task.artifacts[0]!.approval, { status: 'changes_requested', annotations, reviewedBy: 'u1' });
     annotations[0]!.comment = 'mutated';
     assert.equal(task.artifacts[0]!.approval!.annotations![0]!.comment, 'expand this');
   });
 
   it('records an approved decision with another option as an override', () => {
     const decisions = [{ id: 'd1', createdAt: '2026-01-01T00:00:00Z', problem: 'p', options: ['x', 'y'], chosen: 0, reasoning: 'r', approval: pending }];
-    const task = reviewItem(awaiting({ decisions }), 'd1', { verdict: 'approved', chosen: 1 });
-    assert.deepEqual(task.decisions[0]!.approval, { status: 'approved', chosen: 1 });
+    const task = reviewItem(awaiting({ decisions }), 'd1', { verdict: 'approved', chosen: 1 }, ada);
+    assert.deepEqual(task.decisions[0]!.approval, { status: 'approved', chosen: 1, reviewedBy: 'u1' });
     assert.equal(task.decisions[0]!.chosen, 0);
   });
 
   it('records no override when the agent\'s own option is picked', () => {
-    const task = reviewItem(awaiting(), 'd1', { verdict: 'approved', chosen: 0 });
-    assert.deepEqual(task.decisions[0]!.approval, { status: 'approved' });
+    const task = reviewItem(awaiting(), 'd1', { verdict: 'approved', chosen: 0 }, ada);
+    assert.deepEqual(task.decisions[0]!.approval, { status: 'approved', reviewedBy: 'u1' });
   });
 
   it('rejects a pick outside the options, on an artifact or with a change request', () => {
     for (const chosen of [1, -1, 0.5]) {
-      assert.throws(() => reviewItem(awaiting(), 'd1', { verdict: 'approved', chosen }), rejectsWith('invalid_review'));
+      assert.throws(() => reviewItem(awaiting(), 'd1', { verdict: 'approved', chosen }, ada), rejectsWith('invalid_review'));
     }
-    assert.throws(() => reviewItem(awaiting(), 'a1', { verdict: 'approved', chosen: 0 }), rejectsWith('invalid_review'));
+    assert.throws(() => reviewItem(awaiting(), 'a1', { verdict: 'approved', chosen: 0 }, ada), rejectsWith('invalid_review'));
     assert.throws(
-      () => reviewItem(awaiting(), 'd1', { verdict: 'changes_requested', comment: 'no', chosen: 0 }),
+      () => reviewItem(awaiting(), 'd1', { verdict: 'changes_requested', comment: 'no', chosen: 0 }, ada),
       rejectsWith('invalid_review'),
     );
   });
@@ -676,28 +680,28 @@ describe('reviewItem', () => {
   it('requires a comment when requesting changes', () => {
     for (const comment of [undefined, '  ']) {
       assert.throws(
-        () => reviewItem(awaiting(), 'd1', { verdict: 'changes_requested', ...(comment !== undefined && { comment }) }),
+        () => reviewItem(awaiting(), 'd1', { verdict: 'changes_requested', ...(comment !== undefined && { comment }) }, ada),
         rejectsWith('invalid_review'),
       );
     }
   });
 
   it('rejects unknown, unrequested and already reviewed items', () => {
-    assert.throws(() => reviewItem(awaiting(), 'nope', { verdict: 'approved' }), rejectsWith('unknown_item'));
+    assert.throws(() => reviewItem(awaiting(), 'nope', { verdict: 'approved' }, ada), rejectsWith('unknown_item'));
     const unrequested = awaiting({ decisions: [{ id: 'd1', createdAt: '2026-01-01T00:00:00Z', problem: 'p', options: ['x'], chosen: 0, reasoning: 'r' }] });
-    assert.throws(() => reviewItem(unrequested, 'd1', { verdict: 'approved' }), rejectsWith('invalid_review'));
-    const reviewed = reviewItem(awaiting(), 'd1', { verdict: 'approved' });
-    assert.throws(() => reviewItem(reviewed, 'd1', { verdict: 'approved' }), rejectsWith('invalid_review'));
+    assert.throws(() => reviewItem(unrequested, 'd1', { verdict: 'approved' }, ada), rejectsWith('invalid_review'));
+    const reviewed = reviewItem(awaiting(), 'd1', { verdict: 'approved' }, ada);
+    assert.throws(() => reviewItem(reviewed, 'd1', { verdict: 'approved' }, ada), rejectsWith('invalid_review'));
   });
 
   it('rejects a review when the task is not input_required', () => {
-    assert.throws(() => reviewItem(awaiting({ status: 'failed' }), 'd1', { verdict: 'approved' }), rejectsWith('invalid_transition'));
+    assert.throws(() => reviewItem(awaiting({ status: 'failed' }), 'd1', { verdict: 'approved' }, ada), rejectsWith('invalid_transition'));
   });
 
   it('does not mutate its input', () => {
     const task = awaiting();
     const before = frozen(task);
-    reviewItem(task, 'd1', { verdict: 'approved' });
+    reviewItem(task, 'd1', { verdict: 'approved' }, ada);
     assert.deepEqual(task, before);
   });
 });
@@ -709,7 +713,7 @@ describe('answerQuestion with pending approvals', () => {
       questions: [question('q1', 'text')],
       artifacts: [{ id: 'a1', createdAt: '2026-01-01T00:00:00Z', title: 't', kind: 'md', content: 'c', approval: { status: 'pending' } }],
     });
-    const answered = answerQuestion(task, 'q1', ['yes']);
+    const answered = answerQuestion(task, 'q1', ['yes'], ada);
     assert.equal(answered.status, 'input_required');
     assert.equal(hasOpenInput(answered), true);
   });

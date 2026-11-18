@@ -8,7 +8,7 @@ import { ReviewTracker } from '../review-tracker.ts';
 import { createServices } from '../services.ts';
 import { Hooks } from './hooks.ts';
 import { InputReviewHook, openInputIds } from './input-review-hook.ts';
-import { sequentialItemIds } from '../test-support.ts';
+import { ada, sequentialItemIds } from '../test-support.ts';
 
 /** Each review waits until the test settles it. */
 class FakeReviewer implements Pick<Reviewer, 'reviewInput'> {
@@ -45,15 +45,15 @@ function setup({ randomItemIds = false } = {}) {
     ...(!randomItemIds && { newItemId: sequentialItemIds() }),
   });
   const projects = new ProjectService({ repository: new SqliteProjectRepository(':memory:'), newId: () => 'p1' });
-  const project = projects.create({ title: 'Billing', description: 'Invoices for customers.' });
+  const project = projects.create({ title: 'Billing', description: 'Invoices for customers.' }, ada);
   const reviewer = new FakeReviewer();
   const logged: string[] = [];
   const reviews = new ReviewTracker();
   hooks.register(new InputReviewHook({ tasks, service, projects, reviewer, reviews, log: (message) => logged.push(message) }));
   /** A supervised task whose agent works. */
   const workingTask = (): string => {
-    const { id } = service.create({ projectId: project.id, title: 'Add VAT', specification: 'Add VAT to invoices.', autonomyMode: 'supervised' });
-    service.start(id);
+    const { id } = service.create({ projectId: project.id, title: 'Add VAT', specification: 'Add VAT to invoices.', autonomyMode: 'supervised' }, ada);
+    service.start(id, ada);
     lifecycle.markInProgress(id, { tokenHash: `hash-${id}`, executionId: `c-${id}` });
     return id;
   };
@@ -80,10 +80,11 @@ test('a question the reviewer answers is answered on its behalf, with its ration
   const task = tasks.get(id);
   assert.deepEqual(task.questions[0]!.answer, ['19%']);
   assert.deepEqual(task.questions[0]!.byReviewer, { rationale: 'The standard rate.' });
+  assert.equal('answeredBy' in task.questions[0]!, false, 'the reviewer is no user');
   assert.equal(task.status, 'in_progress');
   assert.deepEqual(
-    tasks.changes(id).filter((change) => change.field === 'status').map(({ to, actor }) => `${to} by ${actor}`),
-    ['queued by user', 'in_progress by system', 'input_required by agent', 'in_progress by reviewer'],
+    tasks.changes(id).filter((change) => change.field === 'status').map(({ to, actor, userId }) => `${to} by ${userId ?? actor}`),
+    ['queued by u1', 'in_progress by system', 'input_required by agent', 'in_progress by reviewer'],
   );
   assert.equal(reviewer.requests.length, 1, 'its own answer triggers no review');
 });
@@ -115,10 +116,11 @@ test('the reviewer approves, requests changes or leaves each item; what it leave
   assert.equal(task.status, 'input_required');
   assert.deepEqual(openInputIds(task), ['q1']);
 
-  service.answer(id, 'q1', ['7%']);
+  service.answer(id, 'q1', ['7%'], ada);
   await settled();
   assert.equal(tasks.get(id).status, 'in_progress');
   assert.equal(tasks.get(id).questions[0]!.byReviewer, undefined);
+  assert.equal(tasks.get(id).questions[0]!.answeredBy, ada.userId);
   assert.equal(reviewer.requests.length, 2);
   assert.deepEqual(logged, []);
 });
@@ -149,7 +151,7 @@ test('a response about an item of an earlier run never reaches the restarted tas
   const id = workingTask();
   const earlier = ask(id).question.id;
   await tick();
-  await service.restart(id);
+  await service.restart(id, ada);
   lifecycle.markInProgress(id, { tokenHash: `hash-again-${id}`, executionId: `c-again-${id}` });
   const current = ask(id).question.id;
   assert.notEqual(current, earlier);
@@ -167,7 +169,7 @@ test('a response the engineer beat or that does not fit is logged and leaves the
   ask(id, 'Which rate?');
   ask(id, 'Which rounding?');
   await tick();
-  service.answer(id, 'q1', ['7%']);
+  service.answer(id, 'q1', ['7%'], ada);
   await reviewer.answer([
     { id: 'q1', action: 'answer', answer: ['19%'], rationale: 'The standard rate.' },
     { id: 'q2', action: 'answer', answer: ['half up'], rationale: 'Usual.' },

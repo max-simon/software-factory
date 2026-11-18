@@ -15,9 +15,11 @@ import {
   returnToDraft,
   reviewItem,
   startTask,
-  type ChangeActor,
+  type ChangeAuthor,
   type ExecutionRuntime,
   type NewTask,
+  type Principal,
+  type Responder,
   type Review,
   type ReviewerNote,
   type Task,
@@ -31,7 +33,15 @@ export interface TaskServiceDeps {
   newId?: () => string;
 }
 
-/** What the engineer does with tasks, through the web UI or the MCP server; hooks act on their behalf. */
+/** The input reviewer answering or reviewing on the engineer's behalf, with why. */
+export interface ByReviewer {
+  reviewer: ReviewerNote;
+}
+
+/**
+ * What the engineer does with tasks, through the web UI or the MCP server; hooks act on their behalf.
+ * Every change takes the `Principal` who makes it, so the task and its changelog record the user's id.
+ */
 export class TaskService {
   readonly #tasks: TaskStore;
   readonly #runtime: ExecutionRuntime;
@@ -43,29 +53,29 @@ export class TaskService {
     this.#newId = deps.newId ?? (() => randomBytes(5).toString('hex'));
   }
 
-  create(input: NewTask): Task {
+  create(input: NewTask, by: Principal): Task {
     const all = this.#tasks.list();
-    const task = createTask(input, { id: this.#newId(), now: this.#tasks.now(), rank: nextRank(all) });
+    const task = createTask(input, { id: this.#newId(), now: this.#tasks.now(), rank: nextRank(all), createdBy: by.userId });
     assertValidDependencies(task, task.dependsOn, all);
-    this.#tasks.insert(task);
+    this.#tasks.insert(task, by);
     return task;
   }
 
-  edit(id: string, edit: TaskEdit): Task {
-    return this.#tasks.update(id, 'user', (task) => editTask(task, edit, this.#tasks.list()));
+  edit(id: string, edit: TaskEdit, by: Principal): Task {
+    return this.#tasks.update(id, by, (task) => editTask(task, edit, this.#tasks.list()));
   }
 
-  start(id: string): Task {
-    return this.#tasks.update(id, 'user', startTask);
+  start(id: string, by: Principal): Task {
+    return this.#tasks.update(id, by, startTask);
   }
 
   /** `reviewer` when the spec reviewer holds the task on the engineer's behalf. */
-  requestClarification(id: string, note: string, actor: Extract<ChangeActor, 'user' | 'reviewer'> = 'user'): Task {
-    return this.#tasks.update(id, actor, (task) => requestClarification(task, note));
+  requestClarification(id: string, note: string, by: Principal | 'reviewer'): Task {
+    return this.#tasks.update(id, by, (task) => requestClarification(task, note));
   }
 
-  returnToDraft(id: string): Task {
-    return this.#tasks.update(id, 'user', returnToDraft);
+  returnToDraft(id: string, by: Principal): Task {
+    return this.#tasks.update(id, by, returnToDraft);
   }
 
   /**
@@ -73,9 +83,9 @@ export class TaskService {
    * is saved first, so the dispatcher does not report the removed server as a
    * crash and the dying runner cannot change the task.
    */
-  async cancel(id: string): Promise<Task> {
+  async cancel(id: string, by: Principal): Promise<Task> {
     const { execution } = this.#tasks.get(id);
-    const cancelled = this.#tasks.update(id, 'user', cancelTask);
+    const cancelled = this.#tasks.update(id, by, cancelTask);
     if (execution !== undefined) await this.#runtime.remove(execution.id);
     return cancelled;
   }
@@ -85,9 +95,9 @@ export class TaskService {
    * server is removed after the task is saved; if the dispatcher starts the new
    * one first, that replaces the old one by name anyway.
    */
-  async restart(id: string): Promise<Task> {
+  async restart(id: string, by: Principal): Promise<Task> {
     const { execution } = this.#tasks.get(id);
-    const restarted = this.#tasks.update(id, 'user', restartTask);
+    const restarted = this.#tasks.update(id, by, restartTask);
     if (execution !== undefined) await this.#runtime.remove(execution.id);
     return restarted;
   }
@@ -112,20 +122,20 @@ export class TaskService {
     return this.#tasks.listByProject(this.#tasks.get(id).projectId);
   }
 
-  /** `byReviewer` marks an answer the input reviewer gives on the engineer's behalf. */
-  answer(id: string, questionId: string, answer: string[], byReviewer?: ReviewerNote): Task {
-    return this.#tasks.update(id, actorOf(byReviewer), (task) => answerQuestion(task, questionId, answer, byReviewer));
+  /** `by` is the answering user, or the input reviewer answering on the engineer's behalf. */
+  answer(id: string, questionId: string, answer: string[], by: Principal | ByReviewer): Task {
+    return this.#tasks.update(id, authorOf(by), (task) => answerQuestion(task, questionId, answer, responderOf(by)));
   }
 
-  /** `byReviewer` marks a review the input reviewer gives on the engineer's behalf. */
-  review(id: string, itemId: string, review: Review, byReviewer?: ReviewerNote): Task {
-    return this.#tasks.update(id, actorOf(byReviewer), (task) => reviewItem(task, itemId, review, byReviewer));
+  /** `by` is the reviewing user, or the input reviewer reviewing on the engineer's behalf. */
+  review(id: string, itemId: string, review: Review, by: Principal | ByReviewer): Task {
+    return this.#tasks.update(id, authorOf(by), (task) => reviewItem(task, itemId, review, responderOf(by)));
   }
 
   /** Queues a message for the agent; the dispatcher notifies the execution server if it is idle. */
-  addFollowUp(id: string, message: string): Task {
-    return this.#tasks.update(id, 'user', (task) =>
-      addFollowUp(task, { id: this.#tasks.newItemId('f'), createdAt: this.#tasks.now(), message }),
+  addFollowUp(id: string, message: string, by: Principal): Task {
+    return this.#tasks.update(id, by, (task) =>
+      addFollowUp(task, { id: this.#tasks.newItemId('f'), createdAt: this.#tasks.now(), message, authorId: by.userId }),
     );
   }
 
@@ -137,4 +147,9 @@ export class TaskService {
   }
 }
 
-const actorOf = (byReviewer: ReviewerNote | undefined): ChangeActor => (byReviewer ? 'reviewer' : 'user');
+const isReviewer = (by: Principal | ByReviewer): by is ByReviewer => 'reviewer' in by;
+
+const authorOf = (by: Principal | ByReviewer): ChangeAuthor => (isReviewer(by) ? 'reviewer' : by);
+
+// Only the id goes into the task: `via` is how the user signed in, not who they are.
+const responderOf = (by: Principal | ByReviewer): Responder => (isReviewer(by) ? by : { userId: by.userId });

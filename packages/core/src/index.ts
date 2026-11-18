@@ -8,7 +8,16 @@ export { createProject, editProject, type NewProject, type Project, type Project
 export { agentConsolePort, doorbellPort } from './ports.ts';
 export { DomainError, type DomainErrorCode } from './errors.ts';
 export { assertTransition, transitions } from './status.ts';
-export { taskChanges, type ChangeActor, type TaskChange } from './changelog.ts';
+export {
+  changeMeta,
+  projectChanges,
+  taskChanges,
+  type ChangeActor,
+  type ChangeAuthor,
+  type ChangeMeta,
+  type ProjectChange,
+  type TaskChange,
+} from './changelog.ts';
 export {
   parseInputReview,
   parsePrReview,

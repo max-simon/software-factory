@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import type { PullRequest, PullRequestReview, Task, TaskEvent } from '@factory/core';
 import { SqliteTaskRepository } from '../adapters/sqlite-task-repository.ts';
 import { createServices } from '../services.ts';
-import { sequentialItemIds } from '../test-support.ts';
+import { ada, sequentialItemIds } from '../test-support.ts';
 import { addressReviewSkill, PullRequestReviewedHook, reviewFollowUp } from './pull-request-reviewed-hook.ts';
 
 const url = 'https://github.com/o/r/pull/1';
@@ -27,8 +27,8 @@ function setup() {
     newItemId: sequentialItemIds(),
   });
   const { service, agent, lifecycle } = services;
-  service.create({ projectId: 'p1', title: 'task', specification: 'spec', repoUrl: 'https://github.com/o/r' });
-  service.start('t1');
+  service.create({ projectId: 'p1', title: 'task', specification: 'spec', repoUrl: 'https://github.com/o/r' }, ada);
+  service.start('t1', ada);
   lifecycle.markInProgress('t1', { tokenHash: 'hash', executionId: 'c1' });
   agent.addPullRequest('t1', { url, title: 'PR' });
   agent.markReady('t1');

@@ -9,6 +9,7 @@ import {
   markFailed,
   markInProgress,
   markReady,
+  renameUser,
   startTask,
   type ExecutionRuntime,
   type NewQuestion,
@@ -16,13 +17,14 @@ import {
   type TaskAgent,
 } from '@factory/core';
 import { SqliteProjectRepository } from '../adapters/sqlite-project-repository.ts';
+import type { SqliteUserRepository } from '../adapters/sqlite-user-repository.ts';
 import { SqliteTaskRepository } from '../adapters/sqlite-task-repository.ts';
 import { ProjectService } from '../project-service.ts';
 import { ReviewTracker } from '../review-tracker.ts';
 import { createServices } from '../services.ts';
 import { engineerRoutes } from './engineer-routes.ts';
 import { createServer } from './server.ts';
-import { sequentialItemIds, testAuth } from '../test-support.ts';
+import { ada, sequentialItemIds, testAuth } from '../test-support.ts';
 
 const validTask = {
   projectId: 'p1',
@@ -48,9 +50,12 @@ interface Api {
   repository: SqliteTaskRepository;
   runtime: FakeRuntime;
   base: string;
-  /** A `Cookie` header of a signed-in user; `call` sends it. */
+  /** A `Cookie` header of the signed-in user `ada`; `call` sends it unless given another. */
   cookie: string;
-  call: (method: string, path: string, body?: unknown) => Promise<{ status: number; json: any }>;
+  /** A `Cookie` header of the signed-in user `bob`. */
+  bobCookie: string;
+  users: SqliteUserRepository;
+  call: (method: string, path: string, body?: unknown, cookie?: string) => Promise<{ status: number; json: any }>;
 }
 
 /** `unavailableAgent` defaults to every agent being available. */
@@ -71,23 +76,23 @@ async function startApi(t: TestContext, unavailableAgent?: (agent: TaskAgent) =>
     newId: () => `p${++projectCounter}`,
     now: () => fixedNow,
   });
-  projects.create({ title: 'Login', description: 'Sign-in for the app' });
-  const { authenticate, cookie } = testAuth();
+  projects.create({ title: 'Login', description: 'Sign-in for the app' }, ada);
+  const { authenticate, cookie, bobCookie, users } = testAuth();
   const server = createServer(engineerRoutes(tasks, service, projects, unavailableAgent, reviews), { authenticate }).listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', resolve));
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
-  const call: Api['call'] = async (method, path, body) => {
+  const call: Api['call'] = async (method, path, body, as = cookie) => {
     const response = await fetch(base + path, {
       method,
-      headers: { cookie },
+      headers: { cookie: as },
       ...(body !== undefined && { body: typeof body === 'string' ? body : JSON.stringify(body) }),
     });
     const text = await response.text();
     return { status: response.status, json: text ? JSON.parse(text) : undefined };
   };
-  return { repository, runtime, base, cookie, call };
+  return { repository, runtime, base, cookie, bobCookie, users, call };
 }
 
 const supervisedTask = { ...validTask, autonomyMode: 'supervised' };
@@ -201,7 +206,7 @@ test('projects are created, listed, shown and edited', async (t) => {
   const { call } = await startApi(t);
   const created = await call('POST', '/projects', { title: 'Billing' });
   assert.equal(created.status, 201);
-  assert.deepEqual(created.json, { id: 'p2', createdAt: fixedNow, updatedAt: fixedNow, title: 'Billing', description: '', autoMerge: false });
+  assert.deepEqual(created.json, { id: 'p2', createdAt: fixedNow, createdBy: 'u1', updatedAt: fixedNow, title: 'Billing', description: '', autoMerge: false });
   assert.deepEqual((await call('GET', '/projects')).json.map((p: { id: string }) => p.id), ['p1', 'p2']);
   assert.equal((await call('GET', '/projects/p1')).json.description, 'Sign-in for the app');
   const edited = await call('PATCH', '/projects/p1', { description: '', autoMerge: true });
@@ -424,7 +429,7 @@ test('follow-up on a running task is stored with id and time and keeps it in pro
   const first = await api.call('POST', '/tasks/task-1/follow-ups', { message: ' Also handle logout ' });
   assert.equal(first.status, 200);
   assert.equal(first.json.status, 'in_progress');
-  assert.deepEqual(first.json.followUps, [{ id: 'f1', createdAt: fixedNow, message: 'Also handle logout' }]);
+  assert.deepEqual(first.json.followUps, [{ id: 'f1', createdAt: fixedNow, message: 'Also handle logout', authorId: 'u1' }]);
   assert.equal('tokenHash' in first.json, false);
   const second = await api.call('POST', '/tasks/task-1/follow-ups', { message: 'And remember me' });
   assert.deepEqual(second.json.followUps.map((f: { id: string }) => f.id), ['f1', 'f2']);
@@ -667,11 +672,11 @@ test('a draft is held for clarification, edited, and queued, and the changelog r
   const { status, json } = await call('GET', '/tasks/task-1/changes');
   assert.equal(status, 200);
   assert.deepEqual(json, [
-    { at: fixedNow, actor: 'user', field: 'created' },
-    { at: fixedNow, actor: 'user', field: 'status', from: 'draft', to: 'clarification_required' },
-    { at: fixedNow, actor: 'user', field: 'specification', from: validTask.specification, to: 'Use GitHub' },
-    { at: fixedNow, actor: 'user', field: 'labels', from: [], to: ['auth'] },
-    { at: fixedNow, actor: 'user', field: 'status', from: 'clarification_required', to: 'queued' },
+    { at: fixedNow, actor: 'user', userId: 'u1', field: 'created' },
+    { at: fixedNow, actor: 'user', userId: 'u1', field: 'status', from: 'draft', to: 'clarification_required' },
+    { at: fixedNow, actor: 'user', userId: 'u1', field: 'specification', from: validTask.specification, to: 'Use GitHub' },
+    { at: fixedNow, actor: 'user', userId: 'u1', field: 'labels', from: [], to: ['auth'] },
+    { at: fixedNow, actor: 'user', userId: 'u1', field: 'status', from: 'clarification_required', to: 'queued' },
   ]);
 });
 
@@ -718,4 +723,82 @@ test('task views show no review running when the routes get no tracker', async (
   const { json } = await call('POST', '/tasks', validTask);
   assert.equal(json.isSpecUnderReview, false);
   assert.equal(json.isInputUnderReview, false);
+});
+
+/** ada (u1) and bob (u2) both work on project p1 and task-1, which awaits an answer to q1 and an approval of d1. */
+async function workTogether(api: Api): Promise<void> {
+  const { call, bobCookie } = api;
+  await call('PATCH', '/projects/p1', { title: 'Sign-in', autoMerge: true }, bobCookie);
+  await call('PATCH', '/projects/p1', { title: 'Sign-in', description: 'Login and logout' });
+  await call('POST', '/tasks', supervisedTask);
+  await call('PATCH', '/tasks/task-1', { title: 'Add sign-in' }, bobCookie);
+  await call('POST', '/tasks/task-1/start');
+  const queued = api.repository.get('task-1')!;
+  const running = markInProgress(queued, { tokenHash: 'h', executionId: 'c-1' }, '2026-01-01T00:00:00.000Z');
+  const decision = { id: 'd1', createdAt: '2026-01-01T00:00:00Z', problem: 'p', options: ['x'], chosen: 0, reasoning: 'r', requestApproval: true };
+  api.repository.save(addDecision(askQuestion(running, radio), decision));
+  await call('POST', '/tasks/task-1/questions/q1/answer', { answer: ['a'] }, bobCookie);
+  await call('POST', '/tasks/task-1/items/d1/review', { verdict: 'approved' });
+  await call('POST', '/tasks/task-1/follow-ups', { message: 'Use OAuth' }, bobCookie);
+  await call('POST', '/tasks/task-1/follow-ups', { message: 'Add logout' });
+}
+
+test('changes, answers, approvals and follow-ups record the id of the user who made them', async (t) => {
+  const api = await startApi(t);
+  await workTogether(api);
+  const { call } = api;
+
+  const project = await call('GET', '/projects/p1');
+  assert.equal(project.json.createdBy, 'u1');
+  const projectChanges = await call('GET', '/projects/p1/changes');
+  assert.equal(projectChanges.status, 200);
+  assert.deepEqual(projectChanges.json, [
+    { at: fixedNow, actor: 'user', userId: 'u1', field: 'created' },
+    { at: fixedNow, actor: 'user', userId: 'u2', field: 'title', from: 'Login', to: 'Sign-in' },
+    { at: fixedNow, actor: 'user', userId: 'u2', field: 'autoMerge', from: false, to: true },
+    { at: fixedNow, actor: 'user', userId: 'u1', field: 'description', from: 'Sign-in for the app', to: 'Login and logout' },
+  ]);
+  assert.equal((await call('GET', '/projects/missing/changes')).status, 404);
+
+  const { json: task } = await call('GET', '/tasks/task-1');
+  assert.equal(task.createdBy, 'u1');
+  assert.equal(task.questions[0].answeredBy, 'u2');
+  assert.equal(task.decisions[0].approval.reviewedBy, 'u1');
+  assert.deepEqual(
+    task.followUps.map((f: { message: string; authorId: string }) => [f.message, f.authorId]),
+    [['Use OAuth', 'u2'], ['Add logout', 'u1']],
+  );
+  const taskChanges = await call('GET', '/tasks/task-1/changes');
+  assert.deepEqual(
+    taskChanges.json.map((c: { field: string; userId?: string; to?: unknown }) => [c.field, c.to, c.userId]),
+    [
+      ['created', undefined, 'u1'],
+      ['title', 'Add sign-in', 'u2'],
+      ['status', 'queued', 'u1'],
+      // The answer leaves d1 open; ada's approval settles the input.
+      ['status', 'in_progress', 'u1'],
+    ],
+  );
+});
+
+test('renaming a user changes no task, project or changelog: they hold the id only', async (t) => {
+  const api = await startApi(t);
+  await workTogether(api);
+  const snapshot = async () =>
+    Promise.all(['/tasks', '/tasks/task-1/changes', '/projects', '/projects/p1/changes'].map(async (path) => (await api.call('GET', path)).json));
+  const before = await snapshot();
+  assert.doesNotMatch(JSON.stringify(before), /ada|bob/);
+
+  // What `yarn user rename bob Robert` does.
+  api.users.update({ ...renameUser(api.users.get('u2')!, 'Robert'), updatedAt: '2026-11-13T10:00:00.000Z' });
+  assert.equal(api.users.get('u2')!.displayName, 'Robert');
+  assert.deepEqual(await snapshot(), before);
+});
+
+test('an engineer route reached without a principal fails instead of recording no user', () => {
+  const projects = new ProjectService({ repository: new SqliteProjectRepository(':memory:') });
+  const create = engineerRoutes({} as never, {} as never, projects).find((r) => r.method === 'POST' && r.path === '/projects')!;
+  const request = { params: {}, headers: {}, body: { title: 'Billing' }, clientAddress: '127.0.0.1', secure: false };
+  assert.throws(() => create.handle(request), /without a principal/);
+  assert.deepEqual(projects.list(), []);
 });

@@ -4,7 +4,7 @@ import type { NewTask, PullRequest, PullRequestReader, PullRequestReview, TaskEv
 import { SqliteTaskRepository } from './adapters/sqlite-task-repository.ts';
 import { PullRequestObserver } from './pull-request-observer.ts';
 import { createServices } from './services.ts';
-import { sequentialItemIds } from './test-support.ts';
+import { ada, sequentialItemIds } from './test-support.ts';
 
 class FakePullRequests implements PullRequestReader {
   /** What GitHub answers per URL; a string is thrown as an error. */
@@ -64,8 +64,8 @@ const review: PullRequestReview = {
 
 /** A task in progress with the given pull requests reported; `ready` once the agent reported it ready. */
 function withPullRequests(f: Fixture, pullRequests: PullRequest[], isReady = false): string {
-  const { id } = f.service.create(newTask);
-  f.service.start(id);
+  const { id } = f.service.create(newTask, ada);
+  f.service.start(id, ada);
   f.lifecycle.markInProgress(id, { tokenHash: `hash-${id}`, executionId: `c-${id}` });
   for (const pr of pullRequests) f.agent.addPullRequest(id, { url: pr.url, title: pr.title });
   if (isReady) f.agent.markReady(id);

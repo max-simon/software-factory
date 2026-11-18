@@ -37,12 +37,14 @@ const schema = `
     activity TEXT
   );
   -- Append-only; values are JSON, absent for a creation. Tasks stored before
-  -- the changelog existed have entries from their next change on.
+  -- the changelog existed have entries from their next change on. user_id
+  -- is set for changes by a user, except those stored before users existed.
   CREATE TABLE IF NOT EXISTS task_changes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     task_id TEXT NOT NULL,
     at TEXT NOT NULL,
     actor TEXT NOT NULL,
+    user_id TEXT,
     field TEXT NOT NULL,
     from_value TEXT,
     to_value TEXT
@@ -70,6 +72,7 @@ export class SqliteTaskRepository implements TaskRepository {
     // file, so it covers the project repository's connection too.
     this.#db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;');
     this.#db.exec(schema);
+    this.#addChangeUserIds();
     this.#rankUnrankedTasks();
   }
 
@@ -111,7 +114,7 @@ export class SqliteTaskRepository implements TaskRepository {
 
   listChanges(id: string): TaskChange[] {
     const rows = this.#db
-      .prepare('SELECT at, actor, field, from_value, to_value FROM task_changes WHERE task_id = ? ORDER BY id')
+      .prepare('SELECT at, actor, user_id, field, from_value, to_value FROM task_changes WHERE task_id = ? ORDER BY id')
       .all(id) as unknown as ChangeRow[];
     return rows.map(toChange);
   }
@@ -136,6 +139,13 @@ export class SqliteTaskRepository implements TaskRepository {
     this.#db.close();
   }
 
+  /** Databases created before changes recorded their user lack the column; their rows read without one. */
+  #addChangeUserIds(): void {
+    const columns = this.#db.prepare('PRAGMA table_info(task_changes)').all() as unknown as Array<{ name: string }>;
+    if (columns.some((column) => column.name === 'user_id')) return;
+    this.#db.exec('ALTER TABLE task_changes ADD COLUMN user_id TEXT');
+  }
+
   /** Tasks stored before ranks existed go below the ranked ones, oldest first. */
   #rankUnrankedTasks(): void {
     const unranked = this.#db
@@ -153,11 +163,11 @@ export class SqliteTaskRepository implements TaskRepository {
 
   #appendChanges(id: string, changes: readonly TaskChange[]): void {
     const append = this.#db.prepare(
-      'INSERT INTO task_changes (task_id, at, actor, field, from_value, to_value) VALUES (?, ?, ?, ?, ?, ?)',
+      'INSERT INTO task_changes (task_id, at, actor, user_id, field, from_value, to_value) VALUES (?, ?, ?, ?, ?, ?, ?)',
     );
     for (const change of changes) {
       const values = 'from' in change ? [JSON.stringify(change.from), JSON.stringify(change.to)] : [null, null];
-      append.run(id, change.at, change.actor, change.field, ...values);
+      append.run(id, change.at, change.actor, change.userId ?? null, change.field, ...values);
     }
   }
 
@@ -195,16 +205,21 @@ export class SqliteTaskRepository implements TaskRepository {
 interface ChangeRow {
   at: string;
   actor: ChangeActor;
+  user_id: string | null;
   field: TaskChange['field'];
   from_value: string | null;
   to_value: string | null;
 }
 
 // The writer pairs each field with values of its type, so the cast only restores what it stored.
-const toChange = ({ at, actor, field, from_value, to_value }: ChangeRow): TaskChange =>
-  (from_value === null || to_value === null
-    ? { at, actor, field }
-    : { at, actor, field, from: JSON.parse(from_value), to: JSON.parse(to_value) }) as TaskChange;
+const toChange = ({ at, actor, user_id, field, from_value, to_value }: ChangeRow): TaskChange => {
+  const meta = { at, actor, ...(user_id !== null && { userId: user_id }) };
+  return (
+    from_value === null || to_value === null
+      ? { ...meta, field }
+      : { ...meta, field, from: JSON.parse(from_value), to: JSON.parse(to_value) }
+  ) as TaskChange;
+};
 
 type StoredPullRequest = Omit<PullRequest, 'status'> & Partial<Pick<PullRequest, 'status'>>;
 type StoredDecision = Omit<Decision, 'chosen'> & { chosen?: number | string };

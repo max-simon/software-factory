@@ -1,5 +1,16 @@
 import { randomBytes } from 'node:crypto';
-import { createProject, editProject, type NewProject, type Project, type ProjectEdit, type ProjectRepository } from '@factory/core';
+import {
+  changeMeta,
+  createProject,
+  editProject,
+  projectChanges,
+  type NewProject,
+  type Principal,
+  type Project,
+  type ProjectChange,
+  type ProjectEdit,
+  type ProjectRepository,
+} from '@factory/core';
 import { NotFoundError } from './task-store.ts';
 
 export interface ProjectServiceDeps {
@@ -8,6 +19,7 @@ export interface ProjectServiceDeps {
   now?: () => string;
 }
 
+/** What the engineer does with projects; every change records the id of the user who made it. */
 export class ProjectService {
   readonly #repository: ProjectRepository;
   readonly #newId: () => string;
@@ -19,9 +31,9 @@ export class ProjectService {
     this.#now = deps.now ?? (() => new Date().toISOString());
   }
 
-  create(input: NewProject): Project {
-    const project = createProject(input, { id: this.#newId(), now: this.#now() });
-    this.#repository.insert(project);
+  create(input: NewProject, by: Principal): Project {
+    const project = createProject(input, { id: this.#newId(), now: this.#now(), createdBy: by.userId });
+    this.#repository.insert(project, [{ ...changeMeta(project.createdAt, by), field: 'created' }]);
     return project;
   }
 
@@ -35,9 +47,17 @@ export class ProjectService {
     return project;
   }
 
-  edit(id: string, edit: ProjectEdit): Project {
-    const next = { ...editProject(this.get(id), edit), updatedAt: this.#now() };
-    this.#repository.save(next);
+  edit(id: string, edit: ProjectEdit, by: Principal): Project {
+    const current = this.get(id);
+    const now = this.#now();
+    const next = { ...editProject(current, edit), updatedAt: now };
+    this.#repository.save(next, projectChanges(current, next, changeMeta(now, by)));
     return next;
+  }
+
+  /** Who changed title, description or auto-merge of a project, and when; oldest first. */
+  changes(id: string): ProjectChange[] {
+    this.get(id);
+    return this.#repository.listChanges(id);
   }
 }

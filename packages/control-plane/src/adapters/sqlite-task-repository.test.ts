@@ -259,15 +259,15 @@ test('refuses to save a task that was never inserted', () => {
 test('appends changes with the task, lists them oldest first, and deletes them with it', () => {
   const repo = repository();
   const at = '2026-11-13T10:00:00.000Z';
-  repo.insert(draft('a'), [{ at, actor: 'user', field: 'created' }]);
-  repo.insert(draft('b'), [{ at, actor: 'user', field: 'created' }]);
+  repo.insert(draft('a'), [{ at, actor: 'user', userId: 'u1', field: 'created' }]);
+  repo.insert(draft('b'), [{ at, actor: 'user', userId: 'u1', field: 'created' }]);
   repo.save({ ...startTask(draft('a')), labels: ['x'] }, [
-    { at, actor: 'user', field: 'labels', from: [], to: ['x'] },
+    { at, actor: 'user', userId: 'u2', field: 'labels', from: [], to: ['x'] },
     { at, actor: 'agent', field: 'status', from: 'draft', to: 'queued' },
   ]);
   assert.deepEqual(repo.listChanges('a'), [
-    { at, actor: 'user', field: 'created' },
-    { at, actor: 'user', field: 'labels', from: [], to: ['x'] },
+    { at, actor: 'user', userId: 'u1', field: 'created' },
+    { at, actor: 'user', userId: 'u2', field: 'labels', from: [], to: ['x'] },
     { at, actor: 'agent', field: 'status', from: 'draft', to: 'queued' },
   ]);
   repo.delete('a');
@@ -280,4 +280,29 @@ test('appends no changes when saving an unknown task', () => {
   const change = { at: '2026-11-13T10:00:00.000Z', actor: 'user', field: 'created' } as const;
   assert.throws(() => repo.save(draft('ghost'), [change]));
   assert.deepEqual(repo.listChanges('ghost'), []);
+});
+
+test('adds the user column to a changelog created before changes recorded their user; old rows read without one', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'repo-'));
+  t.after(() => rmSync(dir, { recursive: true }));
+  const path = join(dir, 'tasks.db');
+  const at = '2026-11-13T10:00:00.000Z';
+  const old = new DatabaseSync(path);
+  old.exec(`CREATE TABLE task_changes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, at TEXT NOT NULL, actor TEXT NOT NULL,
+    field TEXT NOT NULL, from_value TEXT, to_value TEXT
+  )`);
+  old.prepare("INSERT INTO task_changes (task_id, at, actor, field) VALUES ('a', ?, 'user', 'created')").run(at);
+  old.close();
+
+  const repo = new SqliteTaskRepository(path);
+  repo.insert(draft('a'));
+  repo.save(startTask(draft('a')), [{ at, actor: 'user', userId: 'u1', field: 'status', from: 'draft', to: 'queued' }]);
+  assert.deepEqual(repo.listChanges('a'), [
+    { at, actor: 'user', field: 'created' },
+    { at, actor: 'user', userId: 'u1', field: 'status', from: 'draft', to: 'queued' },
+  ]);
+  repo.close();
+  // Opening the migrated database again leaves it as it is.
+  assert.equal(new SqliteTaskRepository(path).listChanges('a').length, 2);
 });
