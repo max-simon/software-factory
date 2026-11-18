@@ -30,7 +30,8 @@ export interface ApiClient {
   deleteTask: (id: string) => Promise<void>;
 }
 
-export function createApiClient(baseUrl: string): ApiClient {
+/** `headers` go on every request, e.g. the credentials of the caller the client acts for. */
+export function createApiClient(baseUrl: string, headers: Record<string, string> = {}): ApiClient {
   const base = baseUrl.replace(/\/+$/, '');
 
   async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -44,7 +45,8 @@ export function createApiClient(baseUrl: string): ApiClient {
     try {
       return await fetch(base + path, {
         method,
-        ...(body !== undefined && { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+        headers: body === undefined ? headers : { ...headers, 'content-type': 'application/json' },
+        ...(body !== undefined && { body: JSON.stringify(body) }),
       });
     } catch (error) {
       throw new ConnectionError(`cannot reach the control plane at ${base}: ${describeCause(error)}`);

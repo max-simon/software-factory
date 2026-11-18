@@ -4,8 +4,14 @@ import { ConfigError, loadConfig, unavailableAgent } from './config.ts';
 import { GitHubPullRequests } from './adapters/github-pull-requests.ts';
 import { PodmanRuntime } from './adapters/podman-runtime.ts';
 import { PodmanReviewer } from './adapters/podman-reviewer.ts';
+import { SqliteSessionRepository } from './adapters/sqlite-session-repository.ts';
 import { SqliteProjectRepository } from './adapters/sqlite-project-repository.ts';
 import { SqliteTaskRepository } from './adapters/sqlite-task-repository.ts';
+import { SqliteUserRepository } from './adapters/sqlite-user-repository.ts';
+import { LocalPasswordAuthenticator } from './auth/local-password-authenticator.ts';
+import { LoginThrottle } from './auth/login-throttle.ts';
+import { ScryptPasswordHasher } from './auth/passwords.ts';
+import { SessionService } from './auth/session-service.ts';
 import { Dispatcher } from './dispatcher.ts';
 import { Hooks } from './hooks/hooks.ts';
 import { InputReviewHook } from './hooks/input-review-hook.ts';
@@ -13,8 +19,10 @@ import { PrReviewHook } from './hooks/pr-review-hook.ts';
 import { PullRequestReviewedHook } from './hooks/pull-request-reviewed-hook.ts';
 import { SpecReviewHook } from './hooks/spec-review-hook.ts';
 import { agentRoutes } from './http/agent-routes.ts';
+import { authRoutes } from './http/auth-routes.ts';
 import { engineerRoutes } from './http/engineer-routes.ts';
 import { createServer, mcpPath } from './http/server.ts';
+import { readSessionToken } from './http/session-cookie.ts';
 import { staticFiles } from './http/static-files.ts';
 import { PauseWatch } from './pause-watch.ts';
 import { ProjectService } from './project-service.ts';
@@ -22,7 +30,7 @@ import { PullRequestObserver, pullRequestPollIntervalMs } from './pull-request-o
 import { ReviewTracker } from './review-tracker.ts';
 import { createServices } from './services.ts';
 
-// The engineer API has no authentication, so it must not leave this machine.
+// Engineers sign in, but the API is not hardened for other machines yet (plain HTTP, no TLS), so it stays on loopback.
 const host = '127.0.0.1';
 const reconcileIntervalMs = 2000;
 const pauseCheckIntervalMs = 1000;
@@ -64,14 +72,29 @@ function main(): void {
   hooks.register(new InputReviewHook({ tasks, service, projects, reviewer, reviews }));
   hooks.register(new PrReviewHook({ tasks, pullRequests, reviewer, projects, reviews }));
   hooks.register(new PullRequestReviewedHook({ lifecycle }));
+  const users = new SqliteUserRepository(config.dbPath);
+  const sessions = new SessionService({
+    sessions: new SqliteSessionRepository(config.dbPath),
+    users,
+    idleTimeoutMs: config.sessionIdleHours * 3_600_000,
+    maxLifetimeMs: config.sessionMaxDays * 86_400_000,
+  });
   const routes = [
+    ...authRoutes({
+      authenticator: new LocalPasswordAuthenticator({ users, passwords: users, hasher: new ScryptPasswordHasher() }),
+      sessions,
+      users,
+      throttle: new LoginThrottle(),
+    }),
     ...engineerRoutes(tasks, service, projects, (agent) => unavailableAgent(config.agentCredentials, agent), reviews),
     ...agentRoutes(tasks, agent, projects),
   ];
   const server = createServer(routes, {
+    authenticate: (headers) => sessions.resolve(readSessionToken(headers)),
     staticFiles: staticFiles(webDist),
-    // The MCP tools go through the engineer API over loopback, so they get its validation and error mapping.
-    mcp: createMcpHandler(createApiClient(`http://${host}:${config.port}`)),
+    // The MCP tools go through the engineer API over loopback, so they get its validation and error mapping;
+    // each request's client passes on the caller's session cookie, so the API sees the same user.
+    mcp: createMcpHandler((headers) => createApiClient(`http://${host}:${config.port}`, headers)),
   });
   // Checked on a timer of its own: a host may sleep in the middle of a dispatcher pass.
   const pauseWatch = new PauseWatch();

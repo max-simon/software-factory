@@ -10,7 +10,7 @@ import { createServices } from '../services.ts';
 import { agentRoutes } from './agent-routes.ts';
 import { engineerRoutes } from './engineer-routes.ts';
 import { createServer } from './server.ts';
-import { sequentialItemIds } from '../test-support.ts';
+import { sequentialItemIds, testAuth } from '../test-support.ts';
 
 const token = 'ab'.repeat(32);
 const otherToken = 'cd'.repeat(32);
@@ -35,7 +35,8 @@ class FakeRuntime implements ExecutionRuntime {
 type Call = (
   method: string,
   path: string,
-  options?: { body?: unknown; authorization?: string | null },
+  /** `cookie` defaults to a signed-in engineer's outside `/agent/*` and to none on agent routes. */
+  options?: { body?: unknown; authorization?: string | null; cookie?: string | null },
 ) => Promise<{ status: number; json: any }>;
 
 /** Starts the full server with one running task whose agent token is `token`. */
@@ -60,15 +61,18 @@ async function startApi(t: TestContext, input: NewTask = supervisedTask, now = (
   const projects = new ProjectService({ repository: new SqliteProjectRepository(':memory:'), newId: () => `p${++projectCounter}` });
   projects.create({ title: 'Checkout', description: 'Everything about checkout' });
   projects.create({ title: 'Other' });
-  const server = createServer([...engineerRoutes(tasks, service, projects), ...agentRoutes(tasks, agent, projects)]).listen(0, '127.0.0.1');
+  const auth = testAuth();
+  const server = createServer([...engineerRoutes(tasks, service, projects), ...agentRoutes(tasks, agent, projects)], {
+    authenticate: auth.authenticate,
+  }).listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', resolve));
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
-  return async (method, path, { body, authorization = `Bearer ${token}` } = {}) => {
+  return async (method, path, { body, authorization = `Bearer ${token}`, cookie = path.startsWith('/agent/') ? null : auth.cookie } = {}) => {
     const response = await fetch(base + path, {
       method,
-      headers: authorization === null ? {} : { authorization },
+      headers: { ...(authorization !== null && { authorization }), ...(cookie !== null && { cookie }) },
       ...(body !== undefined && { body: typeof body === 'string' ? body : JSON.stringify(body) }),
     });
     const text = await response.text();
@@ -518,4 +522,15 @@ test('changes the agent makes are logged as the agent', async (t) => {
   await call('POST', '/agent/ready');
   const { json } = await call('GET', '/tasks/task-1/changes', { authorization: null });
   assert.deepEqual(json.at(-1), { at: fixedNow, actor: 'agent', field: 'status', from: 'in_progress', to: 'ready' });
+});
+
+test('agent routes need no session, and a session is no agent token', async (t) => {
+  const call = await startApi(t);
+  assert.equal((await call('GET', '/agent/task', { cookie: null })).status, 200);
+  assert.equal((await call('GET', '/agent/nope', { cookie: null })).status, 404);
+  const engineerCookie = await call('GET', '/tasks/task-1');
+  assert.equal(engineerCookie.status, 200);
+  const withoutToken = await call('GET', '/agent/task', { authorization: null, cookie: 'factory_session=x' });
+  assert.equal(withoutToken.status, 401);
+  assert.equal((await call('GET', '/tasks/task-1', { cookie: null })).status, 401);
 });

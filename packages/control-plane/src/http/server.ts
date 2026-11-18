@@ -4,8 +4,10 @@ import {
   type IncomingMessage,
   type RequestListener,
   type Server,
+  type ServerResponse,
 } from 'node:http';
-import { DomainError, type DomainErrorCode } from '@factory/core';
+import type { TLSSocket } from 'node:tls';
+import { DomainError, type DomainErrorCode, type Principal } from '@factory/core';
 import { NotFoundError } from '../task-store.ts';
 import { isLocalRequest } from './browser-guard.ts';
 import type { StaticFile, StaticFiles } from './static-files.ts';
@@ -19,17 +21,26 @@ export interface Request {
   params: Record<string, string>;
   headers: IncomingHttpHeaders;
   body: unknown;
+  /** Who signed in; set on every route outside `/agent/*` that is not public. */
+  principal?: Principal;
+  /** The socket's remote address. */
+  clientAddress: string;
+  /** Whether the request came over TLS. */
+  secure: boolean;
 }
 
 export interface Response {
   status: number;
   body?: unknown;
+  headers?: Record<string, string>;
 }
 
 export interface Route {
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   /** Path with `:name` segments, e.g. `/tasks/:id`. */
   path: string;
+  /** Reachable without a session, like the login. Routes under `/agent/` never need one: they check agent tokens. */
+  public?: boolean;
   handle: (request: Request) => Response | Promise<Response>;
 }
 
@@ -64,31 +75,35 @@ const domainStatus: Record<DomainErrorCode, number> = {
 };
 
 export interface ServerOptions {
-  /** Serves the web UI for GET requests that match no route. */
+  /**
+   * Resolves the session a request carries. Every route outside `/agent/*`
+   * that is not public needs one, and so does `mcpPath`.
+   */
+  authenticate: (headers: IncomingHttpHeaders) => Principal | undefined;
+  /** Serves the web UI for GET requests that match no route, signed in or not. */
   staticFiles?: StaticFiles;
-  /** Handles every request to `mcpPath` from this machine. */
+  /** Handles every signed-in request to `mcpPath` from this machine. */
   mcp?: RequestListener;
 }
 
 export const mcpPath = '/mcp';
 
-export function createServer(routes: readonly Route[], options: ServerOptions = {}): Server {
+export function createServer(routes: readonly Route[], options: ServerOptions): Server {
   return createHttpServer((req, res) => {
     // The MCP transport reads the body and writes the response itself, so it
     // bypasses the JSON routes; non-local requests still get the 403 below.
     const path = URL.parse(req.url ?? '/', 'http://localhost')?.pathname;
-    if (options.mcp && path === mcpPath && isLocalRequest(req.headers)) return options.mcp(req, res);
+    if (options.mcp && path === mcpPath && isLocalRequest(req.headers)) {
+      let principal;
+      try {
+        principal = options.authenticate(req.headers);
+      } catch (error) {
+        return send(res, toFailure(error));
+      }
+      return principal ? options.mcp(req, res) : send(res, unauthorized());
+    }
     dispatch(routes, options, req)
-      .then((reply) => {
-        if ('content' in reply) {
-          res.writeHead(200, { 'content-type': reply.contentType, 'x-content-type-options': 'nosniff' });
-          res.end(reply.content);
-          return;
-        }
-        const { status, body } = reply;
-        res.writeHead(status, body === undefined ? {} : { 'content-type': 'application/json' });
-        res.end(body === undefined ? undefined : JSON.stringify(body));
-      })
+      .then((reply) => send(res, reply))
       .catch((error: unknown) => {
         console.error(error);
         res.destroy();
@@ -96,19 +111,47 @@ export function createServer(routes: readonly Route[], options: ServerOptions = 
   });
 }
 
+function send(res: ServerResponse, reply: Response | StaticFile): void {
+  if ('content' in reply) {
+    res.writeHead(200, { 'content-type': reply.contentType, 'x-content-type-options': 'nosniff' });
+    res.end(reply.content);
+    return;
+  }
+  const { status, body, headers = {} } = reply;
+  res.writeHead(status, body === undefined ? headers : { ...headers, 'content-type': 'application/json' });
+  res.end(body === undefined ? undefined : JSON.stringify(body));
+}
+
 async function dispatch(routes: readonly Route[], options: ServerOptions, req: IncomingMessage): Promise<Response | StaticFile> {
   try {
     const path = new URL(req.url ?? '/', 'http://localhost').pathname;
     // Agent routes authenticate by token and are called from execution servers under another host name.
-    if (!path.startsWith('/agent/') && !isLocalRequest(req.headers)) {
+    const isAgentPath = path.startsWith('/agent/');
+    if (!isAgentPath && !isLocalRequest(req.headers)) {
       return failure(403, 'forbidden', 'the engineer API accepts only requests from this machine');
     }
     for (const route of routes) {
       const params = route.method === req.method ? matchPath(route.path, path) : undefined;
-      if (params) return await route.handle({ params, headers: req.headers, body: await readJson(req) });
+      if (!params) continue;
+      let principal: Principal | undefined;
+      if (!isAgentPath && !route.public) {
+        principal = options.authenticate(req.headers);
+        if (!principal) return unauthorized();
+      }
+      return await route.handle({
+        params,
+        headers: req.headers,
+        body: await readJson(req),
+        ...(principal && { principal }),
+        clientAddress: req.socket.remoteAddress ?? '',
+        secure: (req.socket as Partial<TLSSocket>).encrypted === true,
+      });
     }
+    // The web UI loads signed out so it can offer a login; anything else does
+    // not tell a signed-out caller which paths exist.
     const file = req.method === 'GET' ? await options.staticFiles?.(path) : undefined;
     if (file) return file;
+    if (!isAgentPath && !options.authenticate(req.headers)) return unauthorized();
     return failure(404, 'not_found', `no route for ${req.method} ${path}`);
   } catch (error) {
     return toFailure(error);
@@ -153,6 +196,8 @@ function toFailure(error: unknown): Response {
   console.error(error);
   return failure(500, 'internal', 'internal server error');
 }
+
+const unauthorized = (): Response => failure(401, 'unauthorized', 'sign in first');
 
 const failure = (status: number, code: string, message: string): Response => ({
   status,

@@ -12,6 +12,7 @@ export default defineConfig({
   test: { include: ['src/**/*.test.tsx'] },
   server: {
     proxy: {
+      '/auth': toControlPlane,
       '/projects': toControlPlane,
       '/tasks': toControlPlane,
     },

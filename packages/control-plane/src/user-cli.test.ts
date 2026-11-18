@@ -1,8 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DomainError, localProvider, type DomainErrorCode } from '@factory/core';
+import { SqliteSessionRepository } from './adapters/sqlite-session-repository.ts';
 import { SqliteUserRepository } from './adapters/sqlite-user-repository.ts';
 import { ScryptPasswordHasher } from './auth/passwords.ts';
+import { hashSessionToken, SessionService } from './auth/session-service.ts';
 import { runUserCli, UsageError } from './user-cli.ts';
 
 const hasher = new ScryptPasswordHasher({ N: 2 ** 10 });
@@ -10,6 +12,7 @@ const rejectsWith = (code: DomainErrorCode) => (error: unknown) => error instanc
 
 function setup() {
   const users = new SqliteUserRepository(':memory:');
+  const sessionStore = new SqliteSessionRepository(':memory:');
   const passwords: string[] = [];
   let output = '';
   let ids = 0;
@@ -18,6 +21,7 @@ function setup() {
     runUserCli(argv, {
       users,
       passwords: users,
+      sessions: sessionStore,
       hasher,
       readPassword: async () => {
         const next = passwords.shift();
@@ -28,7 +32,7 @@ function setup() {
       now: () => new Date(Date.UTC(2026, 10, 12, 10, clock++)).toISOString(),
       newId: () => `id${++ids}`,
     });
-  return { users, passwords, run, output: () => output };
+  return { users, sessionStore, passwords, run, output: () => output };
 }
 
 test('add creates a user with a local password', async () => {
@@ -108,4 +112,17 @@ test('rejects unknown commands and wrong arguments with usage', async () => {
   await assert.rejects(run('rename', 'ada'), isUsage);
   await assert.rejects(run('list', '--display-name', 'x'), isUsage);
   await assert.rejects(run('add', 'ada', '--password', 'secret'), isUsage);
+});
+
+test('disable ends the sessions of the user and leaves those of others', async () => {
+  const { users, sessionStore, passwords, run } = setup();
+  passwords.push('first password', 'other password');
+  await run('add', 'ada');
+  await run('add', 'bob');
+  const sessions = new SessionService({ sessions: sessionStore, users, idleTimeoutMs: 3_600_000, maxLifetimeMs: 86_400_000 });
+  const ada = [sessions.createSession('id1').token, sessions.createSession('id1').token];
+  const bob = sessions.createSession('id2').token;
+  await run('disable', 'ada');
+  for (const token of ada) assert.equal(sessionStore.get(hashSessionToken(token)), undefined);
+  assert.deepEqual(sessions.resolve(bob), { userId: 'id2', via: 'session' });
 });

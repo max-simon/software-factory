@@ -21,6 +21,8 @@ test('applies defaults and keeps secrets out of the config', () => {
     gitUserName: 'bot',
     gitUserEmail: 'bot@example.com',
     followUpWindowHours: 24,
+    sessionIdleHours: 12,
+    sessionMaxDays: 7,
     credentials: ['ANTHROPIC_API_KEY'],
     agentCredentials: { claude: 'ANTHROPIC_API_KEY', opencode: 'ANTHROPIC_API_KEY' },
   });
@@ -84,3 +86,16 @@ test('reads the follow-up window, 24 hours by default, and rejects anything but 
   }
 });
 
+
+test('reads the session idle hours and maximum days, 12 and 7 by default, and rejects anything but a positive number', () => {
+  assert.equal(loadConfig(complete).sessionIdleHours, 12);
+  assert.equal(loadConfig(complete).sessionMaxDays, 7);
+  const config = loadConfig({ ...complete, FACTORY_SESSION_IDLE_HOURS: '0.5', FACTORY_SESSION_MAX_DAYS: ' 30 ' });
+  assert.equal(config.sessionIdleHours, 0.5);
+  assert.equal(config.sessionMaxDays, 30);
+  assert.equal(loadConfig({ ...complete, FACTORY_SESSION_IDLE_HOURS: ' ' }).sessionIdleHours, 12);
+  for (const value of ['0', '-1', 'soon', 'Infinity']) {
+    assert.throws(() => loadConfig({ ...complete, FACTORY_SESSION_IDLE_HOURS: value }), ConfigError);
+    assert.throws(() => loadConfig({ ...complete, FACTORY_SESSION_MAX_DAYS: value }), ConfigError);
+  }
+});
