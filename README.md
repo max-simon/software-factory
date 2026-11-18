@@ -186,6 +186,33 @@ Optional, connect Claude Code over MCP:
 claude mcp add --transport http factory http://127.0.0.1:4700/mcp
 ```
 
+### Users
+
+Users are managed with an operator CLI that writes to the same SQLite file as
+the control plane (`FACTORY_DB`, default `factory.db`). Create the first user:
+
+```bash
+yarn user add alice --display-name "Alice"   # prompts for the password twice
+```
+
+| Command | Effect |
+|---|---|
+| `yarn user add <username> [--display-name <name>]` | Create a user and set its password |
+| `yarn user list` | Username, display name, status (active/disabled) and creation time of every user |
+| `yarn user passwd <username>` | Set a new password |
+| `yarn user rename <username> <display name...>` | Change the display name |
+| `yarn user disable <username>` | Disable the user for good; it keeps its id and history |
+
+Passwords are never taken from the command line. On a terminal they are
+prompted without echo; otherwise the first line of stdin is used, without
+confirmation, for scripting:
+
+```bash
+printf '%s\n' "$PW" | yarn user passwd alice
+```
+
+Passwords must be 12 to 256 characters long and are stored as scrypt hashes.
+
 ### Develop
 
 ```bash

@@ -60,6 +60,7 @@ const domainStatus: Record<DomainErrorCode, number> = {
   duplicate_username: 409,
   invalid_username: 400,
   invalid_display_name: 400,
+  invalid_password: 400,
 };
 
 export interface ServerOptions {

@@ -13,6 +13,7 @@
     "test": "node --test \"packages/*/src/**/*.test.ts\" && yarn workspace @factory/web test",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p packages/web/tsconfig.json --noEmit",
     "start": "node --env-file-if-exists=.env packages/control-plane/src/main.ts",
+    "user": "node --env-file-if-exists=.env packages/control-plane/src/user-cli.ts",
     "web:dev": "yarn workspace @factory/web dev",
     "web:build": "yarn workspace @factory/web build",
     "image:build": "podman build -t factory-executor:latest -f packages/executor/Containerfile . && podman build -t factory-reviewer:latest -f packages/reviewer/Containerfile ."
