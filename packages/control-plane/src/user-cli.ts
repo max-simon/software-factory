@@ -9,12 +9,15 @@ import {
   localProvider,
   parseUsername,
   renameUser,
+  type AccessTokenRepository,
   type PasswordHasher,
   type User,
   type UserRepository,
 } from '@factory/core';
+import { SqliteAccessTokenRepository } from './adapters/sqlite-access-token-repository.ts';
 import { SqliteSessionRepository } from './adapters/sqlite-session-repository.ts';
 import { SqliteUserRepository } from './adapters/sqlite-user-repository.ts';
+import { AccessTokenService } from './auth/access-token-service.ts';
 import type { LocalPasswordStore } from './auth/local-password-authenticator.ts';
 import { parsePassword, ScryptPasswordHasher } from './auth/passwords.ts';
 import type { SessionStore } from './auth/session-service.ts';
@@ -26,9 +29,13 @@ Commands:
   list                                    List all users
   passwd <username>                       Set a user's password
   rename <username> <display name...>     Change a user's display name
-  disable <username>                      Disable a user for good and end its sessions
+  disable <username>                      Disable a user for good, end its sessions and revoke its tokens
+  token <username> <name...> [--expires-in-days <n>]
+                                          Create a personal access token and print it once
 
 Passwords are read from the terminal, or from the first line of stdin when it is piped.
+A token (fct_...) acts as its user on the engineer API and /mcp via "Authorization: Bearer <token>";
+it never expires unless --expires-in-days is given.
 The database is FACTORY_DB (default factory.db).`;
 
 export class UsageError extends Error {
@@ -39,6 +46,7 @@ export interface UserCliDeps {
   users: UserRepository;
   passwords: LocalPasswordStore;
   sessions: Pick<SessionStore, 'deleteForUser'>;
+  tokens: AccessTokenRepository;
   hasher: PasswordHasher;
   /** Reads a new password, confirmed when entered interactively. */
   readPassword: () => Promise<string>;
@@ -53,7 +61,11 @@ export async function runUserCli(argv: readonly string[], deps: UserCliDeps): Pr
   try {
     parsed = parseArgs({
       args: [...argv],
-      options: { 'display-name': { type: 'string' }, help: { type: 'boolean', short: 'h' } },
+      options: {
+        'display-name': { type: 'string' },
+        'expires-in-days': { type: 'string' },
+        help: { type: 'boolean', short: 'h' },
+      },
       allowPositionals: true,
     });
   } catch (error) {
@@ -67,6 +79,9 @@ export async function runUserCli(argv: readonly string[], deps: UserCliDeps): Pr
   const [command, ...args] = positionals;
   if (values['display-name'] !== undefined && command !== 'add') {
     throw new UsageError(`--display-name is only valid for add\n\n${usage}`);
+  }
+  if (values['expires-in-days'] !== undefined && command !== 'token') {
+    throw new UsageError(`--expires-in-days is only valid for token\n\n${usage}`);
   }
   const expect = (count: number, atLeast = false): void => {
     if (atLeast ? args.length < count : args.length !== count) {
@@ -114,6 +129,7 @@ export async function runUserCli(argv: readonly string[], deps: UserCliDeps): Pr
       const user = findUser(deps.users, args[0]!);
       // Also when already disabled: the control plane refuses its sessions anyway, this removes them.
       deps.sessions.deleteForUser(user.id);
+      deps.tokens.deleteForUser(user.id);
       if (user.disabledAt !== undefined) {
         deps.stdout.write(`${user.username} is already disabled\n`);
         return;
@@ -121,6 +137,20 @@ export async function runUserCli(argv: readonly string[], deps: UserCliDeps): Pr
       const now = deps.now();
       deps.users.update({ ...disableUser(user, now), updatedAt: now });
       deps.stdout.write(`disabled ${user.username}\n`);
+      return;
+    }
+    case 'token': {
+      expect(2, true);
+      const user = findActiveUser(deps.users, args[0]!);
+      const days = values['expires-in-days'];
+      const tokens = new AccessTokenService({ tokens: deps.tokens, users: deps.users, now: () => Date.parse(deps.now()), newId: deps.newId });
+      const { token } = tokens.issue(user.id, {
+        name: args.slice(1).join(' '),
+        // Not a number unless it is all digits, so `1.5` or `7d` are rejected rather than read as 1 or 7.
+        ...(days !== undefined && { expiresInDays: /^\d+$/.test(days) ? Number(days) : Number.NaN }),
+      });
+      // The token alone, so `TOKEN=$(yarn user token alice laptop)` works; it is not shown again.
+      deps.stdout.write(`${token}\n`);
       return;
     }
     case undefined:
@@ -221,11 +251,13 @@ async function main(): Promise<void> {
   const dbPath = process.env.FACTORY_DB ?? 'factory.db';
   const users = new SqliteUserRepository(dbPath);
   const sessions = new SqliteSessionRepository(dbPath);
+  const tokens = new SqliteAccessTokenRepository(dbPath);
   try {
     await runUserCli(process.argv.slice(2), {
       users,
       passwords: users,
       sessions,
+      tokens,
       hasher: new ScryptPasswordHasher(),
       readPassword: process.stdin.isTTY ? readTtyPassword : readPipedPassword,
       stdout: process.stdout,
@@ -235,6 +267,7 @@ async function main(): Promise<void> {
   } finally {
     users.close();
     sessions.close();
+    tokens.close();
   }
 }
 
