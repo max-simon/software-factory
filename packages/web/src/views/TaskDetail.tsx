@@ -14,6 +14,7 @@ import {
 import { useEffect, useState, type ReactNode } from 'react';
 import { api } from '../api.ts';
 import { AgentConsoleModal } from '../components/AgentConsoleModal.tsx';
+import { AssigneesSection } from '../components/Assignees.tsx';
 import { Changelog } from '../components/Changelog.tsx';
 import { LiveActivity } from '../components/LiveActivity.tsx';
 import { DependenciesSection } from '../components/Dependencies.tsx';
@@ -68,6 +69,8 @@ export function TaskDetail({ id, projects }: { id: string; projects: Project[] |
           <pre>{task.failureReason}</pre>
         </Section>
       )}
+
+      <AssigneesSection task={task} onChange={set} />
 
       {task.status === 'clarification_required' && <ClarificationNote task={task} onChange={set} />}
 

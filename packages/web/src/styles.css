@@ -998,6 +998,41 @@ details[open] > summary {
   font-style: italic;
 }
 
+.assignees li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.assignees .link {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.assignee-picker {
+  max-width: 260px;
+  margin-top: 10px;
+}
+
+.assignee-badges {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.assignee-badge {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  cursor: default;
+}
+
 ul.plain {
   margin: 0;
   padding: 0;
