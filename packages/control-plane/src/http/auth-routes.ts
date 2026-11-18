@@ -5,7 +5,7 @@ import type { UserAccountService } from '../user-account-service.ts';
 import { requireSession } from './authenticate.ts';
 import type { Response, Route } from './server.ts';
 import { clearedSessionCookie, readSessionToken, sessionCookie } from './session-cookie.ts';
-import { parseDisplayNameChange, parsePasswordChange, ValidationError } from './validation.ts';
+import { parseDisplayNameChange, parseLogin, parsePasswordChange } from './validation.ts';
 
 export interface AuthRoutesDeps {
   authenticator: Authenticator;
@@ -26,14 +26,6 @@ export interface AuthRoutesDeps {
 // One message for an unknown username and a wrong password, so a login does not tell which usernames exist.
 const loginFailedMessage = 'wrong username or password';
 const throttledMessage = 'too many failed logins, try again later';
-
-function parseLogin(body: unknown): { username: string; password: string } {
-  const { username, password } = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
-  if (typeof username !== 'string' || typeof password !== 'string') {
-    throw new ValidationError('login needs a username and a password');
-  }
-  return { username, password };
-}
 
 const throttled = (retryAfterMs: number): Response => ({
   status: 429,

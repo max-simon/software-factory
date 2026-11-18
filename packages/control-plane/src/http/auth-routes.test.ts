@@ -123,6 +123,18 @@ test('a wrong password, an unknown username and a disabled user get the same 401
   assert.equal((await call('POST', '/auth/login', { body: { username: 'ada' } })).status, 400);
 });
 
+test('a login body no account could match is a 400 that does not count as a failure', async (t) => {
+  const { call, login } = await setup(t);
+  for (const body of [
+    { username: 'a'.repeat(33), password },
+    { username: 'ada', password: 'x'.repeat(257) },
+    { username: 'ada', password, remember: true },
+  ]) {
+    for (let i = 0; i < 5; i++) assert.equal((await call('POST', '/auth/login', { body })).status, 400, JSON.stringify(body));
+  }
+  assert.equal((await login()).status, 200);
+});
+
 test('only the login is open without a session', async (t) => {
   const { call } = await setup(t);
   for (const [method, path] of [['GET', '/auth/me'], ['POST', '/auth/logout'], ['GET', '/whoami']] as const) {

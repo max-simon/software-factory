@@ -108,12 +108,15 @@ export async function runUserCli(argv: readonly string[], deps: UserCliDeps): Pr
     }
     case 'token': {
       expect(2, true);
-      const user = findUser(deps.users, args[0]!);
       const days = values['expires-in-days'];
+      // All digits, so `1.5` or `7d` are rejected rather than read as 1 or 7; the service checks the range.
+      if (days !== undefined && !/^\d+$/.test(days)) {
+        throw new UsageError(`--expires-in-days must be a whole number of days\n\n${usage}`);
+      }
+      const user = findUser(deps.users, args[0]!);
       const { token } = deps.accessTokens.issue(user.id, {
         name: args.slice(1).join(' '),
-        // Not a number unless it is all digits, so `1.5` or `7d` are rejected rather than read as 1 or 7.
-        ...(days !== undefined && { expiresInDays: /^\d+$/.test(days) ? Number(days) : Number.NaN }),
+        ...(days !== undefined && { expiresInDays: Number(days) }),
       });
       // The token alone, so `TOKEN=$(yarn user token alice laptop)` works; it is not shown again.
       deps.stdout.write(`${token}\n`);

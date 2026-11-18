@@ -151,8 +151,11 @@ test('token takes an optional expiry in whole days', async () => {
   await run('add', 'ada');
   await run('token', 'ada', 'ci', '--expires-in-days', '30');
   assert.equal(tokenStore.listForUser('id1')[0]!.expiresAt, '2026-12-12T10:01:00.000Z');
-  for (const days of ['0', '1.5', '7d', '3651']) {
+  for (const days of ['0', '3651']) {
     await assert.rejects(run('token', 'ada', 'ci', '--expires-in-days', days), rejectsWith('invalid_token_expiry'), days);
+  }
+  for (const days of ['1.5', '7d', '-1']) {
+    await assert.rejects(run('token', 'ada', 'ci', '--expires-in-days', days), (error) => error instanceof UsageError, days);
   }
   await assert.rejects(run('token', 'ada', ' '), rejectsWith('invalid_token_name'));
   assert.equal(tokenStore.listForUser('id1').length, 1);

@@ -38,9 +38,9 @@ export function parseAccessTokenName(name: string): string {
 }
 
 /** A whole number of days from 1 to `accessTokenMaxExpiryDays`, or a `DomainError` `invalid_token_expiry`. */
-export function parseAccessTokenExpiry(days: unknown): number {
-  if (!Number.isInteger(days) || (days as number) < 1 || (days as number) > accessTokenMaxExpiryDays) {
+export function parseAccessTokenExpiry(days: number): number {
+  if (!Number.isInteger(days) || days < 1 || days > accessTokenMaxExpiryDays) {
     throw new DomainError('invalid_token_expiry', `expiresInDays must be a whole number from 1 to ${accessTokenMaxExpiryDays}`);
   }
-  return days as number;
+  return days;
 }
