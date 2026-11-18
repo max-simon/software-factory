@@ -45,7 +45,7 @@ function Shell({ route }: { route: Exclude<Route, { name: 'login' }> }) {
         <main className={`page${width}`}>
           {route.name === 'home' && <Home projects={projects} error={error} />}
           {route.name === 'new-project' && <NewProject onSaved={upsert} />}
-          {route.name === 'project' && <ProjectOverview id={route.id} />}
+          {route.name === 'project' && <ProjectOverview id={route.id} labels={route.labels} />}
           {route.name === 'edit-project' && <EditProject id={route.id} onSaved={upsert} />}
           {route.name === 'new-task' && <NewTask project={projects?.find((p) => p.id === route.projectId)} projectId={route.projectId} />}
           {route.name === 'task' && <TaskDetail id={route.id} projects={projects} />}

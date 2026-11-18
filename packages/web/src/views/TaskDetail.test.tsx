@@ -56,9 +56,17 @@ test('the task status shows a spinner only while the reviewer checks the specifi
 });
 
 test('a board card shows a spinner only while the reviewer checks the specification', () => {
-  const board = (t: TaskView) => renderToStaticMarkup(<Board tasks={[t]} onMoved={() => {}} />);
+  const board = (t: TaskView) => renderToStaticMarkup(<Board tasks={[t]} labels={[]} onMoved={() => {}} />);
   expect(board(task({ isSpecUnderReview: true }))).toContain(specSpinner);
   expect(board(task({ isSpecUnderReview: false }))).not.toContain(specSpinner);
+});
+
+test('a filtered board shows only the tasks that carry every filter label', () => {
+  const tasks = [task({ id: 'a', title: 'Only ui', labels: ['ui'] }), task({ id: 'b', title: 'Ui and api', labels: ['ui', 'api'] })];
+  const board = (labels: string[]) => renderToStaticMarkup(<Board tasks={tasks} labels={labels} onMoved={() => {}} />);
+  expect(board(['ui'])).toContain('Only ui');
+  expect(board(['ui', 'api'])).not.toContain('Only ui');
+  expect(board(['ui', 'api'])).toContain('Ui and api');
 });
 
 test('a pull request of the task shows a spinner only while the reviewer assesses it', () => {

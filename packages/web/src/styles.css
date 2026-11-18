@@ -546,6 +546,28 @@ section {
 
 /* Board */
 
+.label-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 16px;
+}
+.label-filter .label {
+  font: inherit;
+  font-size: 12px;
+  background: none;
+  cursor: pointer;
+}
+.label-filter .label:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+.label-filter .label[aria-pressed='true'] {
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
 .board {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));

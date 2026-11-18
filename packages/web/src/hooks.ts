@@ -54,14 +54,22 @@ export function usePolling<T>(load: () => Promise<T>, key: string, intervalMs: n
   return { data, error, set, reload };
 }
 
+const hashPath = (hash: string): string => hash.split('?')[0]!;
+
 export function useRoute(): Route {
   const [route, setRoute] = useState(() => parseRoute(location.hash));
+  const pathRef = useRef(hashPath(location.hash));
   useEffect(() => {
     const update = () => {
-      // Views that know a better title set it once they have rendered.
-      document.title = 'Factory';
+      const path = hashPath(location.hash);
+      // A changed query, such as a board filter, keeps the page: no new title, no jump to the top.
+      if (path !== pathRef.current) {
+        // Views that know a better title set it once they have rendered.
+        document.title = 'Factory';
+        window.scrollTo(0, 0);
+      }
+      pathRef.current = path;
       setRoute(parseRoute(location.hash));
-      window.scrollTo(0, 0);
     };
     window.addEventListener('hashchange', update);
     return () => window.removeEventListener('hashchange', update);
