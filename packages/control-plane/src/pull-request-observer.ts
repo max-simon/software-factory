@@ -26,7 +26,10 @@ const hasChanged = (before: PullRequest, after: PullRequest): boolean =>
   after.status !== before.status ||
   after.title !== before.title ||
   after.headSha !== before.headSha ||
-  reviewIds(after) !== reviewIds(before);
+  reviewIds(after) !== reviewIds(before) ||
+  after.baseBranch !== before.baseBranch ||
+  // Unknown mergeability is GitHub still computing it, not a change; the recorded one is kept.
+  (after.hasConflicts !== undefined && after.hasConflicts !== before.hasConflicts);
 
 /**
  * Polls the open pull requests of watched tasks and records what changed; the

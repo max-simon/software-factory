@@ -106,6 +106,10 @@ export interface PullRequest {
   headSha?: string;
   /** Submitted reviews, oldest first, as the control plane last read them; unset until the first read. */
   reviews?: PullRequestReview[];
+  /** Whether it conflicts with its base branch, as last known; unset until the host first computed it. */
+  hasConflicts?: boolean;
+  /** The branch it merges into, as the control plane last read it; unset until the first read. */
+  baseBranch?: string;
 }
 
 /** Submitted states only: pending drafts are invisible to others, dismissed reviews no longer count. */

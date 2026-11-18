@@ -447,6 +447,14 @@ describe('updatePullRequests', () => {
     assert.deepEqual(updatePullRequests(watched('ready'), [merged]).pullRequests, [first, merged]);
   });
 
+  it('keeps the recorded conflict state while the host has not computed it', () => {
+    const conflicted = taskIn('ready', { pullRequests: [{ ...first, hasConflicts: true }, second] });
+    const renamed = { ...first, title: 'One, renamed' };
+    assert.deepEqual(updatePullRequests(conflicted, [renamed]).pullRequests[0], { ...renamed, hasConflicts: true });
+    assert.equal(updatePullRequests(conflicted, [{ ...first, hasConflicts: false }]).pullRequests[0]!.hasConflicts, false);
+    assert.equal('hasConflicts' in updatePullRequests(watched('ready'), [first]).pullRequests[0]!, false);
+  });
+
   it('is accepted while the runner runs and rejected before dispatch and after the end', () => {
     for (const status of ['in_progress', 'input_required', 'ready', 'failed'] as const) {
       assert.doesNotThrow(() => updatePullRequests(watched(status), [first]));

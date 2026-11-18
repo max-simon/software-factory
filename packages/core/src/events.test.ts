@@ -47,6 +47,31 @@ describe('pullRequestEvents', () => {
     assert.deepEqual(pullRequestEvents(task(pr({ headSha: undefined })), after), []);
   });
 
+  it('raises a conflict when the pull request newly conflicts with its base', () => {
+    const after = task(pr({ hasConflicts: true }));
+    const conflicted = [{ type: 'pull_request.conflicted', task: after, pullRequest: after.pullRequests[0]! }];
+    assert.deepEqual(pullRequestEvents(task(pr({ hasConflicts: false })), after), conflicted);
+    assert.deepEqual(pullRequestEvents(task(pr()), after), conflicted);
+  });
+
+  it('raises no conflict while it stays known or when it is cleared', () => {
+    const conflicted = task(pr({ hasConflicts: true }));
+    assert.deepEqual(pullRequestEvents(conflicted, conflicted), []);
+    assert.deepEqual(pullRequestEvents(conflicted, task(pr({ hasConflicts: false }))), []);
+    assert.deepEqual(pullRequestEvents(conflicted, task(pr())), []);
+  });
+
+  it('raises a conflict again when one returns after it was resolved', () => {
+    const versions = [true, false, true].map((hasConflicts) => task(pr({ hasConflicts })));
+    const types = versions.slice(1).flatMap((after, i) => pullRequestEvents(versions[i]!, after).map((event) => event.type));
+    assert.deepEqual(types, ['pull_request.conflicted']);
+    assert.deepEqual(pullRequestEvents(task(pr({ hasConflicts: false })), versions[0]!).map((event) => event.type), ['pull_request.conflicted']);
+  });
+
+  it('raises no conflict for a pull request that is no longer open', () => {
+    assert.deepEqual(pullRequestEvents(task(pr({ status: 'merged' })), task(pr({ status: 'merged', hasConflicts: true }))), []);
+  });
+
   it('raises merged and closed once, when the pull request leaves open', () => {
     const merged = task(pr({ status: 'merged' }));
     assert.deepEqual(pullRequestEvents(task(pr()), merged), [{ type: 'pull_request.merged', task: merged, pullRequest: merged.pullRequests[0]! }]);

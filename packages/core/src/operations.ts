@@ -260,7 +260,7 @@ export function addPullRequest(task: Task, input: NewPullRequest): Task {
   return { ...task, pullRequests: [...task.pullRequests, { ...input, status: 'open' }] };
 }
 
-/** Replaces title and status of reported pull requests with what the control plane read from GitHub. */
+/** Replaces reported pull requests with what the control plane read from GitHub; an unknown conflict state keeps the recorded one. */
 export function updatePullRequests(task: Task, updates: readonly PullRequest[]): Task {
   if (!followUpStatuses.includes(task.status)) {
     throw new DomainError('not_active', `task is ${task.status}, pull request updates are accepted only while it runs`);
@@ -269,7 +269,12 @@ export function updatePullRequests(task: Task, updates: readonly PullRequest[]):
   if (unknown !== undefined) {
     throw new DomainError('unknown_pull_request', `task ${task.id} has no pull request ${unknown.url}`);
   }
-  const pullRequests = task.pullRequests.map((pr) => updates.find((update) => update.url === pr.url) ?? pr);
+  const pullRequests = task.pullRequests.map((pr) => {
+    const update = updates.find((candidate) => candidate.url === pr.url);
+    if (update === undefined) return pr;
+    // The host computes mergeability in the background: not having computed it yet is no news.
+    return update.hasConflicts === undefined && pr.hasConflicts !== undefined ? { ...update, hasConflicts: pr.hasConflicts } : update;
+  });
   return { ...task, pullRequests };
 }
 

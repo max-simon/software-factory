@@ -114,6 +114,25 @@ test('emits an event per new review, push, merge and close once the change is re
   assert.deepEqual(pullRequestEvents(f).slice(3).map((event) => event.type), ['pull_request.merged']);
 });
 
+test('emits a conflict when a pull request newly conflicts, and keeps it while GitHub recomputes mergeability', async () => {
+  const f = setup();
+  const id = withPullRequests(f, [pullRequest(1)], true);
+  f.pullRequests.answers.set(pullRequest(1).url, pullRequest(1, { headSha: 'a1', reviews: [], hasConflicts: false }));
+  await f.observer.observe();
+  f.pullRequests.answers.set(pullRequest(1).url, pullRequest(1, { headSha: 'a1', reviews: [], hasConflicts: true }));
+  await f.observer.observe();
+  const task = f.tasks.get(id);
+  assert.deepEqual(pullRequestEvents(f), [{ type: 'pull_request.conflicted', task, pullRequest: task.pullRequests[0]! }]);
+
+  f.pullRequests.answers.set(pullRequest(1).url, pullRequest(1, { headSha: 'a1', reviews: [] }));
+  await f.observer.observe();
+  assert.equal(f.tasks.get(id).updatedAt, task.updatedAt, 'unknown mergeability is no change');
+  f.pullRequests.answers.set(pullRequest(1).url, pullRequest(1, { headSha: 'a2', reviews: [] }));
+  await f.observer.observe();
+  assert.equal(f.tasks.get(id).pullRequests[0]!.hasConflicts, true, 'a push keeps the recorded conflict');
+  assert.deepEqual(pullRequestEvents(f).slice(1).map((event) => event.type), ['pull_request.pushed']);
+});
+
 test('reads the open pull requests of a failed task only while it keeps its execution server', async () => {
   const f = setup();
   const id = withPullRequests(f, [pullRequest(1)]);

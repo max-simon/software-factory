@@ -33,3 +33,10 @@ test('the indicator draws the state glyph and the review mark', () => {
   expect(render({ status: 'open', reviews: [review('changes_requested')] })).toContain('aria-label="Open · changes requested"');
   expect(render({ status: 'closed', reviews: [] })).toContain('aria-label="Closed"');
 });
+
+test('the indicator marks an open pull request with merge conflicts', () => {
+  const html = renderToStaticMarkup(<PullRequestIndicator pullRequest={{ status: 'open', hasConflicts: true }} />);
+  expect(html).toContain('pr-indicator-open pr-indicator-conflicted');
+  expect(html).toContain('aria-label="Open · not reviewed · merge conflicts"');
+  expect(renderToStaticMarkup(<PullRequestIndicator pullRequest={{ status: 'open' }} />)).not.toContain('pr-indicator-conflicted');
+});

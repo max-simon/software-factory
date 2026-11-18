@@ -44,7 +44,14 @@ export class GitHubPullRequests implements PullRequestReader, PullRequestWriter 
   async read(url: string): Promise<PullRequest> {
     const base = apiUrl(url);
     const { body } = await this.#get(base, url);
-    const { state, merged, title, user } = body as { state?: unknown; merged?: unknown; title?: unknown; user?: { login?: unknown } };
+    const { state, merged, mergeable, title, user, base: target } = body as {
+      state?: unknown;
+      merged?: unknown;
+      mergeable?: unknown;
+      title?: unknown;
+      user?: { login?: unknown };
+      base?: { ref?: unknown };
+    };
     if (state !== 'open' && state !== 'closed') throw new Error(`GitHub returned an unknown state for ${url}: ${String(state)}`);
     if (typeof title !== 'string' || title.trim() === '') throw new Error(`GitHub returned no title for ${url}`);
     const headSha = headShaOf(body, url);
@@ -54,7 +61,16 @@ export class GitHubPullRequests implements PullRequestReader, PullRequestWriter 
       // The author cannot review their own pull request; GitHub files the
       // author's replies to review threads as reviews, which they are not.
       .filter((review): review is PullRequestReview => review !== undefined && review.author !== user?.login);
-    return { url, title, status: merged === true ? 'merged' : state, headSha, reviews };
+    return {
+      url,
+      title,
+      status: merged === true ? 'merged' : state,
+      headSha,
+      reviews,
+      // GitHub computes mergeability in the background and answers null until it has.
+      ...(typeof mergeable === 'boolean' && { hasConflicts: !mergeable }),
+      ...(typeof target?.ref === 'string' && { baseBranch: target.ref }),
+    };
   }
 
   async readHead(url: string): Promise<string> {

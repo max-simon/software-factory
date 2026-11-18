@@ -50,10 +50,11 @@ const marks: Record<PullRequestReviewMark, ReactNode> = {
 };
 
 /** A compact icon for where a pull request stands and how far its review got; the label is on hover. */
-export function PullRequestIndicator({ pullRequest }: { pullRequest: Pick<PullRequest, 'status' | 'reviews'> }) {
-  const { state, review, label } = pullRequestIndicator(pullRequest);
+export function PullRequestIndicator({ pullRequest }: { pullRequest: Pick<PullRequest, 'status' | 'reviews' | 'hasConflicts'> }) {
+  const { state, review, label, hasConflicts } = pullRequestIndicator(pullRequest);
+  const conflicted = hasConflicts ? ' pr-indicator-conflicted' : '';
   return (
-    <span className={`pr-indicator pr-indicator-${state}`} role="img" title={label} aria-label={label}>
+    <span className={`pr-indicator pr-indicator-${state}${conflicted}`} role="img" title={label} aria-label={label}>
       <svg viewBox="0 0 21 16" width="21" height="16" aria-hidden>
         <g className="pr-indicator-glyph">{glyphs[state]}</g>
         <g className={`pr-indicator-mark pr-indicator-mark-${review}`}>{marks[review]}</g>

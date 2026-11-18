@@ -61,6 +61,16 @@ test('read asks the GitHub API with the token and maps open, merged and closed',
   assert.equal((await setup(pull({ state: 'closed', merged: false })).reader.read(url)).status, 'closed');
 });
 
+test('read maps mergeability to conflicts and leaves them unset while GitHub has not computed it', async () => {
+  assert.equal((await setup(pull({ mergeable: true })).reader.read(url)).hasConflicts, false);
+  assert.equal((await setup(pull({ mergeable: false })).reader.read(url)).hasConflicts, true);
+  assert.equal('hasConflicts' in (await setup(pull({ mergeable: null })).reader.read(url)), false);
+});
+
+test('read records the base branch', async () => {
+  assert.equal((await setup(pull({ base: { ref: 'main' } })).reader.read(url)).baseBranch, 'main');
+});
+
 test('read skips reviews by people without a say on the repository', async () => {
   const { reader } = setup(pull(), [
     {
