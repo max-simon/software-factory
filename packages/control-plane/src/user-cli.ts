@@ -13,9 +13,11 @@ import {
   type User,
   type UserRepository,
 } from '@factory/core';
+import { SqliteSessionRepository } from './adapters/sqlite-session-repository.ts';
 import { SqliteUserRepository } from './adapters/sqlite-user-repository.ts';
 import type { LocalPasswordStore } from './auth/local-password-authenticator.ts';
 import { parsePassword, ScryptPasswordHasher } from './auth/passwords.ts';
+import type { SessionStore } from './auth/session-service.ts';
 
 export const usage = `Usage: yarn user <command>
 
@@ -24,7 +26,7 @@ Commands:
   list                                    List all users
   passwd <username>                       Set a user's password
   rename <username> <display name...>     Change a user's display name
-  disable <username>                      Disable a user for good
+  disable <username>                      Disable a user for good and end its sessions
 
 Passwords are read from the terminal, or from the first line of stdin when it is piped.
 The database is FACTORY_DB (default factory.db).`;
@@ -36,6 +38,7 @@ export class UsageError extends Error {
 export interface UserCliDeps {
   users: UserRepository;
   passwords: LocalPasswordStore;
+  sessions: Pick<SessionStore, 'deleteForUser'>;
   hasher: PasswordHasher;
   /** Reads a new password, confirmed when entered interactively. */
   readPassword: () => Promise<string>;
@@ -109,6 +112,8 @@ export async function runUserCli(argv: readonly string[], deps: UserCliDeps): Pr
     case 'disable': {
       expect(1);
       const user = findUser(deps.users, args[0]!);
+      // Also when already disabled: the control plane refuses its sessions anyway, this removes them.
+      deps.sessions.deleteForUser(user.id);
       if (user.disabledAt !== undefined) {
         deps.stdout.write(`${user.username} is already disabled\n`);
         return;
@@ -213,11 +218,14 @@ async function readPipedPassword(): Promise<string> {
 }
 
 async function main(): Promise<void> {
-  const users = new SqliteUserRepository(process.env.FACTORY_DB ?? 'factory.db');
+  const dbPath = process.env.FACTORY_DB ?? 'factory.db';
+  const users = new SqliteUserRepository(dbPath);
+  const sessions = new SqliteSessionRepository(dbPath);
   try {
     await runUserCli(process.argv.slice(2), {
       users,
       passwords: users,
+      sessions,
       hasher: new ScryptPasswordHasher(),
       readPassword: process.stdin.isTTY ? readTtyPassword : readPipedPassword,
       stdout: process.stdout,
@@ -226,6 +234,7 @@ async function main(): Promise<void> {
     });
   } finally {
     users.close();
+    sessions.close();
   }
 }
 

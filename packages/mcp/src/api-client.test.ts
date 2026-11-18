@@ -7,6 +7,7 @@ import { ApiError, ConnectionError, createApiClient, type ApiClient } from './ap
 interface Seen {
   method?: string;
   url?: string;
+  cookie?: string;
   body: string;
 }
 
@@ -20,7 +21,7 @@ before(async () => {
     const chunks: Buffer[] = [];
     req.on('data', (chunk: Buffer) => chunks.push(chunk));
     req.on('end', () => {
-      seen = { method: req.method, url: req.url, body: Buffer.concat(chunks).toString('utf8') };
+      seen = { method: req.method, url: req.url, cookie: req.headers.cookie, body: Buffer.concat(chunks).toString('utf8') };
       res.writeHead(reply.status, { 'content-type': 'application/json' });
       res.end(JSON.stringify(reply.body));
     });
@@ -102,4 +103,18 @@ test('reports an unreachable control plane with its URL', async () => {
     assert.match(error.message, new RegExp(`http://127.0.0.1:${port}`));
     return true;
   });
+});
+
+test('sends the given headers on every request', async () => {
+  const { port } = server.address() as AddressInfo;
+  const withCookie = createApiClient(`http://127.0.0.1:${port}`, { cookie: 'factory_session=abc' });
+  reply = { status: 200, body: [] };
+  await withCookie.listTasks();
+  assert.equal(seen.cookie, 'factory_session=abc');
+  reply = { status: 201, body: { id: 't1' } };
+  await withCookie.createTask({ projectId: 'p1', title: 'T', specification: 'S' });
+  assert.equal(seen.cookie, 'factory_session=abc');
+  assert.equal(JSON.parse(seen.body).title, 'T');
+  await client.listTasks();
+  assert.equal(seen.cookie, undefined);
 });

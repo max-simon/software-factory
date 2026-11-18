@@ -11,10 +11,13 @@ import { fakeTaskClient, sampleTask, type FakeTaskClient } from './test-support.
 let server: Server;
 let baseUrl: string;
 let fake: FakeTaskClient;
+let forwarded: Array<Record<string, string>> = [];
 
 before(async () => {
   // The server reads `fake` per request, so each test can swap in its own state.
-  server = createServer(createMcpHandler({
+  server = createServer(createMcpHandler((headers) => {
+    forwarded.push(headers);
+    return {
     createProject: (project) => fake.createProject(project),
     listProjects: () => fake.listProjects(),
     createTask: (task) => fake.createTask(task),
@@ -26,6 +29,7 @@ before(async () => {
     cancelTask: (id) => fake.cancelTask(id),
     restartTask: (id) => fake.restartTask(id),
     deleteTask: (id) => fake.deleteTask(id),
+    };
   }));
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -33,9 +37,9 @@ before(async () => {
 
 after(() => new Promise<void>((resolve) => server.close(() => resolve())));
 
-async function connect(): Promise<Client> {
+async function connect(headers: Record<string, string> = {}): Promise<Client> {
   const client = new Client({ name: 'test', version: '0.0.0' });
-  await client.connect(new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp`)));
+  await client.connect(new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp`), { requestInit: { headers } }));
   return client;
 }
 
@@ -228,4 +232,14 @@ test('rejects anything but POST', async () => {
   const get = await fetch(`${baseUrl}/mcp`);
   assert.equal(get.status, 405);
   assert.equal(((await get.json()) as { error: { message: string } }).error.message, 'Method not allowed.');
+});
+
+test('makes the API client of each request with the caller cookie and no other header', async () => {
+  fake = fakeTaskClient([sampleTask()]);
+  forwarded = [];
+  const client = await connect({ cookie: 'factory_session=abc', authorization: 'Bearer xyz', 'x-other': '1' });
+  await client.callTool({ name: 'get_task', arguments: { id: 't1' } });
+  await client.close();
+  assert.ok(forwarded.length > 0);
+  for (const headers of forwarded) assert.deepEqual(headers, { cookie: 'factory_session=abc' });
 });

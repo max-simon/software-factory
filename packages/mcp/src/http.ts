@@ -1,4 +1,4 @@
-import type { RequestListener, ServerResponse } from 'node:http';
+import type { IncomingHttpHeaders, RequestListener, ServerResponse } from 'node:http';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { ApiClient } from './api-client.ts';
@@ -11,17 +11,33 @@ function sendError(res: ServerResponse, status: number, message: string): void {
 }
 
 /**
+ * The caller's credentials, passed on to the engineer API on each of its
+ * calls so the API sees the same user. Add a header name here to forward it too.
+ */
+const forwardedHeaders = ['cookie'] as const;
+
+function pickForwardedHeaders(headers: IncomingHttpHeaders): Record<string, string> {
+  const picked: Record<string, string> = {};
+  for (const name of forwardedHeaders) {
+    const value = headers[name];
+    if (typeof value === 'string') picked[name] = value;
+  }
+  return picked;
+}
+
+/**
  * Stateless Streamable HTTP: every POST gets a fresh server and transport, so
  * there are no sessions to track and GET (server-initiated streams) and DELETE
  * (session end) have nothing to do. The host server mounts it on a path and
- * guards it; the handler checks neither.
+ * guards it; the handler checks neither. `clientFor` makes the API client
+ * for one request, given the request's `forwardedHeaders`.
  */
-export function createMcpHandler(client: ApiClient): RequestListener {
+export function createMcpHandler(clientFor: (headers: Record<string, string>) => ApiClient): RequestListener {
   return (req, res) => {
     if (req.method !== 'POST') return sendError(res, 405, 'Method not allowed.');
 
     const server = new McpServer({ name: 'factory', version: '0.0.0' });
-    registerTools(server, client);
+    registerTools(server, clientFor(pickForwardedHeaders(req.headers)));
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     res.on('close', () => {
       void transport.close();

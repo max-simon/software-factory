@@ -171,6 +171,8 @@ Put these in `.env` in the repository root (git-ignored, loaded by `yarn start`)
 | `FACTORY_REVIEWER_MODEL` | `sonnet` | `opus` or `sonnet` |
 | `FACTORY_MAX_RUNNING` | `2` | Tasks worked on at once; idle workers take no slot |
 | `FACTORY_FOLLOW_UP_WINDOW_HOURS` | `24` | How long a failed task keeps its container for follow-ups |
+| `FACTORY_SESSION_IDLE_HOURS` | `12` | A login session ends after this many hours unused |
+| `FACTORY_SESSION_MAX_DAYS` | `7` | A login session ends this many days after login, however active |
 
 ### Start
 
@@ -180,7 +182,23 @@ yarn image:build              # task worker and reviewer images
 yarn web:build && yarn start  # http://127.0.0.1:4700
 ```
 
-Optional, connect Claude Code over MCP:
+The engineer API, the web UI's data and `/mcp` need a signed-in user (see
+[Users](#users)); create one before you start. Until the web UI has a login
+page, sign in with the API:
+
+```bash
+curl -c cookies.txt -H 'content-type: application/json' \
+  -d '{"username":"alice","password":"..."}' http://127.0.0.1:4700/auth/login
+curl -b cookies.txt http://127.0.0.1:4700/auth/me
+```
+
+`POST /auth/login` sets an `HttpOnly` session cookie, `POST /auth/logout`
+ends the session, `GET /auth/me` names the signed-in user. Repeated failed
+logins for a username or from a client are locked out for a while (HTTP 429).
+
+MCP: `/mcp` requires the same session cookie, which MCP clients such as
+Claude Code do not send, so they cannot use it until personal access tokens
+land. For later:
 
 ```bash
 claude mcp add --transport http factory http://127.0.0.1:4700/mcp
@@ -188,6 +206,7 @@ claude mcp add --transport http factory http://127.0.0.1:4700/mcp
 
 ### Users
 
+Everyone who uses the engineer API, the web UI or `/mcp` signs in as a user.
 Users are managed with an operator CLI that writes to the same SQLite file as
 the control plane (`FACTORY_DB`, default `factory.db`). Create the first user:
 
@@ -201,7 +220,7 @@ yarn user add alice --display-name "Alice"   # prompts for the password twice
 | `yarn user list` | Username, display name, status (active/disabled) and creation time of every user |
 | `yarn user passwd <username>` | Set a new password |
 | `yarn user rename <username> <display name...>` | Change the display name |
-| `yarn user disable <username>` | Disable the user for good; it keeps its id and history |
+| `yarn user disable <username>` | Disable the user for good and end its sessions; it keeps its id and history |
 
 Passwords are never taken from the command line. On a terminal they are
 prompted without echo; otherwise the first line of stdin is used, without

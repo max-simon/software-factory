@@ -13,6 +13,10 @@ export interface Config {
   gitUserEmail: string;
   /** Hours a failed task keeps its idle execution server for a follow-up. */
   followUpWindowHours: number;
+  /** Hours a browser session may go unused before it ends. */
+  sessionIdleHours: number;
+  /** Days a browser session lasts at most, however active. */
+  sessionMaxDays: number;
   /** Names of the Anthropic credentials that are set. */
   credentials: AnthropicCredential[];
   /** The one credential forwarded to each agent; an agent without one cannot run. */
@@ -73,6 +77,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       `FACTORY_FOLLOW_UP_WINDOW_HOURS must be a non-negative number, got "${env.FACTORY_FOLLOW_UP_WINDOW_HOURS}"`,
     );
   }
+  const sessionIdleHours = positiveNumber(env, 'FACTORY_SESSION_IDLE_HOURS', 12);
+  const sessionMaxDays = positiveNumber(env, 'FACTORY_SESSION_MAX_DAYS', 7);
   const reviewerModel = env.FACTORY_REVIEWER_MODEL?.trim() || 'sonnet';
   if (reviewerModel !== 'opus' && reviewerModel !== 'sonnet') {
     throw new ConfigError(`FACTORY_REVIEWER_MODEL must be opus or sonnet, got "${env.FACTORY_REVIEWER_MODEL}"`);
@@ -87,7 +93,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     gitUserName: env.FACTORY_GIT_USER_NAME!,
     gitUserEmail: env.FACTORY_GIT_USER_EMAIL!,
     followUpWindowHours,
+    sessionIdleHours,
+    sessionMaxDays,
     credentials,
     agentCredentials,
   };
+}
+
+function positiveNumber(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
+  const value = Number(env[name]?.trim() || fallback);
+  if (!(Number.isFinite(value) && value > 0)) throw new ConfigError(`${name} must be a positive number, got "${env[name]}"`);
+  return value;
 }

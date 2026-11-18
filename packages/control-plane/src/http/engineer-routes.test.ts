@@ -22,7 +22,7 @@ import { ReviewTracker } from '../review-tracker.ts';
 import { createServices } from '../services.ts';
 import { engineerRoutes } from './engineer-routes.ts';
 import { createServer } from './server.ts';
-import { sequentialItemIds } from '../test-support.ts';
+import { sequentialItemIds, testAuth } from '../test-support.ts';
 
 const validTask = {
   projectId: 'p1',
@@ -48,6 +48,8 @@ interface Api {
   repository: SqliteTaskRepository;
   runtime: FakeRuntime;
   base: string;
+  /** A `Cookie` header of a signed-in user; `call` sends it. */
+  cookie: string;
   call: (method: string, path: string, body?: unknown) => Promise<{ status: number; json: any }>;
 }
 
@@ -70,7 +72,8 @@ async function startApi(t: TestContext, unavailableAgent?: (agent: TaskAgent) =>
     now: () => fixedNow,
   });
   projects.create({ title: 'Login', description: 'Sign-in for the app' });
-  const server = createServer(engineerRoutes(tasks, service, projects, unavailableAgent, reviews)).listen(0, '127.0.0.1');
+  const { authenticate, cookie } = testAuth();
+  const server = createServer(engineerRoutes(tasks, service, projects, unavailableAgent, reviews), { authenticate }).listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', resolve));
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -78,12 +81,13 @@ async function startApi(t: TestContext, unavailableAgent?: (agent: TaskAgent) =>
   const call: Api['call'] = async (method, path, body) => {
     const response = await fetch(base + path, {
       method,
+      headers: { cookie },
       ...(body !== undefined && { body: typeof body === 'string' ? body : JSON.stringify(body) }),
     });
     const text = await response.text();
     return { status: response.status, json: text ? JSON.parse(text) : undefined };
   };
-  return { repository, runtime, base, call };
+  return { repository, runtime, base, cookie, call };
 }
 
 const supervisedTask = { ...validTask, autonomyMode: 'supervised' };
@@ -625,12 +629,26 @@ test('review rejects malformed bodies, unknown items and change requests without
 });
 
 test('rejects requests from other websites in the browser', async (t) => {
-  const { base } = await startApi(t);
-  const crossSite = await fetch(`${base}/tasks`, { method: 'POST', headers: { origin: 'https://evil.example' }, body: '{}' });
+  const { base, cookie } = await startApi(t);
+  const crossSite = await fetch(`${base}/tasks`, { method: 'POST', headers: { origin: 'https://evil.example', cookie }, body: '{}' });
   assert.equal(crossSite.status, 403);
   assert.equal((await crossSite.json()).error.code, 'forbidden');
-  const sameOrigin = await fetch(`${base}/tasks`, { headers: { origin: base } });
+  const sameOrigin = await fetch(`${base}/tasks`, { headers: { origin: base, cookie } });
   assert.equal(sameOrigin.status, 200);
+});
+
+test('every engineer route needs a session', async (t) => {
+  const { base } = await startApi(t);
+  const routes = engineerRoutes({} as never, {} as never, {} as never);
+  for (const { method, path } of routes) {
+    for (const cookie of [undefined, 'factory_session=unknown']) {
+      const response = await fetch(base + path.replaceAll(/:\w+/g, 'x'), { method, ...(cookie && { headers: { cookie } }) });
+      assert.equal(response.status, 401, `${method} ${path}`);
+      assert.equal((await response.json()).error.code, 'unauthorized');
+    }
+  }
+  const unknownPath = await fetch(`${base}/nope`, { method: 'POST' });
+  assert.equal(unknownPath.status, 401);
 });
 
 test('a draft is held for clarification, edited, and queued, and the changelog records each step by the user', async (t) => {
