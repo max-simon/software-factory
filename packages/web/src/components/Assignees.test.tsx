@@ -97,11 +97,11 @@ const task = (overrides: Partial<TaskView>): TaskView => ({
 });
 
 test('a board card shows its assignees as initials with the full name on hover', () => {
-  const html = render(<Board tasks={[task({ assignees: ['u1', 'u2'] })]} onMoved={() => {}} />);
+  const html = render(<Board tasks={[task({ assignees: ['u1', 'u2'] })]} labels={[]} onMoved={() => {}} />);
   expect(html).toContain('<span class="assignee-badge" title="Ada Lovelace">AL</span>');
   expect(html).toContain('<span class="assignee-badge" title="Grace Hopper">GH</span>');
 });
 
 test('a board card without assignees shows no badges', () => {
-  expect(render(<Board tasks={[task({})]} onMoved={() => {}} />)).not.toContain('assignee-badge');
+  expect(render(<Board tasks={[task({})]} labels={[]} onMoved={() => {}} />)).not.toContain('assignee-badge');
 });

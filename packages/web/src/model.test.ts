@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   boardColumns,
+  hasEveryLabel,
+  labelsByUsage,
   heartbeatInfo,
   canSendFollowUp,
   describeChange,
@@ -54,7 +56,8 @@ test('parseRoute maps hashes to views and falls back to home', () => {
   assert.deepEqual(parseRoute(''), { name: 'home' });
   assert.deepEqual(parseRoute('#/'), { name: 'home' });
   assert.deepEqual(parseRoute('#/projects/new'), { name: 'new-project' });
-  assert.deepEqual(parseRoute('#/projects/p1'), { name: 'project', id: 'p1' });
+  assert.deepEqual(parseRoute('#/projects/p1'), { name: 'project', id: 'p1', labels: [] });
+  assert.deepEqual(parseRoute('#/projects/p1?label=ui&label=a%2Cb&label=ui&label='), { name: 'project', id: 'p1', labels: ['ui', 'a,b'] });
   assert.deepEqual(parseRoute('#/projects/p1/edit'), { name: 'edit-project', id: 'p1' });
   assert.deepEqual(parseRoute('#/projects/p1/new-task'), { name: 'new-task', projectId: 'p1' });
   assert.deepEqual(parseRoute('#/tasks/ab12'), { name: 'task', id: 'ab12' });
@@ -107,7 +110,9 @@ test('describeProjectChange says what a project change did', () => {
 });
 
 test('href and parseRoute agree, including ids that need encoding', () => {
-  assert.deepEqual(parseRoute(href.project('a/b')), { name: 'project', id: 'a/b' });
+  assert.deepEqual(parseRoute(href.project('a/b')), { name: 'project', id: 'a/b', labels: [] });
+  assert.equal(href.project('p1', []), '#/projects/p1');
+  assert.deepEqual(parseRoute(href.project('p1', ['ui', 'a b', 'x&y'])), { name: 'project', id: 'p1', labels: ['ui', 'a b', 'x&y'] });
   assert.deepEqual(parseRoute(href.newTask('p1')), { name: 'new-task', projectId: 'p1' });
   assert.deepEqual(parseRoute(href.editProject('p1')), { name: 'edit-project', id: 'p1' });
 });
@@ -232,6 +237,20 @@ test('boardColumns lists every column in workflow order, ranked tasks by rank, f
       ['finished', false, ['x', 'f']],
     ],
   );
+});
+
+test('labelsByUsage lists labels most used first, alphabetically among equals', () => {
+  const tasks = [task('t1', 'draft', '', { labels: ['b', 'a'] }), task('t2', 'draft', '', { labels: ['c', 'a'] }), task('t3', 'draft', '', { labels: ['c'] }), task('t4', 'draft', '')];
+  assert.deepEqual(labelsByUsage(tasks), ['a', 'c', 'b']);
+  assert.deepEqual(labelsByUsage([]), []);
+});
+
+test('hasEveryLabel requires all filter labels, and no filter matches every task', () => {
+  const labelled = task('t1', 'draft', '', { labels: ['ui', 'api'] });
+  assert.equal(hasEveryLabel(labelled, []), true);
+  assert.equal(hasEveryLabel(labelled, ['ui']), true);
+  assert.equal(hasEveryLabel(labelled, ['ui', 'api']), true);
+  assert.equal(hasEveryLabel(labelled, ['ui', 'db']), false);
 });
 
 test('moveToSlot targets the task below the slot and skips moves that change nothing', () => {

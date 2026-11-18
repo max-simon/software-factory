@@ -10,6 +10,7 @@ import { usePolling } from '../hooks.ts';
 import {
   describeProjectChange,
   href,
+  labelsByUsage,
   openPullRequests,
   projectMetrics,
   pullRequestNumber,
@@ -17,10 +18,13 @@ import {
   repoName,
   type OpenPullRequest,
   type ProjectMetrics,
+  type TaskView,
 } from '../model.ts';
 import { Board } from './Board.tsx';
 
-export function ProjectOverview({ id }: { id: string }) {
+const shownLabels = 10;
+
+export function ProjectOverview({ id, labels }: { id: string; labels: string[] }) {
   const { data: project, error: projectError } = usePolling(() => api.getProject(id), `project-${id}`);
   const { data: tasks, error: tasksError, set: setTasks } = usePolling(() => api.listProjectTasks(id), `project-tasks-${id}`);
   const metrics = projectMetrics(tasks ?? []);
@@ -50,7 +54,10 @@ export function ProjectOverview({ id }: { id: string }) {
           <a href={href.newTask(id)}>Create the first task</a>
         </div>
       ) : (
-        <Board tasks={tasks} onMoved={setTasks} />
+        <>
+          <LabelFilter id={id} tasks={tasks} active={labels} />
+          <Board tasks={tasks} labels={labels} onMoved={setTasks} />
+        </>
       )}
 
       {changes.length > 0 && (
@@ -60,6 +67,30 @@ export function ProjectOverview({ id }: { id: string }) {
         </details>
       )}
     </article>
+  );
+}
+
+/**
+ * Chips for the most used labels; each toggles a board filter kept in the URL.
+ * Active labels always show, even unused ones, so every filter can be turned off.
+ */
+function LabelFilter({ id, tasks, active }: { id: string; tasks: readonly TaskView[]; active: readonly string[] }) {
+  const popular = labelsByUsage(tasks).slice(0, shownLabels);
+  const chips = [...active.filter((label) => !popular.includes(label)), ...popular];
+  if (chips.length === 0) return null;
+  const toggle = (label: string) => {
+    const next = active.includes(label) ? active.filter((l) => l !== label) : [...active, label];
+    // Replaces the entry, so the back button leaves the board instead of undoing each toggle.
+    location.replace(href.project(id, next));
+  };
+  return (
+    <div className="label-filter" role="group" aria-label="Filter by label">
+      {chips.map((label) => (
+        <button key={label} type="button" className="label" aria-pressed={active.includes(label)} onClick={() => toggle(label)}>
+          {label}
+        </button>
+      ))}
+    </div>
   );
 }
 

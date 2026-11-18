@@ -7,6 +7,7 @@ import { HeartbeatNote, Spinner, specReviewLabel, StatusDot } from '../component
 import { useAction } from '../hooks.ts';
 import {
   boardColumns,
+  hasEveryLabel,
   heartbeatInfo,
   href,
   inputSummary,
@@ -34,10 +35,22 @@ function waitingCounts(tasks: readonly TaskView[]): Waiting {
   );
 }
 
-/** One project's tasks in columns; `onMoved` receives the project's tasks in their new order. */
-export function Board({ tasks, onMoved }: { tasks: readonly TaskView[]; onMoved: (tasks: TaskView[]) => void }) {
+/**
+ * One project's tasks in columns, only those with every one of `labels`;
+ * `onMoved` receives the project's tasks in their new order.
+ */
+export function Board({
+  tasks,
+  labels,
+  onMoved,
+}: {
+  tasks: readonly TaskView[];
+  labels: readonly string[];
+  onMoved: (tasks: TaskView[]) => void;
+}) {
   const moving = useAction();
-  const columns = boardColumns(tasks);
+  const columns = boardColumns(tasks.filter((task) => hasEveryLabel(task, labels)));
+  // Counted over all tasks: a dependency hidden by the filter still holds its dependents back.
   const waiting = waitingCounts(tasks);
 
   const move = (column: BoardColumn, id: string, slot: number) => {

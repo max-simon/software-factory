@@ -21,7 +21,8 @@ export type { TaskView };
 export type Route =
   | { name: 'home' }
   | { name: 'new-project' }
-  | { name: 'project'; id: string }
+  /** `labels` filters the board to tasks that carry every one of them. */
+  | { name: 'project'; id: string; labels: string[] }
   | { name: 'edit-project'; id: string }
   | { name: 'new-task'; projectId: string }
   | { name: 'task'; id: string }
@@ -39,16 +40,15 @@ export function parseRoute(hash: string): Route {
   const raw = hash.replace(/^#\/?/, '');
   const queryAt = raw.indexOf('?');
   const path = queryAt === -1 ? raw : raw.slice(0, queryAt);
+  const query = new URLSearchParams(queryAt === -1 ? '' : raw.slice(queryAt + 1));
   const [first, id, action] = path.split('/').map(decodeURIComponent);
-  if (first === 'login') {
-    return { name: 'login', next: loginNext(new URLSearchParams(queryAt === -1 ? '' : raw.slice(queryAt + 1)).get('next')) };
-  }
+  if (first === 'login') return { name: 'login', next: loginNext(query.get('next')) };
   if (first === 'account') return { name: 'account' };
   if (first === 'projects' && id === 'new') return { name: 'new-project' };
   if (first === 'projects' && id) {
     if (action === 'edit') return { name: 'edit-project', id };
     if (action === 'new-task') return { name: 'new-task', projectId: id };
-    return { name: 'project', id };
+    return { name: 'project', id, labels: [...new Set(query.getAll('label').filter(Boolean))] };
   }
   if (first === 'tasks' && id) return action === 'edit' ? { name: 'edit', id } : { name: 'task', id };
   return { name: 'home' };
@@ -59,7 +59,8 @@ const projectPath = (id: string) => `#/projects/${encodeURIComponent(id)}`;
 export const href = {
   home: '#/',
   newProject: '#/projects/new',
-  project: projectPath,
+  project: (id: string, labels: readonly string[] = []) =>
+    labels.length === 0 ? projectPath(id) : `${projectPath(id)}?${new URLSearchParams(labels.map((label) => ['label', label]))}`,
   editProject: (id: string) => `${projectPath(id)}/edit`,
   newTask: (projectId: string) => `${projectPath(projectId)}/new-task`,
   task: (id: string) => `#/tasks/${encodeURIComponent(id)}`,
@@ -161,6 +162,16 @@ export function boardColumns(tasks: readonly TaskView[]): BoardColumn[] {
     return { key, title, isRanked, tasks: sorted };
   });
 }
+
+/** The project's labels, most used first and alphabetically among equals. */
+export function labelsByUsage(tasks: readonly TaskView[]): string[] {
+  const counts = new Map<string, number>();
+  for (const label of tasks.flatMap((task) => task.labels)) counts.set(label, (counts.get(label) ?? 0) + 1);
+  return [...counts].sort(([a, x], [b, y]) => y - x || a.localeCompare(b)).map(([label]) => label);
+}
+
+export const hasEveryLabel = (task: Pick<TaskView, 'labels'>, labels: readonly string[]): boolean =>
+  labels.every((label) => task.labels.includes(label));
 
 /**
  * The move that puts task `id` at `slot` of its column (0 = top, length = bottom),
