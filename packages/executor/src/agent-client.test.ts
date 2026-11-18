@@ -45,12 +45,13 @@ test('sends the bearer token and JSON body and returns the task', async () => {
 });
 
 test('maps every operation to its route', async () => {
+  const tokens = { inputTokens: 1, outputTokens: 2, cacheReadTokens: 3, cacheCreationTokens: 4 };
   reset((_req, res) => json(res, 200, { task: sampleTask() }));
   await client.getTask();
   await client.reportDecision({ problem: 'p', options: [], reasoning: 'r' });
   await client.reportArtifact({ title: 't', kind: 'k', content: 'c' });
   await client.reportPullRequest({ url: 'https://github.com/o/r/pull/1', title: 't' });
-  await client.reportMetrics({ durationMs: 1500, costUsd: 0.25 });
+  await client.reportMetrics({ durationMs: 1500, costUsd: 0.25, tokens });
   await client.reportReady();
   await client.reportFailure('broken');
   await client.acceptWork(['f1', 'f2']);
@@ -67,7 +68,7 @@ test('maps every operation to its route', async () => {
       'POST /agent/work/accept',
     ],
   );
-  assert.deepEqual(received[4]!.body, { durationMs: 1500, costUsd: 0.25 });
+  assert.deepEqual(received[4]!.body, { durationMs: 1500, costUsd: 0.25, tokens });
   assert.deepEqual(received[6]!.body, { reason: 'broken' });
   assert.deepEqual(received[7]!.body, { followUpIds: ['f1', 'f2'] });
 });

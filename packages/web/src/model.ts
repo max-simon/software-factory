@@ -13,6 +13,7 @@ import type {
   TaskChange,
   TaskStatus,
   TaskView,
+  TokenUsage,
 } from '@factory/core';
 
 export type { TaskView };
@@ -181,6 +182,8 @@ export interface ProjectMetrics {
   /** Summed over every task; tasks without a report count as zero. */
   costUsd: number;
   durationMs: number;
+  /** Tasks measured before tokens were tracked count only their later tokens. */
+  tokens: number;
   openPullRequests: number;
   mergedPullRequests: number;
 }
@@ -195,6 +198,7 @@ export function projectMetrics(tasks: readonly TaskView[]): ProjectMetrics {
     failed: count('failed'),
     costUsd: tasks.reduce((sum, t) => sum + (t.metrics?.costUsd ?? 0), 0),
     durationMs: tasks.reduce((sum, t) => sum + (t.metrics?.durationMs ?? 0), 0),
+    tokens: tasks.reduce((sum, t) => sum + (t.metrics?.tokens ? totalTokens(t.metrics.tokens) : 0), 0),
     openPullRequests: pullRequests.filter((pr) => pr.status === 'open').length,
     mergedPullRequests: pullRequests.filter((pr) => pr.status === 'merged').length,
   };
@@ -204,6 +208,9 @@ export interface OpenPullRequest {
   pullRequest: PullRequestView;
   task: Pick<TaskView, 'id' | 'title'>;
 }
+
+export const totalTokens = (usage: TokenUsage): number =>
+  usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
 
 /** Every open pull request of the tasks, in their board order. */
 export function openPullRequests(tasks: readonly TaskView[]): OpenPullRequest[] {

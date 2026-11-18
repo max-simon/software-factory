@@ -95,6 +95,7 @@ const plan = [
 ];
 const decision = { problem: 'Session store', options: ['cookie', 'jwt'], chosen: 0, reasoning: 'simpler' };
 const artifact = { title: 'Design', kind: 'markdown', content: '# Login' };
+const tokens = { inputTokens: 1, outputTokens: 2, cacheReadTokens: 3, cacheCreationTokens: 4 };
 const pullRequest = { url: 'https://github.com/acme/app/pull/7', title: 'Add login' };
 const radioQuestion = { problem: 'Which provider?', type: 'radio', options: ['github', 'google'] };
 
@@ -205,6 +206,16 @@ test('session metrics add up, also after the task has ended', async (t) => {
   assert.deepEqual(second.json.task.metrics, { durationMs: 61_500, costUsd: 0.5 });
   const { json } = await call('GET', '/tasks/task-1');
   assert.deepEqual(json.metrics, { durationMs: 61_500, costUsd: 0.5 });
+});
+
+test('session metrics add up token counts', async (t) => {
+  const call = await startApi(t);
+  await call('POST', '/agent/metrics', { body: { durationMs: 1, costUsd: 0.5 } });
+  const { status, json } = await call('POST', '/agent/metrics', { body: { durationMs: 1, costUsd: 0.5, tokens } });
+  assert.equal(status, 200);
+  assert.deepEqual(json.task.metrics, { durationMs: 2, costUsd: 1, tokens });
+  const second = await call('POST', '/agent/metrics', { body: { durationMs: 1, costUsd: 0, tokens } });
+  assert.deepEqual(second.json.task.metrics.tokens, { inputTokens: 2, outputTokens: 4, cacheReadTokens: 6, cacheCreationTokens: 8 });
 });
 
 test('session metrics need the agent token', async (t) => {
@@ -391,6 +402,11 @@ test('invalid bodies return 400 invalid_request', async (t) => {
     ['POST', '/agent/metrics', { durationMs: '1', costUsd: 0 }],
     ['POST', '/agent/metrics', { durationMs: 1, costUsd: null }],
     ['POST', '/agent/metrics', { durationMs: 1, costUsd: 0, tokens: 3 }],
+    ['POST', '/agent/metrics', { durationMs: 1, costUsd: 0, tokens: null }],
+    ['POST', '/agent/metrics', { durationMs: 1, costUsd: 0, tokens: { ...tokens, inputTokens: -1 } }],
+    ['POST', '/agent/metrics', { durationMs: 1, costUsd: 0, tokens: { ...tokens, outputTokens: '2' } }],
+    ['POST', '/agent/metrics', { durationMs: 1, costUsd: 0, tokens: { inputTokens: 1, outputTokens: 2, cacheReadTokens: 3 } }],
+    ['POST', '/agent/metrics', { durationMs: 1, costUsd: 0, tokens: { ...tokens, thinkingTokens: 5 } }],
     ['POST', '/agent/metrics', [1, 0]],
     ['POST', '/agent/metrics', '{"durationMs":1e999,"costUsd":0}'],
   ];

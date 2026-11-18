@@ -6,7 +6,7 @@ import { createDoorbell, type Doorbell } from './doorbell.ts';
 import { createHeartbeat } from './heartbeat.ts';
 import type { CommandResult, RunCommand } from './run-command.ts';
 import { runWorker, type RunnerDeps } from './runner.ts';
-import type { SessionState, SessionStore } from './session-state.ts';
+import { noTokens, type SessionState, type SessionStore } from './session-state.ts';
 import { answerAll, claudeFixture, fakeAgentClient, reviewAll, sampleTask, sendFollowUp, type FakeAgentClient } from './test-support.ts';
 
 /** One agent turn; `beat` fires the heartbeat interval by hand. Returns claude's exit code. */
@@ -133,7 +133,7 @@ test('asks for work, sets up git and the clone, runs the first session, then wai
     /# Task: Add a greeting[\s\S]*Labels: demo\n\n## Project: Greeter\n\nFriendly command-line tools\.\n\n## Specification\n\nPrint hello\./,
   );
   assert.equal(h.fake.task.status, 'ready');
-  assert.deepEqual(h.saved, { sessionId: 'sid-1', costUsd: 0 });
+  assert.deepEqual(h.saved, { sessionId: 'sid-1', costUsd: 0, tokens: noTokens });
   assert.ok(h.logs.includes('no work, waiting for the doorbell'));
 });
 
@@ -375,18 +375,26 @@ const firstTurn = claudeFixture('result-first-turn.jsonl');
 const resumedTurn = claudeFixture('result-resumed-turn.jsonl');
 const firstTotal = 0.0008607700000000001;
 const resumedTotal = 0.001417005;
+const firstTokens = { inputTokens: 2, outputTokens: 4, cacheReadTokens: 11507, cacheCreationTokens: 5948 };
+const resumedTokens = { inputTokens: 4, outputTokens: 7, cacheReadTokens: 25698, cacheCreationTokens: 9249 };
+// Matches the fixture's own per-turn count, `model_usage_since_last_result`.
+const resumedIncrease = { inputTokens: 2, outputTokens: 3, cacheReadTokens: 14191, cacheCreationTokens: 3301 };
 
-test('every turn reports its duration and cost increase, across runner processes', async () => {
+test('every turn reports its duration, cost and token increase, across runner processes', async () => {
   const h = harness({ turns: [ask, ready], claudeOutputs: [firstTurn, resumedTurn], turnMs: [90_000, 30_000] });
   await h.start();
-  assert.deepEqual(h.saved, { sessionId: 'sid-1', costUsd: firstTotal });
+  assert.deepEqual(h.saved, { sessionId: 'sid-1', costUsd: firstTotal, tokens: firstTokens });
   answerAll(h.fake, ['8080']);
   await h.start();
   assert.deepEqual(h.fake.metrics, [
-    { durationMs: 90_000, costUsd: firstTotal },
-    { durationMs: 30_000, costUsd: resumedTotal - firstTotal },
+    { durationMs: 90_000, costUsd: firstTotal, tokens: firstTokens },
+    {
+      durationMs: 30_000,
+      costUsd: resumedTotal - firstTotal,
+      tokens: resumedIncrease,
+    },
   ]);
-  assert.deepEqual(h.saved, { sessionId: 'sid-1', costUsd: resumedTotal });
+  assert.deepEqual(h.saved, { sessionId: 'sid-1', costUsd: resumedTotal, tokens: resumedTokens });
 });
 
 test('a failed turn reports its metrics before the failure', async () => {
@@ -413,16 +421,34 @@ test('a lost metrics report neither fails the task nor is counted again', async 
   await h.start();
   assert.equal(h.fake.task.status, 'ready');
   assert.ok(h.logs.includes('could not report metrics: control plane restarting'));
-  assert.deepEqual(h.fake.metrics, [{ durationMs: 1000, costUsd: resumedTotal - firstTotal }]);
+  assert.deepEqual(h.fake.metrics, [{ durationMs: 1000, costUsd: resumedTotal - firstTotal, tokens: resumedIncrease }]);
 });
 
-test('a turn without a cost total reports none, and the next total catches up', async () => {
+test('a turn without totals reports no cost and no tokens, and the next totals catch up', async () => {
   const h = harness({ turns: [ask, ready], claudeOutputs: ['', resumedTurn] });
   await h.start();
   answerAll(h.fake, ['8080']);
   await h.start();
   assert.deepEqual(h.fake.metrics, [
     { durationMs: 1000, costUsd: 0 },
-    { durationMs: 1000, costUsd: resumedTotal },
+    { durationMs: 1000, costUsd: resumedTotal, tokens: resumedTokens },
   ]);
+});
+
+test('a session saved before tokens were tracked reports its whole token total on the next turn', async () => {
+  const h = harness({ turns: [ask, ready], claudeOutputs: [firstTurn, resumedTurn] });
+  await h.start();
+  h.saved = { sessionId: 'sid-1', costUsd: firstTotal, tokens: noTokens };
+  answerAll(h.fake, ['8080']);
+  await h.start();
+  assert.deepEqual(h.fake.metrics.at(-1)?.tokens, resumedTokens);
+});
+
+test('a token total below its baseline reports no increase for that counter', async () => {
+  const h = harness({ turns: [ask, ready], claudeOutputs: [firstTurn, resumedTurn] });
+  await h.start();
+  h.saved = { sessionId: 'sid-1', costUsd: firstTotal, tokens: { ...firstTokens, outputTokens: 100 } };
+  answerAll(h.fake, ['8080']);
+  await h.start();
+  assert.deepEqual(h.fake.metrics.at(-1)?.tokens, { ...resumedIncrease, outputTokens: 0 });
 });

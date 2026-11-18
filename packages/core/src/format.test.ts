@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { formatCost, formatDuration } from './format.ts';
+import { formatCost, formatDuration, formatTokens } from './format.ts';
 
 test('formats durations in the two largest units, truncated', () => {
   const cases: Array<[number, string]> = [
@@ -34,4 +34,23 @@ test('formats costs in dollars, rounded to cents', () => {
     [1234.5, '$1234.50'],
   ];
   for (const [usd, text] of cases) assert.equal(formatCost(usd), text, String(usd));
+});
+
+test('formats token counts compactly, truncated', () => {
+  const cases: Array<[number, string]> = [
+    [0, '0'],
+    [950, '950'],
+    [999, '999'],
+    [1000, '1k'],
+    [1234, '1.2k'],
+    [9999, '9.9k'],
+    [10_000, '10k'],
+    [340_999, '340k'],
+    [999_999, '999k'],
+    [1_000_000, '1M'],
+    [1_250_000, '1.2M'],
+    [12_345_678, '12M'],
+    [2_500_000_000, '2.5B'],
+  ];
+  for (const [count, text] of cases) assert.equal(formatTokens(count), text, String(count));
 });

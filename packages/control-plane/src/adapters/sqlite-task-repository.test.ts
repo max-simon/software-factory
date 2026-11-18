@@ -194,6 +194,9 @@ test('round-trips session metrics and their absence', () => {
   assert.equal('metrics' in repo.get('b')!, false);
   repo.save({ ...measured, metrics: { durationMs: 724_000, costUsd: 1.5 } });
   assert.deepEqual(repo.get('a')?.metrics, { durationMs: 724_000, costUsd: 1.5 });
+  const tokens = { inputTokens: 1, outputTokens: 2, cacheReadTokens: 3, cacheCreationTokens: 4 };
+  repo.save({ ...measured, metrics: { durationMs: 724_000, costUsd: 1.5, tokens } });
+  assert.deepEqual(repo.get('a')?.metrics, { durationMs: 724_000, costUsd: 1.5, tokens });
 });
 
 test('finds a task by token hash', () => {

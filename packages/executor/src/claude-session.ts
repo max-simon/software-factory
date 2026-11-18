@@ -1,4 +1,4 @@
-import type { TaskModel } from '@factory/core';
+import type { TaskModel, TokenUsage } from '@factory/core';
 import type { AgentSession, SessionTurn, TurnOutcome } from './agent-session.ts';
 import { activityOfLine } from './claude-status.ts';
 import type { BridgeConfig } from './config.ts';
@@ -65,10 +65,12 @@ async function runTurn(
   const options = { cwd: settings.cwd, teeOutput: true, ...(onStdoutLine && { onStdoutLine }) };
   const result = await run('claude', claudeArgs(settings, turn), options);
   const totalCostUsd = parseTotalCostUsd(result.stdout);
+  const totalTokens = parseTotalTokens(result.stdout);
   const failure = result.code === 0 ? undefined : failureOf(result.code, sessionError(result.stdout, result.stderr));
   return {
     ...(failure !== undefined && { failure }),
     ...(totalCostUsd !== undefined && { totalCostUsd }),
+    ...(totalTokens !== undefined && { totalTokens }),
   };
 }
 
@@ -82,6 +84,38 @@ export function parseTotalCostUsd(stdout: string): number | undefined {
   const cost = lastResultEvent(stdout)?.total_cost_usd;
   return typeof cost === 'number' && Number.isFinite(cost) && cost >= 0 ? cost : undefined;
 }
+
+// `modelUsage` holds running totals per model, like `total_cost_usd`. A malformed
+// model entry is skipped: it loses that model's count, never the turn.
+export function parseTotalTokens(stdout: string): TokenUsage | undefined {
+  const modelUsage = lastResultEvent(stdout)?.modelUsage;
+  if (typeof modelUsage !== 'object' || modelUsage === null || Array.isArray(modelUsage)) return undefined;
+  const usages = Object.values(modelUsage).map(parseModelUsage).filter((usage) => usage !== undefined);
+  if (usages.length === 0) return undefined;
+  return {
+    inputTokens: sum(usages.map((u) => u.inputTokens)),
+    outputTokens: sum(usages.map((u) => u.outputTokens)),
+    cacheReadTokens: sum(usages.map((u) => u.cacheReadTokens)),
+    cacheCreationTokens: sum(usages.map((u) => u.cacheCreationTokens)),
+  };
+}
+
+function parseModelUsage(entry: unknown): TokenUsage | undefined {
+  if (typeof entry !== 'object' || entry === null) return undefined;
+  const inputTokens = countOf(Reflect.get(entry, 'inputTokens'));
+  const outputTokens = countOf(Reflect.get(entry, 'outputTokens'));
+  const cacheReadTokens = countOf(Reflect.get(entry, 'cacheReadInputTokens'));
+  const cacheCreationTokens = countOf(Reflect.get(entry, 'cacheCreationInputTokens'));
+  if (inputTokens === undefined || outputTokens === undefined || cacheReadTokens === undefined || cacheCreationTokens === undefined) {
+    return undefined;
+  }
+  return { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens };
+}
+
+const countOf = (value: unknown): number | undefined =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+
+const sum = (values: number[]): number => values.reduce((total, value) => total + value, 0);
 
 // The execution server's log is gone once the task fails, so the failure
 // reason must carry the cause. stream-json ends with a `result` event that
@@ -106,6 +140,7 @@ interface StreamEvent {
   type?: unknown;
   result?: unknown;
   total_cost_usd?: unknown;
+  modelUsage?: unknown;
 }
 
 function parseEvent(line: string): StreamEvent | undefined {

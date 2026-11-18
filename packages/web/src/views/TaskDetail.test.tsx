@@ -1,9 +1,10 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, test } from 'vitest';
+import type { SessionMetrics } from '@factory/core';
 import type { TaskView } from '../model.ts';
 import { Board } from './Board.tsx';
 import { OpenPullRequests } from './ProjectOverview.tsx';
-import { Header, PullRequestList } from './TaskDetail.tsx';
+import { Consumption, Header, PullRequestList } from './TaskDetail.tsx';
 
 const task = (overrides: Partial<TaskView>): TaskView => ({
   id: 't1',
@@ -78,4 +79,29 @@ test('pull requests show their state as an icon labelled with the review state',
   expect(html).toContain('aria-label="Merged without review"');
   const overview = renderToStaticMarkup(<OpenPullRequests pullRequests={[{ pullRequest: { ...pr(false), reviews: [] }, task: { id: 't1', title: 'Task' } }]} />);
   expect(overview).toContain('aria-label="Open · not reviewed"');
+});
+
+const consumption = (metrics: SessionMetrics) => renderToStaticMarkup(<Consumption metrics={metrics} />);
+
+test('the consumption report shows time, estimated cost and tokens with their breakdown', () => {
+  const html = consumption({
+    durationMs: 723_000,
+    costUsd: 1.2345,
+    tokens: { inputTokens: 1_234, outputTokens: 56_000, cacheReadTokens: 1_250_000, cacheCreationTokens: 340_000 },
+  });
+  expect(html).toContain('12m 03s');
+  expect(html).toContain('$1.23');
+  expect(html).toContain('estimate at list prices');
+  expect(html).toContain('1.6M');
+  expect(html).toContain('1.2k input · 56k output · 1.2M cache read · 340k cache write');
+});
+
+test('the consumption report of a task measured before tokens were tracked shows them as not recorded', () => {
+  const html = consumption({ durationMs: 1000, costUsd: 0.5 });
+  expect(html).toContain('$0.50');
+  expect(html).toContain('not recorded');
+});
+
+test('the task header leaves the consumption to its own section', () => {
+  expect(render(task({ metrics: { durationMs: 723_000, costUsd: 1.2345 } }))).not.toContain('$1.23');
 });

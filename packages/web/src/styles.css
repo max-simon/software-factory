@@ -1061,6 +1061,24 @@ ul.plain li + li {
   color: var(--muted);
 }
 
+/* Consumption */
+
+.consumption {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 16px;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.consumption dt {
+  color: var(--muted);
+}
+
+.consumption dd {
+  margin: 0;
+}
+
 /* Plan pipeline */
 
 .pipeline {
