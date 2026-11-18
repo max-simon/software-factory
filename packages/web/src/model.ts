@@ -215,6 +215,8 @@ export interface PullRequestIndicator {
   review: PullRequestReviewMark;
   /** The full state in words, for the hover title and screen readers. */
   label: string;
+  /** Set only on an open pull request that conflicts with its base branch. */
+  hasConflicts?: true;
 }
 
 const openLabels: Record<PullRequestReviewMark, string> = {
@@ -225,7 +227,7 @@ const openLabels: Record<PullRequestReviewMark, string> = {
 };
 
 /** Where a pull request stands and how far its review got, for its state icon. */
-export function pullRequestIndicator(pr: Pick<PullRequest, 'status' | 'reviews'>): PullRequestIndicator {
+export function pullRequestIndicator(pr: Pick<PullRequest, 'status' | 'reviews' | 'hasConflicts'>): PullRequestIndicator {
   const review: PullRequestReviewMark = (pr.reviews ?? []).length === 0 ? 'none' : (reviewDecision(pr) ?? 'commented');
   const isReviewed = review !== 'none';
   const labels: Record<PullRequestStatus, string> = {
@@ -233,6 +235,10 @@ export function pullRequestIndicator(pr: Pick<PullRequest, 'status' | 'reviews'>
     merged: isReviewed ? 'Merged after review' : 'Merged without review',
     closed: isReviewed ? 'Closed after review' : 'Closed',
   };
+  // A merged or closed pull request may still read as conflicting; it no longer matters.
+  if (pr.status === 'open' && pr.hasConflicts === true) {
+    return { state: pr.status, review, label: `${labels.open} · merge conflicts`, hasConflicts: true };
+  }
   return { state: pr.status, review, label: labels[pr.status] };
 }
 

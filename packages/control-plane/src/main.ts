@@ -18,6 +18,7 @@ import { Dispatcher } from './dispatcher.ts';
 import { Hooks } from './hooks/hooks.ts';
 import { InputReviewHook } from './hooks/input-review-hook.ts';
 import { PrReviewHook } from './hooks/pr-review-hook.ts';
+import { PullRequestConflictedHook } from './hooks/pull-request-conflicted-hook.ts';
 import { PullRequestReviewedHook } from './hooks/pull-request-reviewed-hook.ts';
 import { SpecReviewHook } from './hooks/spec-review-hook.ts';
 import { agentRoutes } from './http/agent-routes.ts';
@@ -75,6 +76,7 @@ function main(): void {
   hooks.register(new InputReviewHook({ tasks, service, projects, reviewer, reviews }));
   hooks.register(new PrReviewHook({ tasks, pullRequests, reviewer, projects, reviews }));
   hooks.register(new PullRequestReviewedHook({ lifecycle }));
+  hooks.register(new PullRequestConflictedHook({ lifecycle }));
   const users = new SqliteUserRepository(config.dbPath);
   const sessions = new SessionService({
     sessions: new SqliteSessionRepository(config.dbPath),

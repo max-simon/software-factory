@@ -465,6 +465,10 @@ section {
   color: var(--muted);
   opacity: 0.75;
 }
+/* After the state colours, so a conflict overrides open's green. */
+.pr-indicator-conflicted {
+  color: var(--red);
+}
 .pr-indicator-glyph {
   fill: none;
   stroke: currentColor;

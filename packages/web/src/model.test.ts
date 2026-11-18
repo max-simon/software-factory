@@ -116,6 +116,17 @@ test('pullRequestIndicator labels open pull requests by their review decision', 
   assert.equal(open(review(1, 'a', 'approved'), review(2, 'a', 'commented')).review, 'approved');
 });
 
+test('pullRequestIndicator flags merge conflicts of open pull requests only', () => {
+  assert.deepEqual(pullRequestIndicator({ status: 'open', hasConflicts: true }), {
+    state: 'open',
+    review: 'none',
+    label: 'Open · not reviewed · merge conflicts',
+    hasConflicts: true,
+  });
+  assert.deepEqual(pullRequestIndicator({ status: 'open', hasConflicts: false }), { state: 'open', review: 'none', label: 'Open · not reviewed' });
+  assert.deepEqual(pullRequestIndicator({ status: 'merged', hasConflicts: true }), { state: 'merged', review: 'none', label: 'Merged without review' });
+});
+
 test('pullRequestIndicator tells merged and closed pull requests with reviews from those without', () => {
   const reviews = [{ id: 1, author: 'a', state: 'commented' as const, body: '', url: 'u', submittedAt: '2026-01-01T00:00:00Z' }];
   assert.deepEqual(pullRequestIndicator({ status: 'merged', reviews }), { state: 'merged', review: 'commented', label: 'Merged after review' });

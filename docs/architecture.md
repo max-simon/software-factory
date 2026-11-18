@@ -112,8 +112,8 @@ the task is done or its follow-up window ends.
 
 The `PullRequestObserver` reads every open pull request of a task in
 `in_progress`, `input_required` or `ready`, or `failed` while it keeps its
-execution server, once a minute: title, status, head commit and submitted
-reviews by people with a say on the repository (the author's own replies to
+execution server, once a minute: title, status, head commit, base branch,
+whether it conflicts with the base branch, and submitted reviews by people with a say on the repository (the author's own replies to
 review threads are not reviews). It records what changed through
 `LifecycleService.updatePullRequests`, the single entry for pull request
 state. On every save, the `TaskStore` compares the task's pull requests before
@@ -123,12 +123,18 @@ and after, like the changelog, and publishes after the `task.updated` event:
 |---|---|
 | `pull_request.reviewed` | one per review it had not recorded yet; all of them on the first read |
 | `pull_request.pushed` | the head commit moved; not on the first read |
+| `pull_request.conflicted` | an open pull request newly conflicts with its base branch, including on the first read; again only after the conflict was cleared |
 | `pull_request.merged`, `pull_request.closed` | the pull request left `open` |
 
 Events are derived from recorded state, not from how it was learned. A GitHub
 webhook can therefore replace the observer: it records the same changes
 through `updatePullRequests` (finding the task by pull request URL) and the
 observer's loop in `main.ts` is dropped; hooks and dispatcher stay as they are.
+GitHub computes mergeability in the background and answers `mergeable: null`
+until it has, for example right after a push to either branch. An unknown
+mergeability is not a change: the observer does not record it and
+`updatePullRequests` keeps the last known value, so a conflict is not reported
+again each time GitHub recomputes it.
 Polling adds up to a minute of latency, and a change that is undone between
 two reads (a push followed by a force-push back) raises nothing.
 
@@ -258,6 +264,16 @@ starts another PR review.
 - The agent's replies are written with the token that opened the pull request,
   so the observer does not read them as new reviews, and the PR review hook
   only writes conversation comments: neither loops back.
+
+The **pull request conflicted hook** hands each `pull_request.conflicted`
+event to the task's own agent the same way. The follow-up names the pull
+request and its base branch and tells the agent to use the
+`resolve-merge-conflict` skill. The skill merges the base branch into the pull
+request's branch (a merge, not a rebase, so the commits reviewers have seen
+stay intact), resolves each conflict keeping the intent of both sides, verifies,
+pushes without force and reports ready again. A conflict it cannot resolve
+safely is aborted: a supervised task asks the engineer, an autonomous one
+fails. Non-trivial resolutions are reported as decisions.
 
 `PodmanReviewer` runs `podman run --rm -i` on the reviewer image per review,
 with the role (`spec` or `pr`) as argument, passes the request on stdin and

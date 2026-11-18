@@ -131,7 +131,9 @@ stateDiagram-v2
 
 A draft the reviewer finds unclear is held for clarification. A queued task
 waits for the tasks it depends on. A `ready` or `failed` task resumes on a
-follow-up.
+follow-up: from the engineer, or from the control plane when a review is
+submitted on one of its pull requests or one conflicts with its base branch
+(see [hooks](docs/architecture.md#hooks)).
 
 ## Packages
 

@@ -24,6 +24,8 @@ export type PullRequestEvent =
   | { type: 'pull_request.reviewed'; task: Task; pullRequest: PullRequest; review: PullRequestReview }
   /** Its head moved to `pullRequest.headSha`. */
   | { type: 'pull_request.pushed'; task: Task; pullRequest: PullRequest }
+  /** It newly conflicts with its base branch. */
+  | { type: 'pull_request.conflicted'; task: Task; pullRequest: PullRequest }
   | { type: 'pull_request.merged'; task: Task; pullRequest: PullRequest }
   | { type: 'pull_request.closed'; task: Task; pullRequest: PullRequest };
 
@@ -49,6 +51,10 @@ function eventsOf(task: Task, before: PullRequest, after: PullRequest): PullRequ
   const known = new Set(before.reviews?.map((review) => review.id));
   for (const review of after.reviews ?? []) {
     if (!known.has(review.id)) events.push({ type: 'pull_request.reviewed', task, pullRequest: after, review });
+  }
+  // Only a conflict found anew counts: one already reported stays known until the host clears it.
+  if (after.status === 'open' && before.hasConflicts !== true && after.hasConflicts === true) {
+    events.push({ type: 'pull_request.conflicted', task, pullRequest: after });
   }
   if (before.status === 'open' && after.status !== 'open') {
     events.push({ type: `pull_request.${after.status}`, task, pullRequest: after });
