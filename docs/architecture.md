@@ -10,7 +10,7 @@ Detail behind the [README](../README.md): packages, task lifecycle, the worker p
 | `packages/control-plane` | HTTP server on `127.0.0.1:4700`. Login (`/auth/*`), engineer API (`/projects`, `/tasks`) and MCP endpoint (`/mcp`), both behind a browser session or a personal access token; agent API (`/agent/*`, token-authenticated); static web UI. Reads go through the `TaskStore`; changes through one service per actor: `TaskService` (engineer), `AgentService` (agent and runner), `LifecycleService` (the dispatcher). Adapters: SQLite repositories (`node:sqlite`), `PodmanRuntime`, `PodmanReviewer` and `GitHubPullRequests` (REST API). The `Dispatcher` reconciles every 2 s; the `PullRequestObserver` polls GitHub every minute; `Hooks` react to task and pull request events. |
 | `packages/reviewer` | The reviewer image, with three roles picked by its first argument, each with its own system prompt. `spec` reads one task specification with its project and the project's other tasks; `input` reads a supervised task waiting for input, with its open questions and approval requests, and may read the repository and pull requests with `gh` and `git` for context; `pr` reads one pull request reference (URL, head commit, the task it was opened for) and lets the model read the pull request itself with `gh` and `git`. Each takes the request as JSON on stdin, runs one `claude -p` turn with structured output (without tools for `spec`), and prints the answer as JSON on stdout. |
 | `packages/executor` | The container image. Its runner asks the control plane for work, clones the repository, runs one agent turn per piece of work and, once there is none, waits for a nudge on its doorbell; the session state stays on the container's disk, so a restarted runner resumes it. Two agent adapters behind the `AgentSession` port: the `claude` CLI (one process per turn) and `opencode serve` (one HTTP session). The agent reports through a stdio MCP bridge (`report_plan`, `report_decision`, `ask_question`, `report_ready`, …). |
-| `packages/web` | React + Vite UI: login page, account page (display name, password, access tokens), project sidebar, per-project board and dashboard with its open pull requests, task detail with timeline, question and approval forms, follow-ups. Polls the engineer API. |
+| `packages/web` | React + Vite UI: login page, account page (display name, password, access tokens), project sidebar, per-project board and dashboard with its open pull requests, task detail with live activity, timeline, question and approval forms, follow-ups. Polls the engineer API. |
 | `packages/mcp` | Stateless Streamable HTTP MCP handler, mounted by the control plane at `/mcp`, that lets an MCP client create and inspect projects and tasks through the engineer API, passing the caller's session cookie and `Authorization` header on to it. |
 
 ## Task lifecycle
@@ -115,6 +115,22 @@ a loopback port; one that stopped anyway is started instead. A runtime whose
 provider suspends idle machines resumes them on the inbound nudge. Idle
 containers count toward no limit, so on Podman they hold their memory until
 the task is done or its follow-up window ends.
+
+### Live activity
+
+The runner, not the agent, turns the agent's output into short lines
+("Running Bash: yarn test", "Writing: …" with the start of a response): it
+parses the claude CLI's `stream-json` events or opencode's event stream, so
+the agent spends no tokens on it. A heartbeat carries only the latest line,
+and the control plane stores only the latest heartbeat of a task (one row,
+replaced). For the engineer to follow a turn, the runner also batches every
+line and sends it to `POST /agent/activity`, at most once every 2 s and once
+more when the turn ends. The control plane keeps these in memory only
+(`ActivityFeed`): up to 300 lines per task and 50 tasks, the least recently
+active task dropped first. Accepting work starts a new turn and drops the
+previous one's lines. A control-plane restart loses them, and a failed batch
+is not resent. `GET /tasks/:id/activity` returns the current turn's lines;
+the task page polls it.
 
 ## Pull request events
 

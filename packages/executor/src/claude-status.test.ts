@@ -12,7 +12,9 @@ test('session events', () => {
 });
 
 test('assistant content blocks', () => {
-  assert.equal(activityOf(assistant({ type: 'text', text: 'Done.' })), 'Writing response');
+  assert.equal(activityOf(assistant({ type: 'text', text: 'Done.\n\nAll  tests pass.' })), 'Writing: Done. All tests pass.');
+  assert.equal(activityOf(assistant({ type: 'text', text: '  ' })), 'Writing response');
+  assert.equal(activityOf(assistant({ type: 'text', text: 'x'.repeat(200) })), `Writing: ${'x'.repeat(110)}…`);
   assert.equal(activityOf(assistant({ type: 'thinking', thinking: 'hmm' })), 'Thinking');
   assert.equal(activityOf(assistant({ type: 'thinking', thinking: 'hmm' }, { type: 'tool_use', name: 'Glob', input: {} })), 'Running Glob');
   assert.equal(activityOf(assistant()), undefined);

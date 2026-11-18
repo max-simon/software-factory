@@ -1008,6 +1008,38 @@ ul.plain li + li {
   margin-top: 4px;
 }
 
+/* Live activity: one compact line per step of the agent's turn, newest first */
+
+.activity {
+  max-height: 240px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  font-size: 12px;
+}
+
+.activity-entry {
+  display: grid;
+  grid-template-columns: 10ch minmax(0, 1fr);
+  gap: 10px;
+  padding: 2px 0;
+  color: var(--muted);
+}
+
+.activity-entry:first-child {
+  color: var(--text);
+}
+
+.activity-entry time {
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+.activity-text {
+  overflow-wrap: anywhere;
+}
+
 /* Changelog: one compact line per change */
 
 .changelog {

@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { AgentApiError } from './agent-client.ts';
 import { createClaudeSession } from './claude-session.ts';
 import { createDoorbell, type Doorbell } from './doorbell.ts';
+import { createActivityReporter } from './activity-reporter.ts';
 import { createHeartbeat } from './heartbeat.ts';
 import type { CommandResult, RunCommand } from './run-command.ts';
 import { runWorker, type RunnerDeps } from './runner.ts';
@@ -104,6 +105,8 @@ function harness(options: {
         return () => (beat = () => {});
       },
     }),
+    // Waits for no timer: the lines of one callback burst share a batch.
+    activity: createActivityReporter({ send: (entries) => fake.sendActivity(entries), delayMs: 2_000, log: (message) => h.logs.push(message), defer: (run) => (queueMicrotask(run), () => {}) }),
     doorbell: options.doorbell ?? closedDoorbell(),
   });
   const h: Harness = { fake, commands: [], prompts: [], sessionIds: [], logs: [], saved: undefined, retries: 0, start: () => runWorker(deps()) };
@@ -356,6 +359,29 @@ test('heartbeats run only while working and carry the CLI activity', async () =>
     { phase: 'working', activity: 'Running Bash: yarn test' },
     { phase: 'working' },
   ]);
+});
+
+test('reports every activity line of a turn, sent before the runner asks for work again', async () => {
+  const h = harness({
+    turns: [ready],
+    claudeLines: [
+      '{"type":"system","subtype":"init"}',
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'yarn test' } }] } }),
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'All  green.' }] } }),
+    ],
+  });
+  await h.start();
+  assert.deepEqual(h.fake.activity.flat(), ['Starting session', 'Running Bash: yarn test', 'Writing: All green.']);
+});
+
+test('failing activity reports do not fail the task', async () => {
+  const h = harness({ turns: [ready], claudeLines: ['{"type":"system","subtype":"init"}'] });
+  h.fake.sendActivity = async () => {
+    throw new Error('control plane down');
+  };
+  assert.equal(await h.start(), 0);
+  assert.equal(h.fake.task.status, 'ready');
+  assert.ok(h.logs.includes('activity report failed: control plane down'));
 });
 
 test('failing heartbeats do not fail the task', async () => {

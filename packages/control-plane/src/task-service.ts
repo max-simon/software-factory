@@ -15,6 +15,7 @@ import {
   returnToDraft,
   reviewItem,
   startTask,
+  type ActivityEntry,
   type ChangeAuthor,
   type ExecutionRuntime,
   type NewTask,
@@ -25,10 +26,12 @@ import {
   type Task,
   type TaskEdit,
 } from '@factory/core';
+import type { ActivityFeed } from './activity-feed.ts';
 import type { TaskStore } from './task-store.ts';
 
 export interface TaskServiceDeps {
   tasks: TaskStore;
+  activity: ActivityFeed;
   runtime: ExecutionRuntime;
   newId?: () => string;
 }
@@ -44,11 +47,13 @@ export interface ByReviewer {
  */
 export class TaskService {
   readonly #tasks: TaskStore;
+  readonly #activity: ActivityFeed;
   readonly #runtime: ExecutionRuntime;
   readonly #newId: () => string;
 
   constructor(deps: TaskServiceDeps) {
     this.#tasks = deps.tasks;
+    this.#activity = deps.activity;
     this.#runtime = deps.runtime;
     this.#newId = deps.newId ?? (() => randomBytes(5).toString('hex'));
   }
@@ -144,6 +149,12 @@ export class TaskService {
     const console = agentConsoleOf(this.#tasks.get(id));
     // opencode fixes the user name of its Basic auth.
     return { url: console.url, username: 'opencode', password: console.password };
+  }
+
+  /** What the agent did in its current turn, oldest first. */
+  activity(id: string): ActivityEntry[] {
+    this.#tasks.get(id);
+    return this.#activity.list(id);
   }
 }
 

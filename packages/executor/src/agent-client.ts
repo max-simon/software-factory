@@ -33,6 +33,8 @@ export interface AgentClient {
   reportFailure(reason: string): Promise<AgentTaskView>;
   /** Sent by the runner, never by the agent; the control plane stamps the time. */
   sendHeartbeat(heartbeat: Omit<Heartbeat, 'at'>): Promise<void>;
+  /** Sent by the runner: what the agent did since the last report, oldest first. */
+  sendActivity(entries: string[]): Promise<void>;
   /** A heartbeat asking for work; undefined means none, and the runner stops. */
   requestWork(): Promise<Work | undefined>;
   /** Takes the work handed out, with its follow-ups `followUpIds`. */
@@ -84,6 +86,7 @@ export function createAgentClient(baseUrl: string, token: string, fetchImpl: typ
     reportReady: () => taskOf('POST', '/agent/ready'),
     reportFailure: (reason) => taskOf('POST', '/agent/failure', { reason }),
     sendHeartbeat: async (heartbeat) => void (await call('POST', '/agent/heartbeat', heartbeat)),
+    sendActivity: async (entries) => void (await call('POST', '/agent/activity', { entries })),
     requestWork: async () => (await call<{ work?: Work }>('POST', '/agent/heartbeat', { phase: 'awaiting_work' })).work,
     acceptWork: (followUpIds) => taskOf('POST', '/agent/work/accept', { followUpIds }),
     getProject: async () => (await call<{ project: Project }>('GET', '/agent/project')).project,

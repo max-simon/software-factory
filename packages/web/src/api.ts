@@ -1,4 +1,4 @@
-import type { NewProject, NewTask, Project, ProjectChange, ProjectEdit, Review, TaskChange, TaskEdit } from '@factory/core';
+import type { ActivityEntry, NewProject, NewTask, Project, ProjectChange, ProjectEdit, Review, TaskChange, TaskEdit } from '@factory/core';
 import { href, parseRoute, type CurrentUser, type TaskView, type UserSummary } from './model.ts';
 
 export class ApiError extends Error {
@@ -87,6 +87,7 @@ export const api = {
   requestClarification: (id: string, note: string) => call<TaskView>('POST', `${task(id)}/clarification`, { note }),
   returnToDraft: (id: string) => call<TaskView>('DELETE', `${task(id)}/clarification`),
   listChanges: (id: string) => call<TaskChange[]>('GET', `${task(id)}/changes`),
+  listActivity: (id: string) => call<ActivityEntry[]>('GET', `${task(id)}/activity`),
   cancelTask: (id: string) => call<TaskView>('POST', `${task(id)}/cancel`),
   restartTask: (id: string) => call<TaskView>('POST', `${task(id)}/restart`),
   deleteTask: (id: string) => call<void>('DELETE', task(id)),
