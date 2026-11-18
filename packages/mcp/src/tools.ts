@@ -30,35 +30,60 @@ function summarize(task: TaskView) {
     agent: task.agent,
     ...(task.repoUrl !== undefined && { repoUrl: task.repoUrl }),
     ...(task.dependsOn.length > 0 && { dependsOn: task.dependsOn }),
+    ...(task.assignees !== undefined && task.assignees.length > 0 && { assignees: task.assignees }),
     updatedAt: task.updatedAt,
     pullRequests: task.pullRequests.map((pullRequest) => pullRequest.url),
   };
 }
 
-/** `saved` says what happened before, so a retry starts the task instead of creating or changing it again. */
-async function startSaved(client: ApiClient, id: string, saved?: string): Promise<TaskView> {
+/**
+ * Runs a step that follows a save. `saved` says what happened before, so a
+ * retry does only the `unfinished` step instead of creating or changing the
+ * task again.
+ */
+async function afterSaved(id: string, saved: string | undefined, unfinished: string, step: () => Promise<TaskView>): Promise<TaskView> {
   try {
-    return await client.startTask(id);
+    return await step();
   } catch (error) {
     if (!(error instanceof ApiError) || saved === undefined) throw error;
-    throw new ApiError(error.status, error.code, `task ${id} ${saved} but not started: ${error.message}`);
+    throw new ApiError(error.status, error.code, `task ${id} ${saved} but ${unfinished}: ${error.message}`);
   }
 }
 
-async function createTask(client: ApiClient, fields: Partial<NewTask>, start: boolean): Promise<TaskView> {
+const startSaved = (client: ApiClient, id: string, saved?: string) =>
+  afterSaved(id, saved, 'not started', () => client.startTask(id));
+
+const assignSaved = (client: ApiClient, id: string, assignees: string[], saved?: string) =>
+  afterSaved(id, saved, 'its assignees were not set', () => client.setAssignees(id, assignees));
+
+async function createTask(
+  client: ApiClient,
+  fields: Partial<NewTask>,
+  assignees: string[] | undefined,
+  start: boolean,
+): Promise<TaskView> {
   const { projectId, title, specification } = fields;
   if (projectId === undefined || title === undefined || specification === undefined) {
     throw new ApiError(400, 'invalid_request', 'a new task needs projectId, title and specification; pass id to change an existing task');
   }
   const created = await client.createTask({ ...fields, projectId, title, specification });
-  return start ? startSaved(client, created.id, 'was created as a draft') : created;
+  const saved = 'was created as a draft';
+  const assigned = assignees === undefined ? created : await assignSaved(client, created.id, assignees, saved);
+  return start ? startSaved(client, created.id, saved) : assigned;
 }
 
 /** The API refuses fields that only creation sets, so they are passed on rather than dropped. */
-async function changeTask(client: ApiClient, id: string, edit: TaskEdit, start: boolean): Promise<TaskView> {
+async function changeTask(
+  client: ApiClient,
+  id: string,
+  edit: TaskEdit,
+  assignees: string[] | undefined,
+  start: boolean,
+): Promise<TaskView> {
   const hasEdit = Object.keys(edit).length > 0;
-  const changed = hasEdit ? await client.editTask(id, edit) : undefined;
-  if (start) return startSaved(client, id, hasEdit ? 'was changed' : undefined);
+  let changed = hasEdit ? await client.editTask(id, edit) : undefined;
+  if (assignees !== undefined) changed = await assignSaved(client, id, assignees, hasEdit ? 'was changed' : undefined);
+  if (start) return startSaved(client, id, changed === undefined ? undefined : 'was changed');
   return changed ?? client.getTask(id);
 }
 
@@ -84,7 +109,7 @@ export function registerTools(server: McpServer, client: ApiClient): void {
     'set_task',
     {
       description:
-        'Create a factory task, or change one by passing its id. A new task is a draft; start: true queues it for an agent. A queued task starts only once every task in dependsOn is done, so a whole chain can be queued at once. Title, specification and labels can change until the task is queued, dependsOn until it starts; projectId, repoUrl, baseBranch, autonomyMode, model and agent are set on creation only.',
+        'Create a factory task, or change one by passing its id. A new task is a draft; start: true queues it for an agent. A queued task starts only once every task in dependsOn is done, so a whole chain can be queued at once. Title, specification and labels can change until the task is queued, dependsOn until it starts, assignees in any status; projectId, repoUrl, baseBranch, autonomyMode, model and agent are set on creation only.',
       inputSchema: {
         id: z.string().min(1).optional().describe('The task to change; omit to create one'),
         projectId: z.string().min(1).optional().describe('Required to create: the project the task belongs to; see list_projects'),
@@ -103,16 +128,27 @@ export function registerTools(server: McpServer, client: ApiClient): void {
           .array(z.string().min(1))
           .optional()
           .describe('Ids of tasks in the same project that must be done before this one starts, the complete list; see list_tasks'),
+        assignees: z
+          .array(z.string().min(1))
+          .optional()
+          .describe('User ids assigned to the task, the complete list; see list_users. Can change in any status'),
         start: z.boolean().optional().describe('Queue the task once it is saved. Defaults to false.'),
       },
     },
-    ({ id, start = false, ...fields }) =>
-      relay(() => (id === undefined ? createTask(client, fields, start) : changeTask(client, id, fields, start))),
+    ({ id, assignees, start = false, ...fields }) =>
+      relay(() =>
+        id === undefined ? createTask(client, fields, assignees, start) : changeTask(client, id, fields, assignees, start),
+      ),
+  );
+  server.registerTool(
+    'list_users',
+    { description: 'List users with id, username, display name and whether they are disabled. Tasks name users by id.', inputSchema: {} },
+    () => relay(() => client.listUsers()),
   );
   server.registerTool(
     'list_tasks',
     {
-      description: 'List factory tasks with id, project id, title, status, model, agent, repo and pull request URLs.',
+      description: 'List factory tasks with id, project id, title, status, model, agent, repo, assignees and pull request URLs.',
       inputSchema: {
         projectId: z.string().min(1).optional().describe('Only tasks of this project'),
         status: z
