@@ -1,5 +1,6 @@
 import type { Approval, ReviewerNote, TaskStatus } from '@factory/core';
 import { heartbeatInfo, statusLabel, type TaskView } from '../model.ts';
+import { UserName } from './UserName.tsx';
 
 export function StatusDot({ status }: { status: TaskStatus }) {
   return <span className={`dot status-${status}`} title={statusLabel(status)} aria-hidden />;
@@ -54,8 +55,17 @@ export function ApprovalNote({ approval }: { approval: Approval | undefined }) {
     <p className="approval-note">
       <ApprovalBadge status={approval.status} />
       {approval.comment && <span className="muted"> {approval.comment}</span>}
-      <ByReviewer note={approval.byReviewer} />
+      {approval.byReviewer ? <ByReviewer note={approval.byReviewer} /> : approval.status !== 'pending' && <ByUser id={approval.reviewedBy} />}
     </p>
+  );
+}
+
+/** Names the user who gave input; an engineer's input from before users existed shows as unattributed. */
+export function ByUser({ id }: { id: string | undefined }) {
+  return (
+    <span className="by-user">
+      by <UserName id={id} />
+    </span>
   );
 }
 

@@ -83,12 +83,15 @@ function main(): void {
     maxLifetimeMs: config.sessionMaxDays * 86_400_000,
   });
   const accessTokens = new AccessTokenService({ tokens: new SqliteAccessTokenRepository(config.dbPath), users });
+  const hasher = new ScryptPasswordHasher();
   const routes = [
     ...authRoutes({
-      authenticator: new LocalPasswordAuthenticator({ users, passwords: users, hasher: new ScryptPasswordHasher() }),
+      authenticator: new LocalPasswordAuthenticator({ users, passwords: users, hasher }),
       sessions,
       users,
       throttle: new LoginThrottle(),
+      passwords: users,
+      hasher,
     }),
     ...tokenRoutes(accessTokens),
     ...engineerRoutes(tasks, service, projects, (agent) => unavailableAgent(config.agentCredentials, agent), reviews),

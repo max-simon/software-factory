@@ -5,6 +5,10 @@ import {
   heartbeatInfo,
   canSendFollowUp,
   describeChange,
+  describeProjectChange,
+  describeUser,
+  mcpAddCommand,
+  toUserMap,
   inputSummary,
   moveToSlot,
   openInput,
@@ -56,6 +60,50 @@ test('parseRoute maps hashes to views and falls back to home', () => {
   assert.deepEqual(parseRoute('#/tasks/ab12'), { name: 'task', id: 'ab12' });
   assert.deepEqual(parseRoute('#/tasks/ab12/edit'), { name: 'edit', id: 'ab12' });
   assert.deepEqual(parseRoute('#/nonsense'), { name: 'home' });
+  assert.deepEqual(parseRoute('#/account'), { name: 'account' });
+  assert.deepEqual(parseRoute('#/login'), { name: 'login', next: '#/' });
+  assert.deepEqual(parseRoute('#/login?next=%23%2Ftasks%2Fab12'), { name: 'login', next: '#/tasks/ab12' });
+});
+
+test('a login returns only to a page of this app, never to the login itself', () => {
+  for (const next of ['https://evil.example', 'javascript:alert(1)', '#/login', '#/login?next=%23%2Faccount', '']) {
+    assert.deepEqual(parseRoute(`#/login?${new URLSearchParams({ next })}`), { name: 'login', next: '#/' }, next);
+  }
+});
+
+test('href.login and parseRoute agree on where to return', () => {
+  assert.equal(href.login(), '#/login');
+  assert.equal(href.login('#/'), '#/login');
+  for (const next of ['#/tasks/a%2Fb', '#/projects/p1/edit', '#/account']) {
+    assert.deepEqual(parseRoute(href.login(next)), { name: 'login', next });
+  }
+  assert.deepEqual(parseRoute(href.account), { name: 'account' });
+});
+
+test('describeUser names a user by its current display name, an unknown id by itself, a missing one as unattributed', () => {
+  const users = toUserMap([
+    { id: 'u1', username: 'ada', displayName: 'Ada Lovelace', disabled: false },
+    { id: 'u2', username: 'bob', displayName: 'Bob', disabled: true },
+  ]);
+  assert.deepEqual(describeUser('u1', users), { text: 'Ada Lovelace', title: 'ada (u1)', kind: 'known' });
+  assert.deepEqual(describeUser('u2', users), { text: 'Bob', title: 'bob (u2) · disabled', kind: 'known' });
+  assert.equal(describeUser('gone', users).text, 'gone');
+  assert.equal(describeUser('gone', users).kind, 'unknown');
+  assert.equal(describeUser(undefined, users).text, 'engineer (unattributed)');
+});
+
+test('mcpAddCommand adds the factory MCP server with the token as bearer', () => {
+  assert.equal(
+    mcpAddCommand('http://127.0.0.1:4700', 'fct_abc'),
+    'claude mcp add --transport http factory http://127.0.0.1:4700/mcp --header "Authorization: Bearer fct_abc"',
+  );
+});
+
+test('describeProjectChange says what a project change did', () => {
+  const meta = { at: '2026-01-01T00:00:00Z', actor: 'user' as const, userId: 'u1' };
+  assert.equal(describeProjectChange({ ...meta, field: 'created' }), 'Created the project');
+  assert.equal(describeProjectChange({ ...meta, field: 'title', from: 'A', to: 'B' }), 'Renamed “A” → “B”');
+  assert.equal(describeProjectChange({ ...meta, field: 'autoMerge', from: false, to: true }), 'Turned auto-merge on');
 });
 
 test('href and parseRoute agree, including ids that need encoding', () => {

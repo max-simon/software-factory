@@ -1,7 +1,7 @@
 import { relativeTime, type TimelineEntry } from '../model.ts';
 import { DecisionBody } from './InputItems.tsx';
 import { Markdown } from './Markdown.tsx';
-import { ApprovalNote, ByReviewer } from './Status.tsx';
+import { ApprovalNote, ByReviewer, ByUser } from './Status.tsx';
 
 const kindLabels: Record<TimelineEntry['kind'], string> = {
   question: 'Question',
@@ -38,7 +38,7 @@ function EntryBody({ entry, onOpenArtifact }: { entry: TimelineEntry; onOpenArti
           <Markdown>{entry.item.problem}</Markdown>
           <p className="answer">
             {entry.item.answer?.join(', ')}
-            <ByReviewer note={entry.item.byReviewer} />
+            {entry.item.byReviewer ? <ByReviewer note={entry.item.byReviewer} /> : <ByUser id={entry.item.answeredBy} />}
           </p>
         </>
       );
@@ -62,13 +62,16 @@ function EntryBody({ entry, onOpenArtifact }: { entry: TimelineEntry; onOpenArti
       return (
         <>
           <Markdown>{entry.item.message}</Markdown>
-          {entry.item.deliveredAt ? (
-            <p className="delivery delivered" title={entry.item.deliveredAt}>
-              Delivered {relativeTime(entry.item.deliveredAt)}
-            </p>
-          ) : (
-            <p className="delivery">Pending delivery</p>
-          )}
+          <p className="delivery">
+            <ByUser id={entry.item.authorId} />
+            {entry.item.deliveredAt ? (
+              <span className="delivered" title={entry.item.deliveredAt}>
+                Delivered {relativeTime(entry.item.deliveredAt)}
+              </span>
+            ) : (
+              <span>Pending delivery</span>
+            )}
+          </p>
         </>
       );
   }

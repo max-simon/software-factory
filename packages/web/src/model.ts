@@ -3,6 +3,7 @@ import type {
   Decision,
   FollowUp,
   HeartbeatPhase,
+  ProjectChange,
   PullRequest,
   PullRequestStatus,
   PullRequestView,
@@ -23,10 +24,25 @@ export type Route =
   | { name: 'edit-project'; id: string }
   | { name: 'new-task'; projectId: string }
   | { name: 'task'; id: string }
-  | { name: 'edit'; id: string };
+  | { name: 'edit'; id: string }
+  /** `next` is the hash to return to after signing in. */
+  | { name: 'login'; next: string }
+  | { name: 'account' };
+
+/** Where a login returns to: a hash of this app other than the login itself, else home. */
+function loginNext(value: string | null): string {
+  return value?.startsWith('#/') && parseRoute(value.split('?')[0]!).name !== 'login' ? value : href.home;
+}
 
 export function parseRoute(hash: string): Route {
-  const [first, id, action] = hash.replace(/^#\/?/, '').split('/').map(decodeURIComponent);
+  const raw = hash.replace(/^#\/?/, '');
+  const queryAt = raw.indexOf('?');
+  const path = queryAt === -1 ? raw : raw.slice(0, queryAt);
+  const [first, id, action] = path.split('/').map(decodeURIComponent);
+  if (first === 'login') {
+    return { name: 'login', next: loginNext(new URLSearchParams(queryAt === -1 ? '' : raw.slice(queryAt + 1)).get('next')) };
+  }
+  if (first === 'account') return { name: 'account' };
   if (first === 'projects' && id === 'new') return { name: 'new-project' };
   if (first === 'projects' && id) {
     if (action === 'edit') return { name: 'edit-project', id };
@@ -47,6 +63,9 @@ export const href = {
   newTask: (projectId: string) => `${projectPath(projectId)}/new-task`,
   task: (id: string) => `#/tasks/${encodeURIComponent(id)}`,
   edit: (id: string) => `#/tasks/${encodeURIComponent(id)}/edit`,
+  account: '#/account',
+  /** The login page, returning to `next` afterwards; home when it is left out. */
+  login: (next?: string) => (next && next !== '#/' && next !== '#' ? `#/login?${new URLSearchParams({ next })}` : '#/login'),
 };
 
 const statusLabels: Record<TaskStatus, string> = {
@@ -356,5 +375,63 @@ export function describeChange(change: TaskChange): string {
       return 'Changed the dependencies';
     case 'status':
       return `${statusLabel(change.from)} → ${statusLabel(change.to)}`;
+  }
+}
+
+/** A user as `GET /users` lists it; others reference it by `id` only. */
+export interface UserSummary {
+  id: string;
+  username: string;
+  displayName: string;
+  disabled: boolean;
+}
+
+/** The signed-in user, as `GET /auth/me` returns it. */
+export interface CurrentUser {
+  id: string;
+  username: string;
+  displayName: string;
+}
+
+export type UserMap = ReadonlyMap<string, UserSummary>;
+
+export const toUserMap = (users: readonly UserSummary[]): UserMap => new Map(users.map((user) => [user.id, user]));
+
+/** For what an engineer did before users existed, which no record attributes to anyone. */
+export const unattributedLabel = 'engineer (unattributed)';
+
+export interface PersonLabel {
+  text: string;
+  /** For the hover title. */
+  title: string;
+  kind: 'known' | 'unknown' | 'unattributed';
+}
+
+/**
+ * Names the user with id `userId` by its current display name; an id no user
+ * has (anymore) shows as itself, and a missing id as an unattributed engineer.
+ */
+export function describeUser(userId: string | undefined, users: UserMap): PersonLabel {
+  if (userId === undefined) return { text: unattributedLabel, title: 'Recorded before users existed', kind: 'unattributed' };
+  const user = users.get(userId);
+  if (!user) return { text: userId, title: `Unknown user (${userId})`, kind: 'unknown' };
+  return { text: user.displayName, title: `${user.username} (${user.id})${user.disabled ? ' · disabled' : ''}`, kind: 'known' };
+}
+
+/** The command that adds the factory's MCP server to Claude Code with a personal access token. */
+export const mcpAddCommand = (origin: string, token: string): string =>
+  `claude mcp add --transport http factory ${origin}/mcp --header "Authorization: Bearer ${token}"`;
+
+/** One line on what a project changelog entry changed; the description is too long to show inline. */
+export function describeProjectChange(change: ProjectChange): string {
+  switch (change.field) {
+    case 'created':
+      return 'Created the project';
+    case 'title':
+      return `Renamed ${quoted(change.from)} → ${quoted(change.to)}`;
+    case 'description':
+      return 'Edited the description';
+    case 'autoMerge':
+      return change.to ? 'Turned auto-merge on' : 'Turned auto-merge off';
   }
 }

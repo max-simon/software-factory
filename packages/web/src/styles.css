@@ -166,10 +166,42 @@ pre {
   margin-left: 8px;
 }
 
+/* Pinned to the bottom of the sidebar. */
+.sidebar-footer {
+  margin-top: auto;
+  padding-top: 14px;
+}
+
+.sidebar-user {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 0 8px;
+  font-size: 13px;
+}
+
+.sidebar-user a {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--muted);
+}
+
+.sidebar-user a:hover,
+.sidebar-user a.active {
+  color: var(--text);
+}
+
+.sidebar-user .link {
+  flex: none;
+  font-size: 13px;
+}
+
 .theme-toggle {
   display: flex;
-  margin: auto 8px 0;
-  padding-top: 14px;
+  margin: 0 8px;
 }
 
 .theme-toggle button {
@@ -925,8 +957,39 @@ details[open] > summary {
   color: var(--faint);
 }
 
-.delivery.delivered {
+.delivery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 10px;
+}
+
+.delivery .delivered {
   color: var(--muted);
+}
+
+/* The engineer who answered, reviewed or sent something; like the reviewer's mark. */
+.by-user {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--faint);
+}
+
+.delivery .by-user {
+  display: inline;
+  margin-top: 0;
+}
+
+.user-name {
+  cursor: default;
+}
+
+.user-unknown {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+.user-unattributed {
+  font-style: italic;
 }
 
 ul.plain {
@@ -950,7 +1013,8 @@ ul.plain li + li {
 
 .changelog-entry {
   display: grid;
-  grid-template-columns: 9ch 6ch minmax(0, 1fr);
+  /* Wide enough for most display names; longer ones are cut, in full on hover. */
+  grid-template-columns: 9ch 23ch minmax(0, 1fr);
   gap: 10px;
   padding: 2px 0;
   color: var(--muted);
@@ -963,6 +1027,12 @@ ul.plain li + li {
 
 .changelog-text {
   overflow-wrap: anywhere;
+}
+
+.changelog .actor {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .changelog-status .changelog-text {
@@ -1432,5 +1502,122 @@ input[type='radio'] {
     max-height: 45vh;
     border-top: 1px solid var(--line);
     border-left: none;
+  }
+}
+
+/* Login */
+
+.login {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.login-form {
+  width: 100%;
+  max-width: 340px;
+  margin: 0;
+  padding: 24px;
+}
+
+.login-form .wordmark {
+  margin-bottom: 20px;
+  padding: 0;
+  font-size: 18px;
+}
+
+/* Account */
+
+.account .box {
+  margin-top: 24px;
+}
+
+.account .field:last-of-type {
+  margin-bottom: 0;
+}
+
+.token-list {
+  margin-top: 12px;
+}
+
+.token-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+
+.token-list li:first-child {
+  border-top: none;
+}
+
+.token-name {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.token-info .meta {
+  margin-top: 2px;
+}
+
+.token-info .failure {
+  color: var(--red);
+}
+
+.token-empty {
+  margin-top: 12px;
+}
+
+.token-form {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.token-form-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.new-token {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--green) 45%, transparent);
+  border-radius: 8px;
+}
+
+.new-token > p {
+  color: var(--green);
+}
+
+.copyable {
+  margin-top: 10px;
+}
+
+.copyable-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.copyable-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.copyable-row pre {
+  flex: 1;
+  word-break: break-all;
+}
+
+@media (max-width: 600px) {
+  .token-form-fields {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

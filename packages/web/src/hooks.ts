@@ -8,17 +8,20 @@ export interface Polled<T> {
   error: Error | undefined;
   /** Replaces the data right away, e.g. with the task an action returned. */
   set: (data: T) => void;
+  /** Loads again right away, e.g. after an action changed what it loads. */
+  reload: () => void;
 }
 
 /**
  * Loads now and every few seconds while the page is visible. Keeps the last
  * good data on errors so a control-plane restart does not blank the screen.
  */
-export function usePolling<T>(load: () => Promise<T>, key: string): Polled<T> {
+export function usePolling<T>(load: () => Promise<T>, key: string, intervalMs: number = pollIntervalMs): Polled<T> {
   const [data, setData] = useState<T>();
   const [error, setError] = useState<Error>();
   const loadRef = useRef(load);
   loadRef.current = load;
+  const refreshRef = useRef<() => Promise<void>>(async () => {});
 
   useEffect(() => {
     let isCancelled = false;
@@ -35,18 +38,20 @@ export function usePolling<T>(load: () => Promise<T>, key: string): Polled<T> {
         if (!isCancelled) setError(cause instanceof Error ? cause : new Error(String(cause)));
       }
     };
+    refreshRef.current = refresh;
     void refresh();
-    const timer = setInterval(() => void refresh(), pollIntervalMs);
+    const timer = setInterval(() => void refresh(), intervalMs);
     document.addEventListener('visibilitychange', refresh);
     return () => {
       isCancelled = true;
       clearInterval(timer);
       document.removeEventListener('visibilitychange', refresh);
     };
-  }, [key]);
+  }, [key, intervalMs]);
 
   const set = useCallback((next: T) => setData(next), []);
-  return { data, error, set };
+  const reload = useCallback(() => void refreshRef.current(), []);
+  return { data, error, set, reload };
 }
 
 export function useRoute(): Route {

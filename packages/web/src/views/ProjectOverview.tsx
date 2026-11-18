@@ -1,15 +1,19 @@
-import { formatCost, formatDuration } from '@factory/core';
-import { useEffect } from 'react';
+import { formatCost, formatDuration, type Project, type ProjectChange } from '@factory/core';
+import { useEffect, useState } from 'react';
 import { api } from '../api.ts';
+import { Changelog } from '../components/Changelog.tsx';
 import { Markdown } from '../components/Markdown.tsx';
 import { PullRequestIndicator } from '../components/PullRequestIndicator.tsx';
 import { prReviewLabel, Spinner } from '../components/Status.tsx';
+import { UserName } from '../components/UserName.tsx';
 import { usePolling } from '../hooks.ts';
 import {
+  describeProjectChange,
   href,
   openPullRequests,
   projectMetrics,
   pullRequestNumber,
+  relativeTime,
   repoName,
   type OpenPullRequest,
   type ProjectMetrics,
@@ -20,6 +24,7 @@ export function ProjectOverview({ id }: { id: string }) {
   const { data: project, error: projectError } = usePolling(() => api.getProject(id), `project-${id}`);
   const { data: tasks, error: tasksError, set: setTasks } = usePolling(() => api.listProjectTasks(id), `project-tasks-${id}`);
   const metrics = projectMetrics(tasks ?? []);
+  const changes = useProjectChanges(id, project?.updatedAt);
 
   useEffect(() => {
     if (!project) return;
@@ -33,24 +38,7 @@ export function ProjectOverview({ id }: { id: string }) {
   return (
     <article className="project">
       {error && <p className="banner">{error.message} Retrying…</p>}
-      <header className="task-header">
-        <div className="task-heading">
-          <h1>{project.title}</h1>
-          <div className="actions">
-            <a className="button" href={href.editProject(id)}>
-              Edit
-            </a>
-            <a className="button primary" href={href.newTask(id)}>
-              New task
-            </a>
-          </div>
-        </div>
-        {project.description.trim() && (
-          <div className="project-description">
-            <Markdown>{project.description}</Markdown>
-          </div>
-        )}
-      </header>
+      <ProjectHeader project={project} />
 
       <Metrics metrics={metrics} />
 
@@ -64,7 +52,64 @@ export function ProjectOverview({ id }: { id: string }) {
       ) : (
         <Board tasks={tasks} onMoved={setTasks} />
       )}
+
+      {changes.length > 0 && (
+        <details className="box changelog-box">
+          <summary className="section-title">Project changelog</summary>
+          <Changelog changes={changes} describe={describeProjectChange} />
+        </details>
+      )}
     </article>
+  );
+}
+
+/** The project's changelog, reloaded whenever the project changes: every change stamps `updatedAt`. */
+function useProjectChanges(id: string, updatedAt: string | undefined): ProjectChange[] {
+  const [loaded, setLoaded] = useState<{ id: string; changes: ProjectChange[] }>();
+  useEffect(() => {
+    if (updatedAt === undefined) return;
+    let isCancelled = false;
+    // A failed load keeps the last changelog; the project poll already reports an unreachable control plane.
+    api.listProjectChanges(id).then(
+      (changes) => {
+        if (!isCancelled) setLoaded({ id, changes });
+      },
+      () => {},
+    );
+    return () => {
+      isCancelled = true;
+    };
+  }, [id, updatedAt]);
+  return loaded?.id === id ? loaded.changes : [];
+}
+
+/** Title, actions, who created the project and its description. */
+export function ProjectHeader({ project }: { project: Project }) {
+  return (
+    <header className="task-header">
+      <div className="task-heading">
+        <h1>{project.title}</h1>
+        <div className="actions">
+          <a className="button" href={href.editProject(project.id)}>
+            Edit
+          </a>
+          <a className="button primary" href={href.newTask(project.id)}>
+            New task
+          </a>
+        </div>
+      </div>
+      <p className="meta">
+        <span className="created-by">
+          created by <UserName id={project.createdBy} />
+        </span>
+        <span title={project.createdAt}>{relativeTime(project.createdAt)}</span>
+      </p>
+      {project.description.trim() && (
+        <div className="project-description">
+          <Markdown>{project.description}</Markdown>
+        </div>
+      )}
+    </header>
   );
 }
 

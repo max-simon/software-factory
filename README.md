@@ -183,8 +183,10 @@ yarn web:build && yarn start  # http://127.0.0.1:4700
 ```
 
 The engineer API, the web UI's data and `/mcp` need a signed-in user (see
-[Users](#users)); create one before you start. Until the web UI has a login
-page, sign in with the API:
+[Users](#users)); create one before you start, then sign in on the web UI's
+login page. Its account page (your name in the sidebar) changes your display
+name and password and manages your personal access tokens. Scripts sign in
+with the API:
 
 ```bash
 curl -c cookies.txt -H 'content-type: application/json' \
@@ -195,6 +197,14 @@ curl -b cookies.txt http://127.0.0.1:4700/auth/me
 `POST /auth/login` sets an `HttpOnly` session cookie, `POST /auth/logout`
 ends the session, `GET /auth/me` names the signed-in user. Repeated failed
 logins for a username or from a client are locked out for a while (HTTP 429).
+
+| Endpoint | Effect |
+|---|---|
+| `PATCH /auth/me` `{"displayName":"..."}` | Change your display name; returns `{id, username, displayName}` |
+| `POST /auth/password` `{"currentPassword":"...","newPassword":"..."}` | Change your password (12–256 characters); a wrong current one is 400 `wrong_password`. Ends your other sessions |
+| `GET /users` | `[{id, username, displayName, disabled}]` of every user, so clients can show names for the user ids in records |
+
+The first two need a session, like token management below.
 
 ### Personal access tokens and MCP
 
@@ -208,7 +218,9 @@ yarn user token alice laptop                       # never expires
 yarn user token alice ci --expires-in-days 90
 ```
 
-or, signed in with a session, with the API:
+or on the web UI's account page, which shows the new token once together
+with the `claude mcp add` command below, or, signed in with a session, with
+the API:
 
 ```bash
 curl -b cookies.txt -H 'content-type: application/json' \
