@@ -1,16 +1,7 @@
-import {
-  normalizeUsername,
-  renameUser,
-  type Authenticator,
-  type PasswordHasher,
-  type Principal,
-  type UserRepository,
-} from '@factory/core';
-import type { AccessTokenService } from '../auth/access-token-service.ts';
-import type { LocalPasswordStore } from '../auth/local-password-authenticator.ts';
+import { normalizeUsername, type Authenticator, type Principal, type UserRepository } from '@factory/core';
 import type { LoginThrottle } from '../auth/login-throttle.ts';
-import { parsePassword } from '../auth/passwords.ts';
 import type { SessionService } from '../auth/session-service.ts';
+import type { UserAccountService } from '../user-account-service.ts';
 import type { Response, Route } from './server.ts';
 import { clearedSessionCookie, readSessionToken, sessionCookie } from './session-cookie.ts';
 import { requireSession } from './token-routes.ts';
@@ -19,8 +10,7 @@ import { parseDisplayNameChange, parsePasswordChange, ValidationError } from './
 export interface AuthRoutesDeps {
   authenticator: Authenticator;
   sessions: SessionService;
-  /** Revoked on a password change. */
-  accessTokens: Pick<AccessTokenService, 'revokeAll'>;
+  accounts: Pick<UserAccountService, 'rename' | 'changePassword'>;
   users: UserRepository;
   /** Throttles failed logins per username. */
   throttle: LoginThrottle;
@@ -31,11 +21,6 @@ export interface AuthRoutesDeps {
    * everyone out.
    */
   clientThrottle: LoginThrottle;
-  /** Where `POST /auth/password` stores the new password's hash. */
-  passwords: LocalPasswordStore;
-  hasher: PasswordHasher;
-  /** Milliseconds since the epoch. */
-  now?: () => number;
 }
 
 // One message for an unknown username and a wrong password, so a login does not tell which usernames exist.
@@ -64,13 +49,10 @@ const throttled = (retryAfterMs: number): Response => ({
 export function authRoutes({
   authenticator,
   sessions,
-  accessTokens,
+  accounts,
   users,
   throttle,
   clientThrottle,
-  passwords,
-  hasher,
-  now = Date.now,
 }: AuthRoutesDeps): Route[] {
   /** The throttle state of one attempt to prove `username`'s password from `clientAddress`. */
   const attempt = (username: string, clientAddress: string) => {
@@ -135,8 +117,7 @@ export function authRoutes({
       handle: ({ principal, body }) => {
         const forbidden = requireSession(principal);
         if (forbidden) return forbidden;
-        const renamed = renameUser(users.get(principal!.userId)!, parseDisplayNameChange(body));
-        users.update({ ...renamed, updatedAt: new Date(now()).toISOString() });
+        accounts.rename(principal!.userId, parseDisplayNameChange(body));
         return me(principal);
       },
     },
@@ -152,18 +133,13 @@ export function authRoutes({
         const throttling = attempt(user.username, clientAddress);
         const retryAfterMs = throttling.retryAfterMs();
         if (retryAfterMs > 0) return throttled(retryAfterMs);
-        const verified = await authenticator.authenticate({ kind: 'password', username: user.username, password: currentPassword });
-        if (verified !== user.id) {
+        const isChanged = await accounts.changePassword(user.id, currentPassword, newPassword, readSessionToken(headers)!);
+        if (!isChanged) {
           throttling.recordFailure();
           // 400, not 401: the session is fine, and a 401 would send the web UI to its login.
           return { status: 400, body: { error: { code: 'wrong_password', message: 'the current password is wrong' } } };
         }
         throttling.recordSuccess();
-        passwords.setPasswordHash(user.id, await hasher.hash(parsePassword(newPassword)));
-        // Whoever else signed in with the old password is signed out, and tokens they may have
-        // minted with it stop working; this browser stays signed in.
-        sessions.endOtherSessions(user.id, readSessionToken(headers)!);
-        accessTokens.revokeAll(user.id);
         return { status: 204 };
       },
     },

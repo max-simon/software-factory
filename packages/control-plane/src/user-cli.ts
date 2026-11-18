@@ -1,26 +1,11 @@
-import { randomBytes } from 'node:crypto';
 import { parseArgs } from 'node:util';
-import {
-  assertActiveUser,
-  assertUsernameAvailable,
-  createUser,
-  disableUser,
-  DomainError,
-  localProvider,
-  parseUsername,
-  renameUser,
-  type AccessTokenRepository,
-  type PasswordHasher,
-  type User,
-  type UserRepository,
-} from '@factory/core';
+import { assertUsernameAvailable, DomainError, parseUsername, type User, type UserRepository } from '@factory/core';
 import { SqliteAccessTokenRepository } from './adapters/sqlite-access-token-repository.ts';
 import { SqliteSessionRepository } from './adapters/sqlite-session-repository.ts';
 import { SqliteUserRepository } from './adapters/sqlite-user-repository.ts';
 import { AccessTokenService } from './auth/access-token-service.ts';
-import type { LocalPasswordStore } from './auth/local-password-authenticator.ts';
 import { parsePassword, ScryptPasswordHasher } from './auth/passwords.ts';
-import type { SessionStore } from './auth/session-service.ts';
+import { UserAccountService } from './user-account-service.ts';
 
 export const usage = `Usage: yarn user <command>
 
@@ -43,16 +28,13 @@ export class UsageError extends Error {
 }
 
 export interface UserCliDeps {
+  /** Looks users up by username and lists them. */
   users: UserRepository;
-  passwords: LocalPasswordStore;
-  sessions: Pick<SessionStore, 'deleteForUser'>;
-  tokens: AccessTokenRepository;
-  hasher: PasswordHasher;
+  accounts: UserAccountService;
+  accessTokens: AccessTokenService;
   /** Reads a new password, confirmed when entered interactively. */
   readPassword: () => Promise<string>;
   stdout: { write(text: string): unknown };
-  now: () => string;
-  newId: () => string;
 }
 
 /** Runs one CLI command; throws on errors, a `UsageError` for bad invocations. */
@@ -93,13 +75,9 @@ export async function runUserCli(argv: readonly string[], deps: UserCliDeps): Pr
     case 'add': {
       expect(1);
       const username = parseUsername(args[0]!);
+      // Checked before asking for the password too, so it is not typed for a taken name.
       assertUsernameAvailable(username, deps.users.getByUsername(username));
-      const user = createUser({ username, displayName: values['display-name'] }, { id: deps.newId(), now: deps.now() });
-      // Ask for the password first, so a rejected one leaves no user behind.
-      const hash = await deps.hasher.hash(parsePassword(await deps.readPassword()));
-      deps.users.insert(user);
-      deps.users.linkIdentity({ provider: localProvider, subject: user.id, userId: user.id });
-      deps.passwords.setPasswordHash(user.id, hash);
+      const user = await deps.accounts.create({ username, displayName: values['display-name'] }, await deps.readPassword());
       deps.stdout.write(`created user ${user.username}\n`);
       return;
     }
@@ -110,41 +88,29 @@ export async function runUserCli(argv: readonly string[], deps: UserCliDeps): Pr
     }
     case 'passwd': {
       expect(1);
-      const user = findActiveUser(deps.users, args[0]!);
-      const hash = await deps.hasher.hash(parsePassword(await deps.readPassword()));
-      deps.passwords.setPasswordHash(user.id, hash);
+      const user = findUser(deps.users, args[0]!);
+      await deps.accounts.setPassword(user.id, await deps.readPassword());
       deps.stdout.write(`password set for ${user.username}\n`);
       return;
     }
     case 'rename': {
       expect(2, true);
-      const user = findActiveUser(deps.users, args[0]!);
-      const renamed = renameUser(user, args.slice(1).join(' '));
-      deps.users.update({ ...renamed, updatedAt: deps.now() });
-      deps.stdout.write(`renamed ${user.username} to ${renamed.displayName}\n`);
+      const renamed = deps.accounts.rename(findUser(deps.users, args[0]!).id, args.slice(1).join(' '));
+      deps.stdout.write(`renamed ${renamed.username} to ${renamed.displayName}\n`);
       return;
     }
     case 'disable': {
       expect(1);
       const user = findUser(deps.users, args[0]!);
-      // Also when already disabled: the control plane refuses its sessions anyway, this removes them.
-      deps.sessions.deleteForUser(user.id);
-      deps.tokens.deleteForUser(user.id);
-      if (user.disabledAt !== undefined) {
-        deps.stdout.write(`${user.username} is already disabled\n`);
-        return;
-      }
-      const now = deps.now();
-      deps.users.update({ ...disableUser(user, now), updatedAt: now });
-      deps.stdout.write(`disabled ${user.username}\n`);
+      const wasActive = deps.accounts.disable(user.id);
+      deps.stdout.write(wasActive ? `disabled ${user.username}\n` : `${user.username} is already disabled\n`);
       return;
     }
     case 'token': {
       expect(2, true);
-      const user = findActiveUser(deps.users, args[0]!);
+      const user = findUser(deps.users, args[0]!);
       const days = values['expires-in-days'];
-      const tokens = new AccessTokenService({ tokens: deps.tokens, users: deps.users, now: () => Date.parse(deps.now()), newId: deps.newId });
-      const { token } = tokens.issue(user.id, {
+      const { token } = deps.accessTokens.issue(user.id, {
         name: args.slice(1).join(' '),
         // Not a number unless it is all digits, so `1.5` or `7d` are rejected rather than read as 1 or 7.
         ...(days !== undefined && { expiresInDays: /^\d+$/.test(days) ? Number(days) : Number.NaN }),
@@ -164,10 +130,6 @@ function findUser(users: UserRepository, username: string): User {
   const user = users.getByUsername(username);
   if (user === undefined) throw new DomainError('unknown_user', `user ${username} does not exist`);
   return user;
-}
-
-function findActiveUser(users: UserRepository, username: string): User {
-  return assertActiveUser(users.getByUsername(username), username);
 }
 
 export function formatUsers(users: readonly User[]): string {
@@ -255,14 +217,10 @@ async function main(): Promise<void> {
   try {
     await runUserCli(process.argv.slice(2), {
       users,
-      passwords: users,
-      sessions,
-      tokens,
-      hasher: new ScryptPasswordHasher(),
+      accounts: new UserAccountService({ users, passwords: users, hasher: new ScryptPasswordHasher(), sessions, tokens }),
+      accessTokens: new AccessTokenService({ tokens, users }),
       readPassword: process.stdin.isTTY ? readTtyPassword : readPipedPassword,
       stdout: process.stdout,
-      now: () => new Date().toISOString(),
-      newId: () => randomBytes(5).toString('hex'),
     });
   } finally {
     users.close();

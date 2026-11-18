@@ -33,6 +33,7 @@ import { ProjectService } from './project-service.ts';
 import { PullRequestObserver, pullRequestPollIntervalMs } from './pull-request-observer.ts';
 import { ReviewTracker } from './review-tracker.ts';
 import { createServices } from './services.ts';
+import { UserAccountService } from './user-account-service.ts';
 
 // Engineers sign in, but the API is not hardened for other machines yet (plain HTTP, no TLS), so it stays on loopback.
 const host = '127.0.0.1';
@@ -80,24 +81,24 @@ function main(): void {
   hooks.register(new PullRequestReviewedHook({ lifecycle }));
   hooks.register(new PullRequestConflictedHook({ lifecycle }));
   const users = new SqliteUserRepository(config.dbPath);
+  const sessionStore = new SqliteSessionRepository(config.dbPath);
   const sessions = new SessionService({
-    sessions: new SqliteSessionRepository(config.dbPath),
+    sessions: sessionStore,
     users,
     idleTimeoutMs: config.sessionIdleHours * 3_600_000,
     maxLifetimeMs: config.sessionMaxDays * 86_400_000,
   });
-  const accessTokens = new AccessTokenService({ tokens: new SqliteAccessTokenRepository(config.dbPath), users });
+  const tokenStore = new SqliteAccessTokenRepository(config.dbPath);
+  const accessTokens = new AccessTokenService({ tokens: tokenStore, users });
   const hasher = new ScryptPasswordHasher();
   const routes = [
     ...authRoutes({
       authenticator: new LocalPasswordAuthenticator({ users, passwords: users, hasher }),
       sessions,
-      accessTokens,
+      accounts: new UserAccountService({ users, passwords: users, hasher, sessions: sessionStore, tokens: tokenStore }),
       users,
       throttle: new LoginThrottle(),
       clientThrottle: new LoginThrottle({ lockoutAfter: clientLockoutAfter }),
-      passwords: users,
-      hasher,
     }),
     ...tokenRoutes(accessTokens),
     ...engineerRoutes(tasks, service, projects, (agent) => unavailableAgent(config.agentCredentials, agent), reviews),

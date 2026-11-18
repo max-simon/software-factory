@@ -10,6 +10,7 @@ import { LocalPasswordAuthenticator } from '../auth/local-password-authenticator
 import { LoginThrottle } from '../auth/login-throttle.ts';
 import { ScryptPasswordHasher } from '../auth/passwords.ts';
 import { hashSessionToken, SessionService } from '../auth/session-service.ts';
+import { UserAccountService } from '../user-account-service.ts';
 import { authRoutes } from './auth-routes.ts';
 import { createServer, type Request, type Route } from './server.ts';
 import { readSessionToken } from './session-cookie.ts';
@@ -29,17 +30,23 @@ async function setup(t: TestContext) {
   }
   const store = new SqliteSessionRepository(':memory:');
   const sessions = new SessionService({ sessions: store, users, idleTimeoutMs: 12 * hour, maxLifetimeMs: 7 * day, now });
-  const accessTokens = new AccessTokenService({ tokens: new SqliteAccessTokenRepository(':memory:'), users, now });
+  const tokenStore = new SqliteAccessTokenRepository(':memory:');
+  const accessTokens = new AccessTokenService({ tokens: tokenStore, users, now });
+  const accounts = new UserAccountService({
+    users,
+    passwords: users,
+    hasher,
+    sessions: store,
+    tokens: tokenStore,
+    now: () => new Date(now()).toISOString(),
+  });
   const routes = authRoutes({
     authenticator: new LocalPasswordAuthenticator({ users, passwords: users, hasher }),
     sessions,
-    accessTokens,
+    accounts,
     users,
     throttle: new LoginThrottle({ now }),
     clientThrottle: new LoginThrottle({ now, lockoutAfter: 50 }),
-    passwords: users,
-    hasher,
-    now,
   });
   // Stands in for the engineer routes.
   const whoami: Route = { method: 'GET', path: '/whoami', handle: ({ principal }) => ({ status: 200, body: principal }) };

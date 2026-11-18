@@ -312,7 +312,9 @@ Users are a core domain concept (`packages/core/src/user.ts`); their storage, th
   scrypt hash sits on the user's `local` identity row, and
   `LocalPasswordAuthenticator` checks it, hashing even for unknown or disabled
   users so timing does not reveal which usernames exist. Operators manage
-  users with `yarn user`.
+  users with `yarn user`. Both the account routes and that CLI go through
+  `UserAccountService` (create, rename, set or change a password, disable),
+  so neither adapter holds account logic of its own.
 - **Sessions are the factory's own, however a user signed in.** `POST
   /auth/login` checks `{ username, password }` with the `Authenticator` and
   ends in `SessionService.createSession(userId)`, which an IdP's login route
@@ -325,8 +327,8 @@ Users are a core domain concept (`packages/core/src/user.ts`); their storage, th
   the guard refuses them anyway); ended sessions are pruned on login and on
   lookup. `GET /auth/me` names the signed-in user, `PATCH /auth/me`
   `{ displayName }` renames it. `POST /auth/password`
-  `{ currentPassword, newPassword }` checks the current password through the
-  `Authenticator` (a wrong one is 400 `wrong_password`, not 401, so the web
+  `{ currentPassword, newPassword }` checks the new password's length, then
+  the current password against the user's `local` hash (a wrong one is 400 `wrong_password`, not 401, so the web
   UI does not take it for an ended session; failures count towards the login
   throttle), stores the new hash, ends every other session of the user and
   revokes all its access tokens, so whoever knew the old password keeps no
