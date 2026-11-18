@@ -448,19 +448,51 @@ section {
 .approval-changes_requested {
   color: var(--red);
 }
-/* GitHub's colours, so the state reads at a glance. */
-.pr-status {
+/* A pull request's state in GitHub's colours (closed ones fade), with its review as a mark at the corner. */
+.pr-indicator {
+  display: inline-flex;
+  flex: none;
   margin-left: 8px;
-  font-size: 12px;
+  vertical-align: -3px;
 }
-.pr-status-open {
+.pr-indicator-open {
   color: var(--green);
 }
-.pr-status-merged {
+.pr-indicator-merged {
   color: var(--violet);
 }
-.pr-status-closed {
-  color: var(--red);
+.pr-indicator-closed {
+  color: var(--muted);
+  opacity: 0.75;
+}
+.pr-indicator-glyph {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.pr-indicator-mark path {
+  fill: none;
+  stroke: var(--box);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* Hollow: nobody has reviewed it yet. */
+.pr-indicator-mark-none circle {
+  fill: none;
+  stroke: var(--faint);
+  stroke-width: 1.5;
+}
+.pr-indicator-mark-approved circle {
+  fill: var(--green);
+}
+.pr-indicator-mark-changes_requested circle {
+  fill: var(--red);
+}
+.pr-indicator-mark-commented circle {
+  fill: var(--muted);
 }
 .approval-note {
   margin-top: 6px;
@@ -649,7 +681,8 @@ section {
   column-gap: 8px;
 }
 
-.open-pull-requests .approval {
+.open-pull-requests .pr-indicator {
+  align-self: center;
   margin-left: 0;
 }
 

@@ -2,6 +2,7 @@ import { formatCost, formatDuration } from '@factory/core';
 import { useEffect } from 'react';
 import { api } from '../api.ts';
 import { Markdown } from '../components/Markdown.tsx';
+import { PullRequestIndicator } from '../components/PullRequestIndicator.tsx';
 import { prReviewLabel, Spinner } from '../components/Status.tsx';
 import { usePolling } from '../hooks.ts';
 import {
@@ -10,10 +11,8 @@ import {
   projectMetrics,
   pullRequestNumber,
   repoName,
-  reviewDecision,
   type OpenPullRequest,
   type ProjectMetrics,
-  type ReviewDecision,
 } from '../model.ts';
 import { Board } from './Board.tsx';
 
@@ -108,35 +107,27 @@ function Metrics({ metrics }: { metrics: ProjectMetrics }) {
   );
 }
 
-const decisionLabels: Record<ReviewDecision, string> = {
-  approved: 'Approved',
-  changes_requested: 'Changes requested',
-};
-
 export function OpenPullRequests({ pullRequests }: { pullRequests: OpenPullRequest[] }) {
   if (pullRequests.length === 0) return null;
   return (
     <section className="box open-pull-requests">
       <h2 className="section-title">Open pull requests</h2>
       <ul className="plain">
-        {pullRequests.map(({ pullRequest: pr, task }) => {
-          const decision = reviewDecision(pr);
-          return (
-            <li key={pr.url}>
-              <a href={pr.url} target="_blank" rel="noreferrer">
-                <span className="mono muted">
-                  {repoName(pr.url.replace(/\/pull\/\d+$/, ''))} {pullRequestNumber(pr.url)}
-                </span>{' '}
-                {pr.title}
-              </a>
-              {decision && <span className={`approval approval-${decision}`}>{decisionLabels[decision]}</span>}
-              <Spinner isBusy={pr.isUnderReview} label={prReviewLabel} />
-              <a className="open-pull-request-task muted" href={href.task(task.id)}>
-                {task.title}
-              </a>
-            </li>
-          );
-        })}
+        {pullRequests.map(({ pullRequest: pr, task }) => (
+          <li key={pr.url}>
+            <a href={pr.url} target="_blank" rel="noreferrer">
+              <span className="mono muted">
+                {repoName(pr.url.replace(/\/pull\/\d+$/, ''))} {pullRequestNumber(pr.url)}
+              </span>{' '}
+              {pr.title}
+            </a>
+            <PullRequestIndicator pullRequest={pr} />
+            <Spinner isBusy={pr.isUnderReview} label={prReviewLabel} />
+            <a className="open-pull-request-task muted" href={href.task(task.id)}>
+              {task.title}
+            </a>
+          </li>
+        ))}
       </ul>
     </section>
   );

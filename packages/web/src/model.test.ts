@@ -13,6 +13,7 @@ import {
   parseRoute,
   href,
   projectMetrics,
+  pullRequestIndicator,
   relativeTime,
   repoName,
   reviewDecision,
@@ -90,6 +91,42 @@ test('reviewDecision takes each reviewer’s latest decision, and a change reque
   assert.equal(reviewDecision({ reviews: [review(1, 'a', 'changes_requested'), review(2, 'a', 'approved')] }), 'approved');
   assert.equal(reviewDecision({ reviews: [review(1, 'a', 'approved'), review(2, 'a', 'commented')] }), 'approved');
   assert.equal(reviewDecision({ reviews: [review(1, 'a', 'approved'), review(2, 'b', 'changes_requested')] }), 'changes_requested');
+});
+
+test('pullRequestIndicator labels open pull requests by their review decision', () => {
+  const review = (id: number, author: string, state: 'approved' | 'changes_requested' | 'commented') => ({
+    id,
+    author,
+    state,
+    body: '',
+    url: `https://github.com/o/r/pull/1#pullrequestreview-${id}`,
+    submittedAt: '2026-01-01T00:00:00Z',
+  });
+  const open = (...reviews: ReturnType<typeof review>[]) => pullRequestIndicator({ status: 'open', reviews });
+  assert.deepEqual(pullRequestIndicator({ status: 'open' }), { state: 'open', review: 'none', label: 'Open · not reviewed' });
+  assert.deepEqual(open(), { state: 'open', review: 'none', label: 'Open · not reviewed' });
+  assert.deepEqual(open(review(1, 'a', 'approved')), { state: 'open', review: 'approved', label: 'Open · approved' });
+  assert.deepEqual(open(review(1, 'a', 'approved'), review(2, 'b', 'changes_requested')), {
+    state: 'open',
+    review: 'changes_requested',
+    label: 'Open · changes requested',
+  });
+  assert.deepEqual(open(review(1, 'a', 'commented'), review(2, 'b', 'commented')), { state: 'open', review: 'commented', label: 'Open · commented' });
+  // A later comment does not undo the reviewer's approval.
+  assert.equal(open(review(1, 'a', 'approved'), review(2, 'a', 'commented')).review, 'approved');
+});
+
+test('pullRequestIndicator tells merged and closed pull requests with reviews from those without', () => {
+  const reviews = [{ id: 1, author: 'a', state: 'commented' as const, body: '', url: 'u', submittedAt: '2026-01-01T00:00:00Z' }];
+  assert.deepEqual(pullRequestIndicator({ status: 'merged', reviews }), { state: 'merged', review: 'commented', label: 'Merged after review' });
+  assert.deepEqual(pullRequestIndicator({ status: 'merged', reviews: [] }), { state: 'merged', review: 'none', label: 'Merged without review' });
+  assert.deepEqual(pullRequestIndicator({ status: 'merged' }), { state: 'merged', review: 'none', label: 'Merged without review' });
+  assert.deepEqual(pullRequestIndicator({ status: 'closed' }), { state: 'closed', review: 'none', label: 'Closed' });
+  assert.deepEqual(pullRequestIndicator({ status: 'closed', reviews: [{ ...reviews[0]!, state: 'changes_requested' }] }), {
+    state: 'closed',
+    review: 'changes_requested',
+    label: 'Closed after review',
+  });
 });
 
 test('projectMetrics counts tasks by status and sums cost, time and pull requests', () => {

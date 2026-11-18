@@ -72,3 +72,10 @@ test('an open pull request in the project overview shows a spinner only while th
   expect(list(true)).toContain(prSpinner);
   expect(list(false)).not.toContain(prSpinner);
 });
+
+test('pull requests show their state as an icon labelled with the review state', () => {
+  const html = renderToStaticMarkup(<PullRequestList pullRequests={[{ ...pr(false), status: 'merged' }]} />);
+  expect(html).toContain('aria-label="Merged without review"');
+  const overview = renderToStaticMarkup(<OpenPullRequests pullRequests={[{ pullRequest: { ...pr(false), reviews: [] }, task: { id: 't1', title: 'Task' } }]} />);
+  expect(overview).toContain('aria-label="Open · not reviewed"');
+});

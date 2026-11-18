@@ -9,6 +9,7 @@ import { ArtifactModal } from '../components/ArtifactModal.tsx';
 import { ArtifactApprovalRequest, DecisionApprovalForm, QuestionForm } from '../components/InputItems.tsx';
 import { Markdown } from '../components/Markdown.tsx';
 import { PlanPipeline } from '../components/PlanPipeline.tsx';
+import { PullRequestIndicator } from '../components/PullRequestIndicator.tsx';
 import { HeartbeatNote, inputReviewLabel, prReviewLabel, Spinner, StatusLabel } from '../components/Status.tsx';
 import { Timeline } from '../components/Timeline.tsx';
 import { useAction, usePolling } from '../hooks.ts';
@@ -346,7 +347,7 @@ export function PullRequestList({ pullRequests }: { pullRequests: TaskView['pull
           <a href={pr.url} target="_blank" rel="noreferrer">
             <span className="mono muted">{pullRequestNumber(pr.url)}</span> {pr.title}
           </a>
-          <span className={`pr-status pr-status-${pr.status}`}>{pr.status}</span>
+          <PullRequestIndicator pullRequest={pr} />
           <Spinner isBusy={pr.isUnderReview} label={prReviewLabel} />
         </li>
       ))}
