@@ -105,3 +105,12 @@ export {
   type Principal,
   type User,
 } from './user.ts';
+export {
+  accessTokenMaxExpiryDays,
+  accessTokenNameMaxLength,
+  accessTokenPrefix,
+  parseAccessTokenExpiry,
+  parseAccessTokenName,
+  type AccessToken,
+  type NewAccessToken,
+} from './access-token.ts';

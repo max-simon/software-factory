@@ -3,6 +3,7 @@ import type {
   AutonomyMode,
   Heartbeat,
   HeartbeatPhase,
+  NewAccessToken,
   NewArtifact,
   NewDecision,
   NewProject,
@@ -349,4 +350,13 @@ export function parseAcceptedWork(body: unknown): string[] {
   const ids = stringArray(fields, 'followUpIds');
   if (ids.length > maxFollowUpIds) throw new ValidationError(`followUpIds must list at most ${maxFollowUpIds} follow-ups`);
   return ids;
+}
+
+/** Shape only; the service checks the name's length and the expiry's range. */
+export function parseNewAccessToken(body: unknown): NewAccessToken {
+  const fields = object(body);
+  rejectUnknownFields(fields, ['name', 'expiresInDays']);
+  if (typeof fields.name !== 'string') throw new ValidationError('name must be a string');
+  const expiresInDays = fields.expiresInDays;
+  return { name: fields.name, ...(expiresInDays !== undefined && { expiresInDays: expiresInDays as number }) };
 }

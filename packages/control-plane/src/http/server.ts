@@ -21,7 +21,7 @@ export interface Request {
   params: Record<string, string>;
   headers: IncomingHttpHeaders;
   body: unknown;
-  /** Who signed in; set on every route outside `/agent/*` that is not public. */
+  /** Who signed in, by session or token; set on every route outside `/agent/*` that is not public. */
   principal?: Principal;
   /** The socket's remote address. */
   clientAddress: string;
@@ -72,12 +72,14 @@ const domainStatus: Record<DomainErrorCode, number> = {
   invalid_username: 400,
   invalid_display_name: 400,
   invalid_password: 400,
+  invalid_token_name: 400,
+  invalid_token_expiry: 400,
 };
 
 export interface ServerOptions {
   /**
-   * Resolves the session a request carries. Every route outside `/agent/*`
-   * that is not public needs one, and so does `mcpPath`.
+   * Resolves the session or personal access token a request carries. Every
+   * route outside `/agent/*` that is not public needs one, and so does `mcpPath`.
    */
   authenticate: (headers: IncomingHttpHeaders) => Principal | undefined;
   /** Serves the web UI for GET requests that match no route, signed in or not. */

@@ -3,6 +3,7 @@ import type { LoginThrottle } from '../auth/login-throttle.ts';
 import type { SessionService } from '../auth/session-service.ts';
 import type { Response, Route } from './server.ts';
 import { clearedSessionCookie, readSessionToken, sessionCookie } from './session-cookie.ts';
+import { requireSession } from './token-routes.ts';
 import { ValidationError } from './validation.ts';
 
 export interface AuthRoutesDeps {
@@ -66,7 +67,10 @@ export function authRoutes({ authenticator, sessions, users, throttle }: AuthRou
     {
       method: 'POST',
       path: '/auth/logout',
-      handle: ({ headers, secure }) => {
+      handle: ({ headers, principal, secure }) => {
+        // A token has no session to end; revoke it with DELETE /auth/tokens/:id.
+        const forbidden = requireSession(principal);
+        if (forbidden) return forbidden;
         sessions.endSession(readSessionToken(headers)!);
         return { status: 204, headers: { 'set-cookie': clearedSessionCookie(secure) } };
       },

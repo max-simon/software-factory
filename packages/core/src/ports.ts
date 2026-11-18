@@ -2,6 +2,7 @@ import type { TaskChange } from './changelog.ts';
 import type { Project } from './project.ts';
 import type { InputReview, InputReviewRequest, PrReview, PrReviewRequest, SpecReview, SpecReviewRequest } from './review.ts';
 import type { AgentConsole, Heartbeat, PullRequest, Task, TaskAgent, TaskModel, TaskStatus } from './task.ts';
+import type { AccessToken } from './access-token.ts';
 import type { Credentials, ExternalIdentity, User } from './user.ts';
 
 export interface TaskRepository {
@@ -134,4 +135,20 @@ export interface Authenticator {
 export interface PasswordHasher {
   hash(password: string): Promise<string>;
   verify(password: string, hash: string): Promise<boolean>;
+}
+
+/**
+ * Stores personal access tokens by the SHA-256 of the token; the token itself
+ * is never stored. Expired tokens stay until deleted, so their owner sees them.
+ */
+export interface AccessTokenRepository {
+  insert(token: AccessToken, tokenHash: string): void;
+  getByHash(tokenHash: string): AccessToken | undefined;
+  /** The user's tokens, oldest first. */
+  listForUser(userId: string): AccessToken[];
+  touch(id: string, lastUsedAt: string): void;
+  /** Deletes the token if it belongs to the user; whether it did. */
+  delete(userId: string, id: string): boolean;
+  /** Deletes every token of the user, e.g. when it is disabled. */
+  deleteForUser(userId: string): void;
 }

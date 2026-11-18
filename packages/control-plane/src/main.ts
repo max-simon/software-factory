@@ -4,10 +4,12 @@ import { ConfigError, loadConfig, unavailableAgent } from './config.ts';
 import { GitHubPullRequests } from './adapters/github-pull-requests.ts';
 import { PodmanRuntime } from './adapters/podman-runtime.ts';
 import { PodmanReviewer } from './adapters/podman-reviewer.ts';
+import { SqliteAccessTokenRepository } from './adapters/sqlite-access-token-repository.ts';
 import { SqliteSessionRepository } from './adapters/sqlite-session-repository.ts';
 import { SqliteProjectRepository } from './adapters/sqlite-project-repository.ts';
 import { SqliteTaskRepository } from './adapters/sqlite-task-repository.ts';
 import { SqliteUserRepository } from './adapters/sqlite-user-repository.ts';
+import { AccessTokenService } from './auth/access-token-service.ts';
 import { LocalPasswordAuthenticator } from './auth/local-password-authenticator.ts';
 import { LoginThrottle } from './auth/login-throttle.ts';
 import { ScryptPasswordHasher } from './auth/passwords.ts';
@@ -20,10 +22,11 @@ import { PullRequestReviewedHook } from './hooks/pull-request-reviewed-hook.ts';
 import { SpecReviewHook } from './hooks/spec-review-hook.ts';
 import { agentRoutes } from './http/agent-routes.ts';
 import { authRoutes } from './http/auth-routes.ts';
+import { authenticateRequest } from './http/authenticate.ts';
 import { engineerRoutes } from './http/engineer-routes.ts';
 import { createServer, mcpPath } from './http/server.ts';
-import { readSessionToken } from './http/session-cookie.ts';
 import { staticFiles } from './http/static-files.ts';
+import { tokenRoutes } from './http/token-routes.ts';
 import { PauseWatch } from './pause-watch.ts';
 import { ProjectService } from './project-service.ts';
 import { PullRequestObserver, pullRequestPollIntervalMs } from './pull-request-observer.ts';
@@ -79,6 +82,7 @@ function main(): void {
     idleTimeoutMs: config.sessionIdleHours * 3_600_000,
     maxLifetimeMs: config.sessionMaxDays * 86_400_000,
   });
+  const accessTokens = new AccessTokenService({ tokens: new SqliteAccessTokenRepository(config.dbPath), users });
   const routes = [
     ...authRoutes({
       authenticator: new LocalPasswordAuthenticator({ users, passwords: users, hasher: new ScryptPasswordHasher() }),
@@ -86,14 +90,15 @@ function main(): void {
       users,
       throttle: new LoginThrottle(),
     }),
+    ...tokenRoutes(accessTokens),
     ...engineerRoutes(tasks, service, projects, (agent) => unavailableAgent(config.agentCredentials, agent), reviews),
     ...agentRoutes(tasks, agent, projects),
   ];
   const server = createServer(routes, {
-    authenticate: (headers) => sessions.resolve(readSessionToken(headers)),
+    authenticate: authenticateRequest(sessions, accessTokens),
     staticFiles: staticFiles(webDist),
     // The MCP tools go through the engineer API over loopback, so they get its validation and error mapping;
-    // each request's client passes on the caller's session cookie, so the API sees the same user.
+    // each request's client passes on the caller's session cookie or bearer token, so the API sees the same user.
     mcp: createMcpHandler((headers) => createApiClient(`http://${host}:${config.port}`, headers)),
   });
   // Checked on a timer of its own: a host may sleep in the middle of a dispatcher pass.
