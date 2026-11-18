@@ -1,9 +1,11 @@
 import { randomBytes } from 'node:crypto';
 import {
+  changeMeta,
   pullRequestEvents,
   taskChanges,
-  type ChangeActor,
+  type ChangeAuthor,
   type Heartbeat,
+  type Principal,
   type Task,
   type TaskChange,
   type TaskEvent,
@@ -74,22 +76,26 @@ export class TaskStore {
     return this.#repository.findByTokenHash(tokenHash);
   }
 
-  insert(task: Task): void {
-    this.#repository.insert(task, [{ at: task.createdAt, actor: 'user', field: 'created' }]);
+  /** `by` is the user who created the task. */
+  insert(task: Task, by: Principal): void {
+    this.#repository.insert(task, [{ ...changeMeta(task.createdAt, by), field: 'created' }]);
     this.#onEvent({ type: 'task.created', task });
   }
 
   /**
    * Loads the task, applies `operation`, stamps `updatedAt`, saves it with its
    * changelog and publishes it, followed by what changed on its pull requests.
+   * A change `by` a user records the user's id, never a name.
    */
-  update(id: string, actor: ChangeActor, operation: (task: Task) => Task): Task {
+  update(id: string, by: ChangeAuthor, operation: (task: Task) => Task): Task {
     const current = this.get(id);
     const now = this.now();
     const next = { ...operation(current), updatedAt: now };
-    const changes = taskChanges(current, next, { at: now, actor });
+    const meta = changeMeta(now, by);
+    const changes = taskChanges(current, next, meta);
     this.#repository.save(next, changes);
-    this.#onEvent({ type: 'task.updated', task: next, actor, changes });
+    const { actor, userId } = meta;
+    this.#onEvent({ type: 'task.updated', task: next, actor, ...(userId !== undefined && { userId }), changes });
     pullRequestEvents(current, next).forEach((event) => this.#onEvent(event));
     return next;
   }

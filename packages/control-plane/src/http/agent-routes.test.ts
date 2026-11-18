@@ -10,7 +10,7 @@ import { createServices } from '../services.ts';
 import { agentRoutes } from './agent-routes.ts';
 import { engineerRoutes } from './engineer-routes.ts';
 import { createServer } from './server.ts';
-import { sequentialItemIds, testAuth } from '../test-support.ts';
+import { ada, sequentialItemIds, testAuth } from '../test-support.ts';
 
 const token = 'ab'.repeat(32);
 const otherToken = 'cd'.repeat(32);
@@ -50,7 +50,7 @@ async function startApi(t: TestContext, input: NewTask = supervisedTask, now = (
     newItemId: sequentialItemIds(),
     now,
   });
-  const created = service.create(input);
+  const created = service.create(input, ada);
   repository.save(markInProgress(startTask(created), {
     tokenHash: hashAgentToken(token),
     executionId: 'c-1',
@@ -59,8 +59,8 @@ async function startApi(t: TestContext, input: NewTask = supervisedTask, now = (
 
   let projectCounter = 0;
   const projects = new ProjectService({ repository: new SqliteProjectRepository(':memory:'), newId: () => `p${++projectCounter}` });
-  projects.create({ title: 'Checkout', description: 'Everything about checkout' });
-  projects.create({ title: 'Other' });
+  projects.create({ title: 'Checkout', description: 'Everything about checkout' }, ada);
+  projects.create({ title: 'Other' }, ada);
   const auth = testAuth();
   const server = createServer([...engineerRoutes(tasks, service, projects), ...agentRoutes(tasks, agent, projects)], {
     authenticate: auth.authenticate,
@@ -129,7 +129,7 @@ test('a supervised task runs the full agent sequence', async (t) => {
   assert.deepEqual(json.task.decisions, [{ id: 'd1', createdAt: fixedNow, ...decision }]);
   assert.deepEqual(json.task.artifacts, [{ id: 'a1', createdAt: fixedNow, ...artifact }]);
   assert.deepEqual(json.task.pullRequests, [{ ...pullRequest, status: 'open' }]);
-  assert.deepEqual(json.task.questions, [{ id: 'q1', createdAt: fixedNow, ...radioQuestion, answer: ['github'] }]);
+  assert.deepEqual(json.task.questions, [{ id: 'q1', createdAt: fixedNow, ...radioQuestion, answer: ['github'], answeredBy: 'u1' }]);
   assert.equal(json.task.updatedAt, fixedNow);
 });
 
@@ -160,6 +160,7 @@ test('approval requests block until the engineer reviews every item', async (t) 
     status: 'changes_requested',
     comment: 'Add a sequence diagram',
     annotations,
+    reviewedBy: 'u1',
   });
 
   const again = await call('POST', '/tasks/task-1/items/a1/review', { body: { verdict: 'approved' } });
@@ -317,7 +318,7 @@ test('answers and follow-ups become work for the resumed session', async (t) => 
   await call('POST', '/tasks/task-1/questions/q1/answer', { body: { answer: ['github'] } });
   const { json } = await call('POST', '/agent/heartbeat', { body: { phase: 'awaiting_work' } });
   assert.deepEqual(json.work, {
-    followUps: [{ id: 'f1', createdAt: fixedNow, message: 'Prefer GitHub' }],
+    followUps: [{ id: 'f1', createdAt: fixedNow, message: 'Prefer GitHub', authorId: 'u1' }],
     inputIds: ['q1'],
   });
 });
@@ -411,13 +412,13 @@ test('follow-ups reach the agent and are acknowledged as delivered', async (t) =
   assert.equal(sent.json.status, 'in_progress');
 
   const { json } = await call('GET', '/agent/task');
-  assert.deepEqual(json.task.followUps, [{ id: 'f1', createdAt: fixedNow, message: 'Also add a logout button' }]);
+  assert.deepEqual(json.task.followUps, [{ id: 'f1', createdAt: fixedNow, message: 'Also add a logout button', authorId: 'u1' }]);
 
   const delivered = await call('POST', '/agent/work/accept', { body: { followUpIds: ['f1'] } });
   assert.equal(delivered.status, 200);
   assert.equal((await call('GET', '/tasks/task-1')).json.execution.workAcceptedAt, fixedNow);
   assert.deepEqual(delivered.json.task.followUps, [
-    { id: 'f1', createdAt: fixedNow, message: 'Also add a logout button', deliveredAt: fixedNow },
+    { id: 'f1', createdAt: fixedNow, message: 'Also add a logout button', authorId: 'u1', deliveredAt: fixedNow },
   ]);
   assertAgentView(delivered.json);
 
@@ -461,6 +462,7 @@ test('an agent reads its own project', async (t) => {
     title: 'Checkout',
     description: 'Everything about checkout',
     autoMerge: false,
+    createdBy: 'u1',
     createdAt: json.project.createdAt,
     updatedAt: json.project.updatedAt,
   });

@@ -120,7 +120,7 @@ export class InputReviewHook implements Hook {
   }
 
   #apply(id: string, response: InputResponse): void {
-    const byReviewer = { rationale: response.rationale.trim() };
+    const byReviewer = { reviewer: { rationale: response.rationale.trim() } };
     switch (response.action) {
       case 'answer':
         this.#deps.service.answer(id, response.id, response.answer, byReviewer);

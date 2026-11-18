@@ -8,6 +8,7 @@ import { ReviewTracker } from '../review-tracker.ts';
 import { createServices } from '../services.ts';
 import { Hooks } from './hooks.ts';
 import { SpecReviewHook, triggersSpecReview } from './spec-review-hook.ts';
+import { ada } from '../test-support.ts';
 
 /** Each review waits until the test settles it. */
 class FakeReviewer implements Pick<Reviewer, 'reviewSpec'> {
@@ -51,12 +52,12 @@ function setup() {
     now,
   });
   const projects = new ProjectService({ repository: new SqliteProjectRepository(':memory:'), newId: () => 'p1', now });
-  const project = projects.create({ title: 'Billing', description: 'Invoices for customers.' });
+  const project = projects.create({ title: 'Billing', description: 'Invoices for customers.' }, ada);
   const reviewer = new FakeReviewer();
   const logged: string[] = [];
   const reviews = new ReviewTracker();
   hooks.register(new SpecReviewHook({ tasks, service, projects, reviewer, reviews, log: (message) => logged.push(message) }));
-  const createTask = (title = 'Add VAT') => service.create({ projectId: project.id, title, specification: 'Add VAT to invoices.' });
+  const createTask = (title = 'Add VAT') => service.create({ projectId: project.id, title, specification: 'Add VAT to invoices.' }, ada);
   /** Waits until every hook run so far has finished. */
   const settled = async () => {
     while (pending.length > 0) await pending.shift();
@@ -89,7 +90,7 @@ test('the request marks the dependencies among the other tasks, and editing them
   const web = createTask('Show tax rates');
   await tick();
   for (let i = 0; i < 3; i++) await reviewer.answer(fine);
-  service.edit(web.id, { dependsOn: [backend.id] });
+  service.edit(web.id, { dependsOn: [backend.id] }, ada);
   await tick();
 
   assert.equal(reviewer.requests.length, 4);
@@ -112,8 +113,8 @@ test('an unclear draft is held for clarification with the comment, logged as a r
   assert.equal(held.status, 'clarification_required');
   assert.equal(held.clarification, '- Which repository?');
   assert.deepEqual(
-    tasks.changes(task.id).filter((change) => change.field === 'status').map(({ actor }) => actor),
-    ['reviewer'],
+    tasks.changes(task.id).filter((change) => change.field === 'status').map((change) => [change.actor, 'userId' in change]),
+    [['reviewer', false]],
   );
   assert.equal(reviewer.requests.length, 1, 'the reviewer change triggers no new review');
 });
@@ -122,8 +123,8 @@ test('a verdict on an outdated version is discarded, and one more review covers 
   const { reviewer, createTask, settled, tasks, service } = setup();
   const task = createTask();
   await tick();
-  service.edit(task.id, { specification: 'Add VAT to invoices in repo billing-api.' });
-  service.edit(task.id, { title: 'Add VAT to invoices' });
+  service.edit(task.id, { specification: 'Add VAT to invoices in repo billing-api.' }, ada);
+  service.edit(task.id, { title: 'Add VAT to invoices' }, ada);
   await tick();
   assert.equal(reviewer.requests.length, 1, 'edits during a review start none in parallel');
 
@@ -142,7 +143,7 @@ test('a task started or deleted during its review is left alone', async () => {
   const started = createTask('started');
   const deleted = createTask('deleted');
   await tick();
-  service.start(started.id);
+  service.start(started.id, ada);
   await service.delete(deleted.id);
 
   await reviewer.answer(unclear);
@@ -168,8 +169,8 @@ test('returning to draft after a clarification reviews the task again', async ()
   const task = createTask();
   await tick();
   await reviewer.answer(unclear);
-  service.edit(task.id, { specification: 'Add VAT to invoices in repo billing-api.' });
-  service.returnToDraft(task.id);
+  service.edit(task.id, { specification: 'Add VAT to invoices in repo billing-api.' }, ada);
+  service.returnToDraft(task.id, ada);
   await tick();
 
   assert.equal(reviewer.requests.length, 2, 'edits while held trigger nothing; the return to draft does');
@@ -219,7 +220,7 @@ test('a task shows under spec review through all its runs, reruns included, and 
   assert.equal(reviews.isSpecUnderReview(task.id), false, 'not before the hook runs');
   await tick();
   assert.equal(reviews.isSpecUnderReview(task.id), true);
-  service.edit(task.id, { title: 'Add VAT to invoices' });
+  service.edit(task.id, { title: 'Add VAT to invoices' }, ada);
   await reviewer.answer(fine);
   assert.equal(reviews.isSpecUnderReview(task.id), true, 'still shown while the rerun goes on');
   await reviewer.answer(fine);

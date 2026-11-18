@@ -13,6 +13,7 @@ import type {
   Annotation,
   ReviewerNote,
   QuestionType,
+  Responder,
   ReviewVerdict,
   SessionMetrics,
   Task,
@@ -101,10 +102,12 @@ function assertActive(task: Task): void {
   }
 }
 
-export function createTask(input: NewTask, meta: { id: string; now: string; rank: number }): Task {
+/** `meta.createdBy` is the id of the user who creates the task. */
+export function createTask(input: NewTask, meta: { id: string; now: string; rank: number; createdBy?: string }): Task {
   const task: Task = {
     id: meta.id,
     createdAt: meta.now,
+    ...(meta.createdBy !== undefined && { createdBy: meta.createdBy }),
     updatedAt: meta.now,
     projectId: input.projectId,
     title: input.title,
@@ -281,8 +284,8 @@ export function askQuestion(task: Task, question: NewQuestion): Task {
   return awaitInput({ ...task, questions: [...task.questions, { ...question }] });
 }
 
-/** `byReviewer` marks an answer the input reviewer gave instead of the engineer. */
-export function answerQuestion(task: Task, questionId: string, answer: string[], byReviewer?: ReviewerNote): Task {
+/** `by` is the answering user, or the input reviewer answering instead of the engineer. */
+export function answerQuestion(task: Task, questionId: string, answer: string[], by: Responder): Task {
   const question = task.questions.find((q) => q.id === questionId);
   if (!question) {
     throw new DomainError('unknown_question', `task ${task.id} has no question ${questionId}`);
@@ -295,13 +298,13 @@ export function answerQuestion(task: Task, questionId: string, answer: string[],
   }
   assertValidAnswer(question, answer);
   const questions = task.questions.map((q) =>
-    q.id === questionId ? { ...q, answer: [...answer], ...(byReviewer && { byReviewer: { ...byReviewer } }) } : q,
+    q.id === questionId ? { ...q, answer: [...answer], ...respondedBy(by, 'answeredBy') } : q,
   );
   return resumeWhenSettled({ ...task, questions });
 }
 
-/** Approves or rejects a decision or artifact that awaits approval; `byReviewer` marks a review by the input reviewer. */
-export function reviewItem(task: Task, itemId: string, review: Review, byReviewer?: ReviewerNote): Task {
+/** Approves or rejects a decision or artifact that awaits approval; `by` is the reviewing user or the input reviewer. */
+export function reviewItem(task: Task, itemId: string, review: Review, by: Responder): Task {
   const item = [...task.decisions, ...task.artifacts].find((i) => i.id === itemId);
   if (!item) throw new DomainError('unknown_item', `task ${task.id} has no decision or artifact ${itemId}`);
   if (item.approval?.status !== 'pending') {
@@ -321,11 +324,16 @@ export function reviewItem(task: Task, itemId: string, review: Review, byReviewe
     ...(comment ? { comment } : {}),
     ...(annotations.length > 0 ? { annotations: annotations.map((a) => ({ ...a })) } : {}),
     ...(chosen !== undefined && { chosen }),
-    ...(byReviewer && { byReviewer: { ...byReviewer } }),
+    ...respondedBy(by, 'reviewedBy'),
   };
   const reviewed = <T extends { id: string }>(items: T[]): T[] =>
     items.map((i) => (i.id === itemId ? { ...i, approval } : i));
   return resumeWhenSettled({ ...task, decisions: reviewed(task.decisions), artifacts: reviewed(task.artifacts) });
+}
+
+/** A user is recorded by id under `userKey`, never by name; the input reviewer by its note, without a user. */
+function respondedBy<K extends 'answeredBy' | 'reviewedBy'>(by: Responder, userKey: K): { byReviewer: ReviewerNote } | { [P in K]: string } {
+  return 'reviewer' in by ? { byReviewer: { ...by.reviewer } } : ({ [userKey]: by.userId } as { [P in K]: string });
 }
 
 /** The reviewer's pick when it overrides the agent's; picking the agent's own option is no override. */

@@ -2,6 +2,8 @@
 export interface Project {
   id: string;
   createdAt: string;
+  /** The id of the user who created it; unset for projects stored before users existed. */
+  createdBy?: string;
   updatedAt: string;
   title: string;
   /** Markdown; may be empty. */
@@ -26,10 +28,12 @@ export interface ProjectEdit {
 
 // Pure, like the task operations: the caller stamps `updatedAt` when saving.
 
-export function createProject(input: NewProject, meta: { id: string; now: string }): Project {
+/** `meta.createdBy` is the id of the user who creates the project. */
+export function createProject(input: NewProject, meta: { id: string; now: string; createdBy?: string }): Project {
   return {
     id: meta.id,
     createdAt: meta.now,
+    ...(meta.createdBy !== undefined && { createdBy: meta.createdBy }),
     updatedAt: meta.now,
     title: input.title,
     description: input.description ?? '',

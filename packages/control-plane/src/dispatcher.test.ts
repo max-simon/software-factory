@@ -16,7 +16,7 @@ import { hashAgentToken } from './agent-token.ts';
 import { Dispatcher, orphanSweepIntervalMs, type DispatcherDeps, startupTimeoutMs } from './dispatcher.ts';
 import { createServices } from './services.ts';
 import type { TaskService } from './task-service.ts';
-import { sequentialItemIds } from './test-support.ts';
+import { ada, sequentialItemIds } from './test-support.ts';
 
 class FakeRuntime implements ExecutionRuntime {
   started: ExecutionSpec[] = [];
@@ -125,7 +125,7 @@ const newTask = (overrides: Partial<NewTask> = {}): NewTask => ({
 });
 
 const queued = ({ service }: Fixture, overrides: Partial<NewTask> = {}): Task =>
-  service.start(service.create(newTask(overrides)).id);
+  service.start(service.create(newTask(overrides), ada).id, ada);
 
 /**
  * A started task in `status`; its worker stays working unless `isIdle`, which needs a status the agent reported.
@@ -133,8 +133,8 @@ const queued = ({ service }: Fixture, overrides: Partial<NewTask> = {}): Task =>
  */
 function inStatus({ tasks, service, agent, lifecycle, runtime }: Fixture, status: StartedStatus, executionId: string, isIdle = false): Task {
   const { agentConsole } = runtime;
-  const { id } = service.create(newTask({ autonomyMode: 'supervised', ...(agentConsole && { agent: 'opencode' as const }) }));
-  service.start(id);
+  const { id } = service.create(newTask({ autonomyMode: 'supervised', ...(agentConsole && { agent: 'opencode' as const }) }), ada);
+  service.start(id, ada);
   lifecycle.markInProgress(id, { tokenHash: `hash-${id}`, executionId, ...(agentConsole && { agentConsole }) });
   if (status === 'input_required') agent.askQuestion(id, { problem: 'p?', type: 'text', options: [] });
   if (status === 'ready' || status === 'done') agent.markReady(id);
@@ -152,8 +152,8 @@ const pullRequest = (n: number, status: PullRequest['status'] = 'open'): PullReq
 
 /** A ready task with an idle worker and the given open pull requests. */
 function readyWith(f: Fixture, pullRequests: PullRequest[]): Task {
-  const { id } = f.service.create(newTask());
-  f.service.start(id);
+  const { id } = f.service.create(newTask(), ada);
+  f.service.start(id, ada);
   f.lifecycle.markInProgress(id, { tokenHash: `hash-${id}`, executionId: `c-${id}` });
   for (const pr of pullRequests) f.agent.addPullRequest(id, { url: pr.url, title: pr.title });
   f.agent.markReady(id);
@@ -264,7 +264,7 @@ test('passes the task model and agent to the execution server', async () => {
 test('omits baseBranch and repoUrl from the spec when the task has none', async () => {
   const f = setup();
   const { repoUrl: _none, ...repoLess } = newTask();
-  f.service.start(f.service.create(repoLess).id);
+  f.service.start(f.service.create(repoLess, ada).id, ada);
   await f.dispatcher.reconcile();
   assert.ok(!('baseBranch' in f.runtime.started[0]!));
   assert.ok(!('repoUrl' in f.runtime.started[0]!));
@@ -325,7 +325,7 @@ for (const status of ['input_required', 'failed'] as const) {
 }
 
 for (const [name, interrupt] of [
-  ['cancelled', (service: TaskService, id: string) => service.cancel(id)],
+  ['cancelled', (service: TaskService, id: string) => service.cancel(id, ada)],
   ['deleted', (service: TaskService, id: string) => service.delete(id)],
 ] as const) {
   test(`removes the new execution server of a task ${name} while it started`, async () => {
@@ -409,7 +409,7 @@ test('a worker that cannot be restarted is released anyway and the error logged'
 test('notifies an idle worker once a follow-up waits for it, and marks it working', async () => {
   const f = setup(1);
   const task = inStatus(f, 'ready', 'c1', true);
-  f.service.addFollowUp(task.id, 'rename the button');
+  f.service.addFollowUp(task.id, 'rename the button', ada);
   const next = queued(f);
   await f.dispatcher.reconcile();
   assert.deepEqual(f.runtime.notified, ['c1']);
@@ -435,7 +435,7 @@ test('notifies an idle worker once the last question is answered', async () => {
   await f.dispatcher.reconcile();
   assert.deepEqual(f.runtime.notified, []);
 
-  f.service.answer(task.id, 'q1', ['yes']);
+  f.service.answer(task.id, 'q1', ['yes'], ada);
   await f.dispatcher.reconcile();
   assert.deepEqual(f.runtime.notified, ['c1']);
 });
@@ -444,7 +444,7 @@ test('records the agent console address a notified execution server reports', as
   const f = setup();
   f.runtime.agentConsole = { url: 'http://127.0.0.1:43021', password: 'pw' };
   const task = inStatus(f, 'ready', 'c1', true);
-  f.service.addFollowUp(task.id, 'again');
+  f.service.addFollowUp(task.id, 'again', ada);
   f.runtime.movedConsoleUrl = 'http://127.0.0.1:50000';
   await f.dispatcher.reconcile();
   assert.deepEqual(f.tasks.get(task.id).execution?.console, { url: 'http://127.0.0.1:50000', password: 'pw' });
@@ -465,7 +465,7 @@ test('records the agent console address a restarted execution server reports', a
 test('fails a task whose execution server cannot be notified, with a redacted reason', async () => {
   const f = setup();
   const task = inStatus(f, 'failed', 'c1', true);
-  f.service.addFollowUp(task.id, 'again');
+  f.service.addFollowUp(task.id, 'again', ada);
   f.runtime.failOn.notify = 'no such container, sk-secret';
   await f.dispatcher.reconcile();
   const updated = f.tasks.get(task.id);
@@ -477,7 +477,7 @@ test('fails a task whose execution server cannot be notified, with a redacted re
 test('a notified worker that never reports is restarted after the startup timeout', async () => {
   const f = setup();
   const task = inStatus(f, 'ready', 'c1', true);
-  f.service.addFollowUp(task.id, 'again');
+  f.service.addFollowUp(task.id, 'again', ada);
   await f.dispatcher.reconcile();
   f.advance(startupTimeoutMs);
   await f.dispatcher.reconcile();

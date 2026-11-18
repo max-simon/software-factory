@@ -47,6 +47,8 @@ export interface Approval {
   chosen?: number;
   /** Set when the input reviewer reviewed it; unset for the engineer's reviews. */
   byReviewer?: ReviewerNote;
+  /** The id of the user who reviewed it; unset while pending, for the input reviewer's reviews and for reviews stored before users existed. */
+  reviewedBy?: string;
 }
 
 export interface Decision {
@@ -85,7 +87,12 @@ export interface Question {
   answer?: string[];
   /** Set when the input reviewer answered it; unset for the engineer's answers. */
   byReviewer?: ReviewerNote;
+  /** The id of the user who answered it; unset for the input reviewer's answers and for answers stored before users existed. */
+  answeredBy?: string;
 }
+
+/** Who answers a question or reviews an item: a user by id, or the input reviewer on the engineer's behalf. */
+export type Responder = { userId: string } | { reviewer: ReviewerNote };
 
 /** GitHub's state of a pull request, as the control plane last read it. */
 export type PullRequestStatus = 'open' | 'merged' | 'closed';
@@ -182,6 +189,8 @@ export interface FollowUp {
   /** When it was sent; stamped by the control plane. */
   createdAt: string;
   message: string;
+  /** The id of the user who sent it; unset for follow-ups stored before users existed. */
+  authorId?: string;
   /** Set once the runner accepted it for the agent session. */
   deliveredAt?: string;
 }
@@ -189,6 +198,8 @@ export interface FollowUp {
 export interface Task {
   id: string;
   createdAt: string;
+  /** The id of the user who created it; unset for tasks stored before users existed. */
+  createdBy?: string;
   updatedAt: string;
   projectId: string;
   title: string;

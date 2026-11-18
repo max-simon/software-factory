@@ -9,6 +9,8 @@ export type TaskEvent =
       /** As saved. */
       task: Task;
       actor: ChangeActor;
+      /** The id of the user who made the update; set exactly when `actor` is `user`. */
+      userId?: string;
       /** The changelog entries of this update; empty when no tracked field changed. */
       changes: TaskChange[];
     }

@@ -206,7 +206,12 @@ test('list_tasks returns a compact summary and filters by status and project', a
 });
 
 test('get_task returns the full task', async () => {
-  const task = sampleTask({ plan: [{ title: 'Write code', status: 'done' }] });
+  const task = sampleTask({
+    plan: [{ title: 'Write code', status: 'done' }],
+    // Who did what goes by user id, never by name.
+    createdBy: 'u1',
+    followUps: [{ id: 'f1', createdAt: '2026-11-12T00:00:00.000Z', message: 'Say hi', authorId: 'u2' }],
+  });
   fake = fakeTaskClient([task]);
   assert.deepEqual(JSON.parse((await call('get_task', { id: 't1' })).text), task);
 });

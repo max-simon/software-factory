@@ -8,6 +8,7 @@ import { ReviewTracker } from '../review-tracker.ts';
 import { createServices } from '../services.ts';
 import { Hooks } from './hooks.ts';
 import { PrReviewHook } from './pr-review-hook.ts';
+import { ada } from '../test-support.ts';
 
 const prUrl = (n: number) => `https://github.com/o/r/pull/${n}`;
 
@@ -75,13 +76,13 @@ function setup({ risks = { 1: 'low', 2: 'low' }, refusedMerges = new Set(), isCo
     newId: () => `t${++counter}`,
   });
   const projects = new ProjectService({ repository: new SqliteProjectRepository(':memory:'), newId: () => `p${++projectCounter}` });
-  const autoMerged = projects.create({ title: 'Auto', autoMerge: true });
-  const manual = projects.create({ title: 'Manual' });
+  const autoMerged = projects.create({ title: 'Auto', autoMerge: true }, ada);
+  const manual = projects.create({ title: 'Manual' }, ada);
   hooks.register(new PrReviewHook({ tasks, pullRequests, reviewer, projects, reviews, log: (message) => logged.push(message) }));
   /** A task in progress in `projectId` that reported one pull request per number. */
   const workingTask = (projectId: string, numbers: number[]): string => {
-    const { id } = service.create({ projectId, title: 't', specification: 's', repoUrl: 'https://github.com/o/r' });
-    service.start(id);
+    const { id } = service.create({ projectId, title: 't', specification: 's', repoUrl: 'https://github.com/o/r' }, ada);
+    service.start(id, ada);
     lifecycle.markInProgress(id, { tokenHash: `hash-${id}`, executionId: `c-${id}` });
     for (const n of numbers) agent.addPullRequest(id, { url: prUrl(n), title: `PR ${n}` });
     return id;
@@ -218,7 +219,7 @@ test('drops the decision when a follow-up moved the task back to work during the
   const id = workingTask(autoMerged.id, [1]);
   agent.markReady(id);
   await tick();
-  service.addFollowUp(id, 'Rename the flag');
+  service.addFollowUp(id, 'Rename the flag', ada);
   await release();
   await settled();
   assert.deepEqual(merged, []);
@@ -231,7 +232,7 @@ test('a task that turns ready again outdates the running review; the newer run d
   const id = workingTask(autoMerged.id, [1]);
   agent.markReady(id);
   await tick();
-  service.addFollowUp(id, 'Rename the flag');
+  service.addFollowUp(id, 'Rename the flag', ada);
   agent.markReady(id);
   await tick();
   assert.equal(reviewed.length, 1, 'the newer run waits for the running one');
@@ -249,7 +250,7 @@ test('does not merge when the task changed while the decision was posted, and sa
     onComment: () => {
       if (isChanged) return;
       isChanged = true;
-      fakes.service.addFollowUp(id, 'Wait, one more thing');
+      fakes.service.addFollowUp(id, 'Wait, one more thing', ada);
     },
   });
   const id = fakes.workingTask(fakes.autoMerged.id, [1]);
