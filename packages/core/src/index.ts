@@ -127,3 +127,16 @@ export {
   type NewAccessToken,
 } from './access-token.ts';
 export { type Session } from './session.ts';
+export {
+  autonomyLabels,
+  factoryLabel,
+  modelLabels,
+  parseManagedLabels,
+  projectLabelPrefix,
+  startLabel,
+  statusLabel,
+  statusLabelChanges,
+  statusLabelPrefix,
+  type LabelChanges,
+  type ManagedLabels,
+} from './managed-labels.ts';
