@@ -115,6 +115,9 @@ export function EditTask({ id }: { id: string }) {
   const { isBusy, error, run } = useAction();
   if (!task) return <p className="muted">{loadError ? loadError.message : 'Loading…'}</p>;
   if (!isEditable(task.status)) return <p className="muted">Only tasks that are not queued yet can be edited.</p>;
+  if (task.external) {
+    return <p className="muted">Title, specification and labels of this task come from {task.external.key}; change them there.</p>;
+  }
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

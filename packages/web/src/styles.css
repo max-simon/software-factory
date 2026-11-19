@@ -615,6 +615,7 @@ section {
 }
 
 .card {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -625,13 +626,45 @@ section {
 }
 
 .card:hover,
-.card:focus-visible {
+.card:has(.card-title:focus-visible) {
   border-color: var(--line-strong);
 }
 
 .card-title {
   font-weight: 500;
   overflow-wrap: anywhere;
+}
+
+/* Stretches the title link over the whole card, so the card stays one click target. */
+.card-title::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+
+.card-title:focus-visible {
+  outline: none;
+}
+
+.card:has(.card-title:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.issue-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Above the stretched title link, so it opens the issue rather than the task. */
+.card .issue-link {
+  position: relative;
+  z-index: 1;
+}
+
+a.issue-link:hover {
+  color: var(--accent);
 }
 
 .card-meta,
@@ -1733,4 +1766,8 @@ input[type='radio'] {
   .token-form-fields {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+.task-header .hint {
+  margin-top: 8px;
 }

@@ -170,6 +170,12 @@ export function labelsByUsage(tasks: readonly TaskView[]): string[] {
   return [...counts].sort(([a, x], [b, y]) => y - x || a.localeCompare(b)).map(([label]) => label);
 }
 
+/** Whether `url` is an absolute http(s) URL, the only kind safe to link to. */
+export const isWebUrl = (url: string): boolean => {
+  const protocol = URL.parse(url)?.protocol;
+  return protocol === 'http:' || protocol === 'https:';
+};
+
 export const hasEveryLabel = (task: Pick<TaskView, 'labels'>, labels: readonly string[]): boolean =>
   labels.every((label) => task.labels.includes(label));
 
