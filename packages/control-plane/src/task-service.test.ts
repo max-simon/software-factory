@@ -76,6 +76,10 @@ class FakeIssues implements IssueProvider {
     return [];
   }
 
+  covers(): boolean {
+    return true;
+  }
+
   async changeLabels(url: string, change: { add: readonly string[]; remove: readonly string[] }): Promise<void> {
     this.#calls.push('changeLabels');
     if (this.failing.labels !== undefined) throw new Error(this.failing.labels);
@@ -144,7 +148,7 @@ test('delete removes the factory labels from a managed task\'s issue, comments o
   }
   assert.equal(change!.remove.some((label) => label.startsWith('factory:project:') || label.includes('model') || label.endsWith('autonomous')), false);
   assert.equal(f.issues.comments.length, 1);
-  assert.equal(f.issues.comments[0]!.key, 'task-deleted');
+  assert.equal(f.issues.comments[0]!.key, 'm1:task-deleted');
   assert.equal(f.issues.comments[0]!.url, issueUrl);
 });
 

@@ -115,7 +115,7 @@ export class TaskService {
    */
   async cancel(id: string, by: Principal): Promise<Task> {
     const { execution } = this.#tasks.get(id);
-    const cancelled = this.#tasks.update(id, by, cancelTask);
+    const cancelled = this.#tasks.update(id, by, (task) => cancelTask(task, this.#tasks.now()));
     if (execution !== undefined) await this.#runtime.remove(execution.id);
     return cancelled;
   }
@@ -164,7 +164,7 @@ export class TaskService {
     }
     // The labels are gone, so the sync will not re-import the issue; keeping the task for a comment would gain nothing.
     try {
-      await this.#issues.comment(external.url, deletedCommentKey, deletedCommentBody);
+      await this.#issues.comment(external.url, deletedCommentKey(id), deletedCommentBody);
     } catch (error) {
       this.#log(`delete ${id}: commenting on ${external.key} failed: ${redact(describe(error), this.#secrets)}`);
     }

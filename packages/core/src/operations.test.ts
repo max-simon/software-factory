@@ -262,15 +262,16 @@ describe('lifecycle', () => {
 
   it('markFailed records the reason from every status that has started or is queued', () => {
     for (const status of ['queued', 'in_progress', 'input_required', 'ready'] as const) {
-      const task = markFailed(taskIn(status), 'boom');
+      const task = markFailed(taskIn(status), 'boom', '2026-01-02T00:00:00Z');
       assert.equal(task.status, 'failed');
       assert.equal(task.failureReason, 'boom');
+      assert.equal(task.failedAt, '2026-01-02T00:00:00Z');
     }
   });
 
   it('markFailed rejects drafts, done and failed', () => {
     for (const status of ['draft', 'clarification_required', 'done', 'failed'] as const) {
-      assert.throws(() => markFailed(taskIn(status), 'x'), rejectsWith('invalid_transition'));
+      assert.throws(() => markFailed(taskIn(status), 'x', 'now'), rejectsWith('invalid_transition'));
     }
   });
 
@@ -278,7 +279,7 @@ describe('lifecycle', () => {
     const task = taskIn('queued');
     const before = frozen(task);
     markInProgress(task, { tokenHash: 'h', executionId: 'c' }, '2026-01-02T00:00:00Z');
-    markFailed(task, 'x');
+    markFailed(task, 'x', 'now');
     assert.deepEqual(task, before);
   });
 });
@@ -287,16 +288,17 @@ describe('cancelTask', () => {
   it('fails a queued or running task with a reason and drops its token and execution', () => {
     for (const status of ['queued', 'in_progress', 'input_required', 'ready'] as const) {
       const execution = { id: 'c', tokenHash: 'h', worker: { state: 'working' as const, since: 'x' }, console: { url: 'u', password: 'p' } };
-      const task = cancelTask(taskIn(status, { execution }));
+      const task = cancelTask(taskIn(status, { execution }), '2026-01-02T00:00:00Z');
       assert.equal(task.status, 'failed');
       assert.equal(task.failureReason, 'Cancelled by the engineer');
+      assert.equal(task.failedAt, '2026-01-02T00:00:00Z');
       assert.equal('execution' in task, false);
     }
   });
 
   it('rejects draft, done and failed tasks', () => {
     for (const status of ['draft', 'done', 'failed'] as const) {
-      assert.throws(() => cancelTask(taskIn(status)), rejectsWith('invalid_transition'), status);
+      assert.throws(() => cancelTask(taskIn(status), 'now'), rejectsWith('invalid_transition'), status);
     }
   });
 });
@@ -346,6 +348,7 @@ describe('restartTask', () => {
       pullRequests: [{ url: `${repoUrl}/pull/1`, title: 't', status: 'open' }],
       followUps: [{ id: 'f1', createdAt: 'x', message: 'm' }],
       failureReason: 'boom',
+      failedAt: 'x',
       metrics: { durationMs: 10, costUsd: 1 },
       execution: {
         id: 'c',
@@ -878,10 +881,11 @@ describe('addFollowUp', () => {
     assert.equal(addFollowUp(withServer(taskIn('ready')), followUp('f1')).status, 'in_progress');
   });
 
-  it('moves a failed task back to in_progress and clears the failure reason', () => {
-    const task = addFollowUp(withServer(taskIn('failed', { failureReason: 'boom' })), followUp('f1'));
+  it('moves a failed task back to in_progress and clears the failure reason and time', () => {
+    const task = addFollowUp(withServer(taskIn('failed', { failureReason: 'boom', failedAt: 'x' })), followUp('f1'));
     assert.equal(task.status, 'in_progress');
     assert.equal('failureReason' in task, false);
+    assert.equal('failedAt' in task, false);
   });
 
   it('keeps a task awaiting input in input_required', () => {

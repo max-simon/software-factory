@@ -410,8 +410,8 @@ const resumeWhenSettled = (task: Task): Task => (hasOpenInput(task) ? task : tra
 
 export const markReady = (task: Task): Task => transition(task, 'ready');
 
-export function markFailed(task: Task, reason: string): Task {
-  return { ...transition(task, 'failed'), failureReason: reason };
+export function markFailed(task: Task, reason: string, now: string): Task {
+  return { ...transition(task, 'failed'), failureReason: reason, failedAt: now };
 }
 
 export const markDone = (task: Task): Task => transition(task, 'done');
@@ -466,7 +466,7 @@ export function addFollowUp(task: Task, input: NewFollowUp): Task {
 
 function resumeForFollowUp(task: Task): Task {
   if (task.status !== 'ready' && task.status !== 'failed') return task;
-  const { failureReason: _cleared, ...rest } = task;
+  const { failureReason: _cleared, failedAt: _clearedAt, ...rest } = task;
   return transition(rest, 'in_progress');
 }
 
@@ -481,11 +481,11 @@ export const isRestartable = (status: TaskStatus): boolean => !isEditable(status
  * go at once, so neither the runner nor a follow-up can revive the task while
  * the caller removes the execution server.
  */
-export function cancelTask(task: Task): Task {
+export function cancelTask(task: Task, now: string): Task {
   if (!isCancellable(task.status)) {
     throw new DomainError('invalid_transition', `task is ${task.status}, only queued or running tasks can be cancelled`);
   }
-  return detachExecution(markFailed(task, 'Cancelled by the engineer'));
+  return detachExecution(markFailed(task, 'Cancelled by the engineer', now));
 }
 
 /**
@@ -496,7 +496,7 @@ export function restartTask(task: Task): Task {
   if (!isRestartable(task.status)) {
     throw new DomainError('invalid_transition', `task is ${task.status}, only a task that has started can be restarted`);
   }
-  const { failureReason: _failure, ...kept } = detachExecution(transition(task, 'queued'));
+  const { failureReason: _failure, failedAt: _failedAt, ...kept } = detachExecution(transition(task, 'queued'));
   return { ...kept, plan: [], decisions: [], artifacts: [], questions: [], pullRequests: [], followUps: [] };
 }
 

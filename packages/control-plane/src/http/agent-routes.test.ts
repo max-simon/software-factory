@@ -193,6 +193,7 @@ test('failure records the reason', async (t) => {
   assert.equal(status, 200);
   assert.equal(json.task.status, 'failed');
   assert.equal(json.task.failureReason, 'tests do not compile');
+  assert.equal(json.task.failedAt, fixedNow);
   assertAgentView(json);
 });
 

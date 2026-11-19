@@ -293,6 +293,8 @@ export interface Task {
   /** Tasks stored before follow-ups existed read as `[]`. */
   followUps: FollowUp[];
   failureReason?: string;
+  /** When it failed; set exactly with `failureReason`, but unset for tasks that failed before it existed. */
+  failedAt?: string;
   metrics?: SessionMetrics;
   /** Set with the execution server, removed with it. */
   execution?: Execution;

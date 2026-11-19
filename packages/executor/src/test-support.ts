@@ -108,7 +108,7 @@ export function fakeAgentClient(task: AgentTaskView = sampleTask()): FakeAgentCl
       return record('reportMetrics', {});
     },
     reportReady: async () => record('reportReady', { status: 'ready' }),
-    reportFailure: async (failureReason) => record('reportFailure', { status: 'failed', failureReason }),
+    reportFailure: async (failureReason) => record('reportFailure', { status: 'failed', failureReason, failedAt: stamp() }),
     sendHeartbeat: async (heartbeat) => {
       fake.heartbeats.push({ ...heartbeat });
     },
@@ -120,7 +120,7 @@ export function fakeAgentClient(task: AgentTaskView = sampleTask()): FakeAgentCl
       const work = pendingWork(withExecution());
       const isLost = work === undefined && fake.task.status === 'in_progress';
       const failure = 'the agent ended its turn without reporting ready, failure or a question';
-      record('requestWork', isLost ? { status: 'failed', failureReason: failure } : {});
+      record('requestWork', isLost ? { status: 'failed', failureReason: failure, failedAt: stamp() } : {});
       return work;
     },
     acceptWork: async (ids) => {
@@ -184,5 +184,5 @@ export const claudeFixture = (name: string): string =>
 export function sendFollowUp(fake: FakeAgentClient, message: string): void {
   const followUps = [...fake.task.followUps, { id: `f${fake.task.followUps.length + 1}`, createdAt: sampleNow, message }];
   const isResumed = fake.task.status === 'ready' || fake.task.status === 'failed';
-  fake.task = { ...fake.task, followUps, ...(isResumed && { status: 'in_progress' as const, failureReason: undefined }) };
+  fake.task = { ...fake.task, followUps, ...(isResumed && { status: 'in_progress' as const, failureReason: undefined, failedAt: undefined }) };
 }

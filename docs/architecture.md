@@ -41,7 +41,9 @@ Detail behind the [README](../README.md): packages, task lifecycle, the worker p
   turn ended without an outcome, or a working execution server sent no
   heartbeat for 60 s (5 min after it was started or notified). Time the
   control plane itself was paused does not count: when the host sleeps, the
-  execution servers sleep with it. A failed task
+  execution servers sleep with it. `markFailed` records `failureReason` and
+  `failedAt`, the time the caller passes; a follow-up or restart clears both,
+  and tasks that failed before `failedAt` existed lack it. A failed task
   keeps its execution server for `FACTORY_FOLLOW_UP_WINDOW_HOURS`, so a
   follow-up can resume the same agent session.
 - **Changelog:** every change to title, specification, labels or status is
@@ -484,11 +486,18 @@ start with `factory`, and each class has one owner:
 - **Skipped issues.** A closed issue is not imported. Nor is an issue without
   a project label, or whose label names no known project; it gets no comment,
   since adding the label later is the expected fix, and a pass logs one line
-  at most listing such issues. An issue with an empty body gets one comment
-  saying it needs a description, and is skipped until it has one.
-- **Task-id comment.** The issue gets a comment naming its task. The sync
-  ensures it on every pass; the provider posts each key once, so this only
-  recovers a comment whose first attempt failed.
+  at most listing such issues; that includes several project labels naming
+  different projects, which therefore get no conflict comment. An issue with
+  an empty body gets one comment, key `empty-body`, saying it needs a
+  description, and is skipped until it has one.
+- **Comment keys.** Every comment about a task has a key starting with the
+  task id (`<task id>:task-id`, `<task id>:late-edit`, …). An issue whose
+  task was deleted can be imported again as a new task, which then posts its
+  own comments instead of finding the old task's keys taken. Only
+  `empty-body`, posted before there is a task, is unscoped.
+- **Task-id comment.** The issue gets a comment, key `<task id>:task-id`,
+  naming its task. The sync ensures it on every pass; the provider posts each
+  key once, so this only recovers a comment whose first attempt failed.
 - **Updates before start.** While the task is `draft` or
   `clarification_required`, a pass copies title, body, content labels,
   autonomy mode and model into it through `syncManagedContent`, as `system`.
@@ -525,9 +534,9 @@ start with `factory`, and each class has one owner:
   and `clarification_required`), a pass compares the issue's title, body,
   content labels, autonomy mode and model with the task, normalised as the
   import does. When any differs, the issue gets one comment, key
-  `late-edit`, saying the task has started, the change is not incorporated
-  and a changed specification needs a new issue. The fixed key makes it one
-  comment per task, however many edits and passes follow. Content is
+  `<task id>:late-edit`, saying the task has started, the change is not
+  incorporated and a changed specification needs a new issue. The key makes
+  it one comment per task, however many edits and passes follow. Content is
   compared, not the issue's update time, which also moves on the factory's
   own comments and label writes; an unchanged issue never gets the comment.
 - **Status label.** For every managed task whose issue is listed, a pass
@@ -540,14 +549,43 @@ start with `factory`, and each class has one owner:
   pass. A started task is reported while its issue is listed, closed or not;
   once the issue loses the `factory` label it is no longer listed and
   reporting stops silently.
-- **Conflicts.** Contradictory config or project labels get one comment
-  listing the notes and saying the defaults apply. Its key is derived from
-  the notes, so the same conflicts are noted once and a new one again.
+- **Conflicts.** Contradictory config labels of an issue with a task get one
+  comment listing the notes and saying the defaults apply, posted right after
+  the task-id comment on import and checked again on every pass before
+  start. Its key, `<task id>:config-conflict:<hash>`, is derived from the
+  notes, so the same conflicts are noted once and a new one again.
+- **Task reports.** For every managed task whose issue is listed, after the
+  status label, a pass posts what `managedComments` (pure, in
+  `packages/core/src/managed-comments.ts`) says the task should have
+  reported so far; the provider posts each key once, so only new items go
+  out. Each comment is short Markdown and names what it is:
+  - a clarification request while the task is `clarification_required`,
+    with a hint that editing the issue's title or description is the
+    answer; keyed by a hash of the note, so a new note is posted again (the
+    sync passes the SHA-256 digest in, keeping `node:crypto` out of core,
+    which the web UI bundles);
+  - each question, with its options, saying it is answered in the factory;
+  - each decision, with its options (the chosen one marked) and reasoning;
+  - each artifact, by title and kind only;
+  - each pending approval request of a decision or artifact, saying it is
+    reviewed in the factory;
+  - each open pull request once the task is `ready`;
+  - a failure, without the reason, pointing to the factory; keyed by
+    `failedAt` (the last update for tasks that failed before it existed).
+
+  Item keys are `<task id>:<item id>` (`…:approval` for requests), so a
+  restart, whose items have new ids, and a new failure time are reported
+  again. Left out on purpose: artifact content (long, and reviewed in the
+  factory) and the failure reason (it can quote container output). Comments
+  on the issue are never read back: answers, reviews and approvals happen in
+  the factory only. Agent-written text (problems, options, reasoning,
+  titles, the clarification note) is untrusted: it goes in as plain text,
+  with a zero-width space after every `@` so it cannot mention anyone.
 - **Errors.** One failing issue does not stop the others; its error is logged
   with the issue's URL and secrets redacted. A provider call that fails never
-  changes the task and is retried on the next pass. The status report is
-  guarded on its own, so an earlier failure for the same issue does not hold
-  it back.
+  changes the task and is retried on the next pass. The status report and
+  the task reports are each guarded on their own, so an earlier failure for
+  the same issue does not hold them back.
 
 ### Deletion
 
@@ -561,9 +599,10 @@ issue first, so the sync does not import it again:
 - **Labels.** `factory`, `factory:start` and every `factory:status:*` label
   are removed. Project and config labels stay, so adding `factory` again
   imports the issue as a new task with the same setup.
-- **Comment.** One comment, key `task-deleted`, says the task was deleted in
-  the factory, its labels were removed and re-adding `factory` imports the
-  issue again.
+- **Comment.** One comment, key `<task id>:task-deleted`, says the task was
+  deleted in the factory, its labels were removed and re-adding `factory`
+  imports the issue again; scoped by task, so a task imported again and
+  deleted again gets its own comment.
 - **Failures.** If removing the labels fails, the task is kept and the call
   answers HTTP 502 with `issue_provider_failed`; the cause is logged with
   secrets redacted. If only the comment fails, it is logged and the task is

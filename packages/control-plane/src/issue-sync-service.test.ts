@@ -1,6 +1,7 @@
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createProject, createTask, requestClarification, startTask, statusLabel, statusLabelPrefix, transitions, type ExternalIssue, type IssueProvider, type TaskEvent, type TaskStatus } from '@factory/core';
+import { createProject, createTask, requestClarification, restartTask, startTask, statusLabel, statusLabelPrefix, transitions, type ExternalIssue, type IssueProvider, type Task, type TaskEvent, type TaskStatus } from '@factory/core';
 import { SqliteProjectRepository } from './adapters/sqlite-project-repository.ts';
 import { SqliteTaskRepository } from './adapters/sqlite-task-repository.ts';
 import { IssueSync } from './issue-sync-service.ts';
@@ -63,6 +64,8 @@ class FakeIssues implements IssueProvider {
     return this.comments.filter((c) => c.url === url).map((c) => c.key);
   }
 }
+
+const sha16 = (text: string): string => createHash('sha256').update(text).digest('hex').slice(0, 16);
 
 const issue = (n: number, fields: Partial<ExternalIssue> = {}): ExternalIssue => ({
   provider: 'github',
@@ -129,7 +132,7 @@ test('imports an open issue as a draft managed task, created by system, with a t
   assert.deepEqual(task.external, { provider: 'github', url: issue(1).url, key: 'o/r#1' });
   assert.equal('createdBy' in task, false);
   assert.deepEqual(f.tasks.changes('t1'), [{ at: task.createdAt, actor: 'system', field: 'created' }]);
-  assert.deepEqual(f.provider.comments, [{ url: issue(1).url, key: 'task-id', body: 'The factory tracks this issue as task `t1`.' }]);
+  assert.deepEqual(f.provider.comments, [{ url: issue(1).url, key: 't1:task-id', body: 'The factory tracks this issue as task `t1`.' }]);
   assert.deepEqual(f.logged, []);
 });
 
@@ -139,7 +142,7 @@ test('defaults apply without config labels, and a second pass neither duplicates
   await f.sync.sync();
   await f.sync.sync();
   assert.deepEqual(f.tasks.list().map((t) => [t.id, t.autonomyMode, t.model, t.rank]), [['t1', 'autonomous', 'opus', 0], ['t2', 'autonomous', 'opus', 1]]);
-  assert.deepEqual(f.provider.keys(issue(1).url), ['task-id']);
+  assert.deepEqual(f.provider.keys(issue(1).url), ['t1:task-id']);
   assert.equal(f.events.filter((event) => event.type === 'task.updated').length, 0);
 });
 
@@ -178,22 +181,23 @@ test('contradicting labels get one comment per set of conflicts, and the default
   await f.sync.sync();
   await f.sync.sync();
   assert.equal(f.tasks.get('t1').autonomyMode, 'autonomous');
-  const conflictComments = f.provider.comments.filter((c) => c.key.startsWith('config-conflict:'));
+  // Noted once the task exists, scoped by its id.
+  assert.equal(f.provider.keys(conflicted.url)[0], 't1:task-id');
+  const conflictComments = f.provider.comments.filter((c) => c.key.startsWith('t1:config-conflict:'));
   assert.equal(conflictComments.length, 1);
   assert.match(conflictComments[0]!.body, /defaults apply/);
   assert.match(conflictComments[0]!.body, /factory:autonomous and factory:supervised are both set/);
   f.provider.issues = [{ ...conflicted, labels: [...conflicted.labels, 'factory:model:opus', 'factory:model:sonnet'] }];
   await f.sync.sync();
-  assert.equal(f.provider.comments.filter((c) => c.key.startsWith('config-conflict:')).length, 2);
+  assert.equal(f.provider.comments.filter((c) => c.key.startsWith('t1:config-conflict:')).length, 2);
 });
 
-test('an issue with conflicting project labels is noted and skipped', async () => {
+test('an issue with conflicting project labels never becomes a task, so it is skipped without a comment', async () => {
   const f = setup();
   f.provider.issues = [issue(1, { labels: ['factory', 'factory:project:p1', 'factory:project:p2'] })];
   await f.sync.sync();
   assert.deepEqual(f.tasks.list(), []);
-  assert.equal(f.provider.comments.length, 1);
-  assert.match(f.provider.comments[0]!.body, /several project labels/);
+  assert.deepEqual(f.provider.comments, []);
   assert.equal(f.logged.length, 1);
 });
 
@@ -262,7 +266,7 @@ test('an emptied body is not synced and gets one comment', async () => {
   await f.sync.sync();
   const task = f.tasks.get(id);
   assert.deepEqual([task.title, task.specification], ['Issue 1', 'Body 1']);
-  assert.deepEqual(f.provider.keys(issue(1).url), ['task-id', 'empty-body']);
+  assert.deepEqual(f.provider.keys(issue(1).url), ['t1:task-id', 'empty-body']);
 });
 
 test('a started task is not touched, and a closed issue of a task is still linked', async () => {
@@ -284,7 +288,7 @@ test('the task-id comment is retried on a later pass when the first attempt fail
   assert.equal(f.tasks.list().length, 1);
   f.provider.failures.clear();
   await f.sync.sync();
-  assert.deepEqual(f.provider.keys(issue(1).url), ['task-id']);
+  assert.deepEqual(f.provider.keys(issue(1).url), ['t1:task-id']);
 });
 
 test('one failing issue does not stop the others, and its error is logged redacted', async () => {
@@ -293,7 +297,7 @@ test('one failing issue does not stop the others, and its error is logged redact
   f.provider.failures.set(issue(1).url, 'bad credentials ghp_secret');
   await f.sync.sync();
   assert.deepEqual(f.tasks.list().map((t) => t.external?.url), [issue(1).url, issue(2).url]);
-  assert.deepEqual(f.provider.keys(issue(2).url), ['task-id']);
+  assert.deepEqual(f.provider.keys(issue(2).url), ['t2:task-id']);
   assert.deepEqual(f.logged, [`issue sync: ${issue(1).url}: bad credentials [redacted]`]);
 });
 
@@ -499,7 +503,7 @@ test('a started task whose issue left the list is no longer reported', async () 
   assert.deepEqual(f.logged, []);
 });
 
-const lateEdits = (f: Fixture, url: string) => f.provider.comments.filter((c) => c.url === url && c.key === 'late-edit');
+const lateEdits = (f: Fixture, url: string) => f.provider.comments.filter((c) => c.url === url && c.key.endsWith(':late-edit'));
 
 test('edits after start get one late-edit comment across passes and edits, and change nothing', async () => {
   const f = setup();
@@ -520,6 +524,7 @@ test('edits after start get one late-edit comment across passes and edits, and c
   }
   const comments = lateEdits(f, issue(1).url);
   assert.equal(comments.length, 1);
+  assert.equal(comments[0]!.key, `${id}:late-edit`);
   assert.match(comments[0]!.body, /already started/);
   assert.match(comments[0]!.body, /not incorporated/);
   assert.match(comments[0]!.body, /new issue/);
@@ -587,4 +592,109 @@ test('a provider error on one issue changes neither its task nor the other issue
   assert.deepEqual(f.provider.statusLabels(issue(1).url), ['factory:status:queued']);
   assert.equal(lateEdits(f, issue(1).url).length, 1);
   assert.deepEqual(f.tasks.get('t1'), before);
+});
+
+/** Puts the task of a listed issue in a state, as the agent API or the dispatcher would. */
+const put = (f: Fixture, id: string, fields: Partial<Task>) => f.tasks.update(id, 'system', (task) => ({ ...task, ...fields }));
+
+/** Comment keys on issue 1 beyond the task-id comment. */
+const reports = (f: Fixture) => f.provider.keys(issue(1).url).filter((key) => !key.endsWith(':task-id'));
+
+const twice = async (f: Fixture) => {
+  await f.sync.sync();
+  await f.sync.sync();
+};
+
+const reported = {
+  questions: [{ id: 'q1', createdAt: 'x', problem: 'Which?', type: 'radio' as const, options: ['a', 'b'] }],
+  decisions: [{ id: 'd1', createdAt: 'x', problem: 'P', options: [], reasoning: 'R', approval: { status: 'pending' as const } }],
+  artifacts: [{ id: 'a1', createdAt: 'x', title: 'Plan', kind: 'markdown', content: 'secret content' }],
+};
+
+test('every kind of report is posted once across passes, as the task moves on', async () => {
+  const f = setup();
+  const id = await imported(f, issue(1));
+  f.tasks.update(id, 'reviewer', (task) => requestClarification(task, 'What?'));
+  await twice(f);
+  assert.deepEqual(reports(f), [`${id}:clarification:${sha16('What?')}`]);
+  f.tasks.update(id, 'system', startTask);
+  put(f, id, { status: 'input_required', ...reported });
+  await twice(f);
+  put(f, id, { status: 'ready', pullRequests: [{ url: 'https://github.com/o/r/pull/7', title: 'Fix', status: 'open' }] });
+  await twice(f);
+  put(f, id, { status: 'failed', failureReason: 'boom', failedAt: '2026-11-19T12:00:00.000Z' });
+  await twice(f);
+  assert.deepEqual(reports(f), [
+    `${id}:clarification:${sha16('What?')}`,
+    `${id}:q1`,
+    `${id}:d1`,
+    `${id}:d1:approval`,
+    `${id}:a1`,
+    `${id}:https://github.com/o/r/pull/7`,
+    `${id}:failed:2026-11-19T12:00:00.000Z`,
+  ]);
+  assert.equal(f.provider.comments.some((c) => c.body.includes('secret content') || c.body.includes('boom')), false);
+  assert.deepEqual(f.logged, []);
+});
+
+test('a new clarification note is posted again', async () => {
+  const f = setup();
+  const id = await imported(f, issue(1));
+  f.tasks.update(id, 'reviewer', (task) => requestClarification(task, 'What?'));
+  await f.sync.sync();
+  put(f, id, { clarification: 'Which?' });
+  await twice(f);
+  assert.deepEqual(reports(f), [`${id}:clarification:${sha16('What?')}`, `${id}:clarification:${sha16('Which?')}`]);
+});
+
+test("a restart's new items and new failure are posted", async () => {
+  const f = setup();
+  const id = await imported(f, issue(1));
+  f.tasks.update(id, 'system', startTask);
+  put(f, id, { status: 'failed', ...reported, failureReason: 'boom', failedAt: '2026-11-19T12:00:00.000Z' });
+  await f.sync.sync();
+  f.tasks.update(id, 'system', restartTask);
+  put(f, id, {
+    status: 'failed',
+    questions: [{ ...reported.questions[0]!, id: 'q2' }],
+    decisions: [{ ...reported.decisions[0]!, id: 'd2' }],
+    artifacts: [{ ...reported.artifacts[0]!, id: 'a2' }],
+    failureReason: 'boom',
+    failedAt: '2026-11-19T13:00:00.000Z',
+  });
+  await twice(f);
+  const second = [`${id}:q2`, `${id}:d2`, `${id}:d2:approval`, `${id}:a2`, `${id}:failed:2026-11-19T13:00:00.000Z`];
+  assert.deepEqual(reports(f).slice(-second.length), second);
+  assert.equal(reports(f).length, 10);
+});
+
+test('a failed comment changes nothing on the task, is logged redacted and posted on the next pass', async () => {
+  const f = setup();
+  const id = await imported(f, issue(1));
+  f.tasks.update(id, 'system', startTask);
+  const before = put(f, id, { status: 'input_required', ...reported });
+  f.provider.failures.set(issue(1).url, 'comment failed ghp_secret');
+  await f.sync.sync();
+  assert.deepEqual(f.tasks.get(id), before);
+  assert.deepEqual(reports(f), []);
+  assert.deepEqual(f.provider.statusLabels(issue(1).url), ['factory:status:input-required']);
+  // The task-id comment, ensured by the issue's own sync, fails alike.
+  const failure = `issue sync: ${issue(1).url}: comment failed [redacted]`;
+  assert.deepEqual(f.logged, [failure, failure]);
+  f.provider.failures.clear();
+  await f.sync.sync();
+  assert.deepEqual(reports(f), [`${id}:q1`, `${id}:d1`, `${id}:d1:approval`, `${id}:a1`]);
+  assert.deepEqual(f.tasks.get(id), before);
+});
+
+test('an issue imported again after its task was deleted gets comments of its own task', async () => {
+  const f = setup();
+  await imported(f, issue(1));
+  f.provider.issues = [];
+  await f.sync.sync();
+  assert.deepEqual(f.tasks.list(), []);
+  const id = await imported(f, issue(1));
+  assert.equal(id, 't2');
+  assert.deepEqual(f.provider.keys(issue(1).url), ['t1:task-id', 't2:task-id']);
+  assert.match(f.provider.comments.at(-1)!.body, /task `t2`/);
 });

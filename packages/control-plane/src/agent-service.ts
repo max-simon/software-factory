@@ -83,7 +83,7 @@ export class AgentService {
   }
 
   markFailed(id: string, reason: string): Task {
-    return this.#tasks.update(id, 'agent', (task) => markFailed(task, reason));
+    return this.#tasks.update(id, 'agent', (task) => markFailed(task, reason, this.#tasks.now()));
   }
 
   /**

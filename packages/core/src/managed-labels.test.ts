@@ -197,8 +197,8 @@ describe('deletionLabelChanges', () => {
 });
 
 describe('the deletion comment', () => {
-  it('has a fixed key and tells how to import the issue again', () => {
-    assert.equal(deletedCommentKey, 'task-deleted');
+  it('has a key per task and tells how to import the issue again', () => {
+    assert.equal(deletedCommentKey('t1'), 't1:task-deleted');
     assert.match(deletedCommentBody, /deleted in the factory/);
     assert.match(deletedCommentBody, /`factory` label again/);
   });
