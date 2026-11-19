@@ -519,12 +519,35 @@ start with `factory`, and each class has one owner:
   refusal is logged and the next pass tries again.
 - **After start** the issue no longer steers the task: edits, a closed issue
   or a removed `factory` label have no effect, and it finishes and reports
-  as usual.
+  as usual. A restart from the web UI queues the task again with the
+  specification it had at start; the issue is not read again.
+- **Late edits.** Once the task has started (any status other than `draft`
+  and `clarification_required`), a pass compares the issue's title, body,
+  content labels, autonomy mode and model with the task, normalised as the
+  import does. When any differs, the issue gets one comment, key
+  `late-edit`, saying the task has started, the change is not incorporated
+  and a changed specification needs a new issue. The fixed key makes it one
+  comment per task, however many edits and passes follow. Content is
+  compared, not the issue's update time, which also moves on the factory's
+  own comments and label writes; an unchanged issue never gets the comment.
+- **Status label.** For every managed task whose issue is listed, a pass
+  compares the issue's labels with the task's status after the issue's own
+  sync (so a task started in this pass reports `queued`) and calls
+  `changeLabels` with `statusLabelChanges` only when they differ. The issue
+  then carries exactly one `factory:status:<status>` label, the current
+  one; all eight statuses are reported, `draft` included. No state is
+  stored: a status label a human sets or removes is corrected on the next
+  pass. A started task is reported while its issue is listed, closed or not;
+  once the issue loses the `factory` label it is no longer listed and
+  reporting stops silently.
 - **Conflicts.** Contradictory config or project labels get one comment
   listing the notes and saying the defaults apply. Its key is derived from
   the notes, so the same conflicts are noted once and a new one again.
 - **Errors.** One failing issue does not stop the others; its error is logged
-  with the issue's URL and secrets redacted.
+  with the issue's URL and secrets redacted. A provider call that fails never
+  changes the task and is retried on the next pass. The status report is
+  guarded on its own, so an earlier failure for the same issue does not hold
+  it back.
 
 ### Deletion
 

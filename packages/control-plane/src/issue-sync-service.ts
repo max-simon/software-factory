@@ -9,6 +9,7 @@ import {
   returnToDraft,
   startLabel,
   startTask,
+  statusLabelChanges,
   syncManagedContent,
   type ExternalIssue,
   type IssueProvider,
@@ -38,6 +39,10 @@ const emptyBodyKey = 'empty-body';
 const emptyBodyComment =
   'This issue has no description, so the factory does not take it as a task. Describe what should be done; the factory picks it up on its next pass.';
 
+const lateEditKey = 'late-edit';
+const lateEditComment =
+  'The task for this issue has already started, so this change to the issue is not incorporated: the task keeps the title, description, labels and configuration it started with. For a changed specification, open a new issue.';
+
 const isEmpty = (text: string): boolean => text.trim() === '';
 
 const sameList = (a: readonly string[], b: readonly string[]): boolean =>
@@ -64,7 +69,9 @@ const isContentChanged = (task: Task, content: ManagedContent): boolean =>
  * Creates managed tasks from the provider's issues that carry the factory
  * label, keeps their title, specification, labels and configuration in step
  * until they start, starts them on the start label, and deletes them when
- * their issue is closed or loses the factory label before they start. Issue
+ * their issue is closed or loses the factory label before they start. It
+ * reports each task's status as a label on its issue, and notes once when an
+ * issue is edited after its task started. Issue
  * text is untrusted: it goes into the task as it is and never into the log.
  */
 export class IssueSync {
@@ -85,6 +92,8 @@ export class IssueSync {
     const withoutProject: string[] = [];
     for (const issue of issues) {
       await this.#guard(issue.url, () => this.#sync(issue, withoutProject));
+      // Separately guarded, so a failure earlier for this issue does not hold back its status.
+      await this.#guard(issue.url, () => this.#reportStatus(issue));
     }
     await this.#deleteUnlabelled(new Set(issues.map((issue) => issue.url)));
     // One line per pass, not per issue: an issue waiting for its project label is no error.
@@ -135,7 +144,7 @@ export class IssueSync {
     // After start the issue no longer steers the task; a start label left by a failed removal goes now.
     if (!isEditable(task.status)) {
       if (parsed.wantsStart) await this.#removeStartLabel(issue);
-      return;
+      return this.#commentLateEdit(task, issue, parsed);
     }
     if (!issue.isOpen) return this.#delete(task);
     await this.#commentConflicts(issue, parsed);
@@ -155,6 +164,29 @@ export class IssueSync {
       const synced = syncManagedContent(current, content);
       return isTextChange && synced.status === 'clarification_required' ? returnToDraft(synced) : synced;
     });
+  }
+
+  /**
+   * Content is compared, not the issue's update time, which also moves on the
+   * factory's own comments and labels. The fixed key makes it one comment per
+   * task, however many edits follow.
+   */
+  #commentLateEdit(task: Task, issue: ExternalIssue, parsed: ManagedLabels): Promise<void> {
+    if (!isContentChanged(task, contentOf(issue, parsed))) return Promise.resolve();
+    return this.#deps.provider.comment(issue.url, lateEditKey, lateEditComment);
+  }
+
+  /**
+   * Read after the issue's sync, so a task started in this pass reports its
+   * new status. Compared with the listed labels, so nothing is stored and a
+   * status label a human changed is corrected on the next pass.
+   */
+  #reportStatus(issue: ExternalIssue): Promise<void> {
+    const task = this.#deps.tasks.findByExternalUrl(issue.url);
+    if (task === undefined) return Promise.resolve();
+    const { add, remove } = statusLabelChanges(issue.labels, task.status);
+    if (add.length === 0 && remove.length === 0) return Promise.resolve();
+    return this.#deps.provider.changeLabels(issue.url, { add: [...add], remove: [...remove] });
   }
 
   /** Removes the start label as written on the issue, since labels match case-insensitively. */
