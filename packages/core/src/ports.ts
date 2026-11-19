@@ -1,4 +1,4 @@
-import type { ProjectChange, TaskChange } from './changelog.ts';
+import type { TaskChange } from './changelog.ts';
 import type { Project } from './project.ts';
 import type { InputReview, InputReviewRequest, PrReview, PrReviewRequest, SpecReview, SpecReviewRequest } from './review.ts';
 import type { AgentConsole, ExternalIssue, Heartbeat, PullRequest, Task, TaskAgent, TaskModel, TaskStatus } from './task.ts';
@@ -29,15 +29,11 @@ export interface TaskRepository {
 }
 
 export interface ProjectRepository {
-  /** Writes the project and appends `changes` to its changelog in one transaction. */
-  insert(project: Project, changes?: readonly ProjectChange[]): void;
+  insert(project: Project): void;
   get(id: string): Project | undefined;
   /** Oldest first. */
   list(): Project[];
-  /** Writes the project and appends `changes` to its changelog in one transaction. */
-  save(project: Project, changes?: readonly ProjectChange[]): void;
-  /** The project's changelog, oldest first; empty for an unknown project. */
-  listChanges(id: string): ProjectChange[];
+  save(project: Project): void;
 }
 
 export interface ExecutionSpec {

@@ -59,9 +59,7 @@ Detail behind the [README](../README.md): packages, task lifecycle, the worker p
   the engineer's behalf, `system` for the dispatcher and the issue sync. A
   `user` entry also carries the `userId` of the signed-in user (entries from
   before users have none). The task page shows it as a compact timeline;
-  `GET /tasks/:id/changes` returns it. Projects keep the same changelog of
-  title, description and auto-merge in `project_changes`;
-  `GET /projects/:id/changes` returns it.
+  `GET /tasks/:id/changes` returns it.
 - **Who did what:** the engineer API passes the request's `Principal` to the
   services, which record the user's id, never a name: `createdBy` on tasks and
   projects, `authorId` on follow-ups, `answeredBy` on answers, `reviewedBy` on
@@ -430,7 +428,7 @@ factory owns everything else.
   works while the task is `draft` or `clarification_required` and throws
   `not_editable` afterwards, like an edit: the agent works on what it was
   given. It goes through `TaskStore.update`, so the changelog records it.
-  Answers, approvals, follow-ups, cancel, restart, assignees and rank work as
+  Answers, approvals, follow-ups, cancel, restart and rank work as
   for any task; delete does too, but first releases the issue (see Deletion).
 
 ### Labels

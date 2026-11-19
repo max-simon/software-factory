@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createProject, type Project } from '@factory/core';
@@ -23,21 +27,16 @@ test('rejects duplicate ids and saving an unknown project', () => {
   assert.throws(() => repo.save(project('missing', '2026-11-12T10:00:00.000Z')), /does not exist/);
 });
 
-test('appends changes with the project and lists them oldest first, with the user id only for users', () => {
-  const repo = new SqliteProjectRepository(':memory:');
-  const at = '2026-11-13T10:00:00.000Z';
-  repo.insert(project('a', at), [{ at, actor: 'user', userId: 'u1', field: 'created' }]);
-  repo.insert(project('b', at));
-  repo.save({ ...project('a', at), title: 'renamed', autoMerge: true }, [
-    { at, actor: 'user', userId: 'u2', field: 'title', from: 'a', to: 'renamed' },
-    { at, actor: 'system', field: 'autoMerge', from: false, to: true },
-  ]);
-  assert.deepEqual(repo.listChanges('a'), [
-    { at, actor: 'user', userId: 'u1', field: 'created' },
-    { at, actor: 'user', userId: 'u2', field: 'title', from: 'a', to: 'renamed' },
-    { at, actor: 'system', field: 'autoMerge', from: false, to: true },
-  ]);
-  assert.deepEqual(repo.listChanges('b'), []);
-  assert.throws(() => repo.save(project('ghost', at), [{ at, actor: 'user', userId: 'u1', field: 'title', from: 'x', to: 'y' }]));
-  assert.deepEqual(repo.listChanges('ghost'), []);
+test('drops the changelog table of a database created while projects kept one', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'repo-'));
+  t.after(() => rmSync(dir, { recursive: true }));
+  const path = join(dir, 'projects.db');
+  const old = new DatabaseSync(path);
+  old.exec('CREATE TABLE project_changes (id INTEGER PRIMARY KEY, project_id TEXT NOT NULL)');
+  old.close();
+  new SqliteProjectRepository(path).close();
+  const db = new DatabaseSync(path);
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all();
+  db.close();
+  assert.deepEqual(tables.map(({ name }) => name), ['projects']);
 });

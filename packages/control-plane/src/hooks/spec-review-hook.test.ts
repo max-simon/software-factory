@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import type { ExecutionRuntime, Reviewer, SpecReview, SpecReviewRequest, TaskEvent } from '@factory/core';
 import { SqliteProjectRepository } from '../adapters/sqlite-project-repository.ts';
 import { SqliteTaskRepository } from '../adapters/sqlite-task-repository.ts';
-import { SqliteUserRepository } from '../adapters/sqlite-user-repository.ts';
 import { ProjectService } from '../project-service.ts';
 import { ReviewTracker } from '../review-tracker.ts';
 import { createServices } from '../services.ts';
@@ -47,7 +46,6 @@ function setup() {
   const pending: Promise<void>[] = [];
   const { tasks, service } = createServices({
     repository: new SqliteTaskRepository(':memory:'),
-    users: new SqliteUserRepository(':memory:'),
     runtime: {} as ExecutionRuntime,
     onEvent: (event) => void pending.push(hooks.emit(event)),
     newId: () => `t${++counter}`,

@@ -7,7 +7,6 @@ import {
   heartbeatInfo,
   canSendFollowUp,
   describeChange,
-  describeProjectChange,
   describeUser,
   mcpAddCommand,
   toUserMap,
@@ -100,13 +99,6 @@ test('mcpAddCommand adds the factory MCP server with the token as bearer', () =>
     mcpAddCommand('http://127.0.0.1:4700', 'fct_abc'),
     'claude mcp add --transport http factory http://127.0.0.1:4700/mcp --header "Authorization: Bearer fct_abc"',
   );
-});
-
-test('describeProjectChange says what a project change did', () => {
-  const meta = { at: '2026-01-01T00:00:00Z', actor: 'user' as const, userId: 'u1' };
-  assert.equal(describeProjectChange({ ...meta, field: 'created' }), 'Created the project');
-  assert.equal(describeProjectChange({ ...meta, field: 'title', from: 'A', to: 'B' }), 'Renamed “A” → “B”');
-  assert.equal(describeProjectChange({ ...meta, field: 'autoMerge', from: false, to: true }), 'Turned auto-merge on');
 });
 
 test('href and parseRoute agree, including ids that need encoding', () => {
@@ -427,7 +419,6 @@ test('describeChange words each changelog entry on one line', () => {
   assert.equal(describeChange({ ...meta, field: 'labels', from: ['ui', 'old'], to: ['ui', 'new'] }), 'Labels +new −old');
   assert.equal(describeChange({ ...meta, field: 'labels', from: ['a', 'b'], to: ['b', 'a'] }), 'Labels reordered');
   assert.equal(describeChange({ ...meta, field: 'dependsOn', from: [], to: ['t1'] }), 'Changed the dependencies');
-  assert.equal(describeChange({ ...meta, field: 'assignees', from: [], to: ['u1'] }), 'Changed the assignees');
   assert.equal(
     describeChange({ ...meta, field: 'status', from: 'draft', to: 'clarification_required' }),
     'Draft → Needs clarification',

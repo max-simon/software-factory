@@ -32,7 +32,6 @@ export interface ApiClient {
   getTask: (id: string) => Promise<TaskView>;
   startTask: (id: string) => Promise<TaskView>;
   editTask: (id: string, edit: TaskEdit) => Promise<TaskView>;
-  setAssignees: (id: string, assignees: string[]) => Promise<TaskView>;
   requestClarification: (id: string, note: string) => Promise<TaskView>;
   cancelTask: (id: string) => Promise<TaskView>;
   restartTask: (id: string) => Promise<TaskView>;
@@ -73,7 +72,6 @@ export function createApiClient(baseUrl: string, headers: Record<string, string>
     getTask: (id) => request('GET', taskPath(id)),
     startTask: (id) => request('POST', `${taskPath(id)}/start`),
     editTask: (id, edit) => request('PATCH', taskPath(id), edit),
-    setAssignees: (id, assignees) => request('PUT', `${taskPath(id)}/assignees`, { assignees }),
     requestClarification: (id, note) => request('POST', `${taskPath(id)}/clarification`, { note }),
     cancelTask: (id) => request('POST', `${taskPath(id)}/cancel`),
     restartTask: (id) => request('POST', `${taskPath(id)}/restart`),

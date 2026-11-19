@@ -34,12 +34,9 @@ export interface FakeTaskClient extends ApiClient {
   tasks: TaskView[];
   created: NewTask[];
   edited: Array<{ id: string; edit: TaskEdit }>;
-  assigned: Array<{ id: string; assignees: string[] }>;
   users: UserSummary[];
   /** Makes `startTask` fail, as the API does for a task that cannot be queued. */
   failStart?: ApiError;
-  /** Makes `setAssignees` fail, as the API does for an unknown or disabled user. */
-  failAssign?: ApiError;
 }
 
 /** An in-memory stand-in for the engineer API with the same not-found error. */
@@ -87,12 +84,6 @@ export function fakeTaskClient(tasks: TaskView[] = []): FakeTaskClient {
     editTask: async (id, edit) => {
       fake.edited.push({ id, edit });
       return Object.assign(find(id), edit);
-    },
-    assigned: [],
-    setAssignees: async (id, assignees) => {
-      if (fake.failAssign) throw fake.failAssign;
-      fake.assigned.push({ id, assignees });
-      return Object.assign(find(id), { assignees });
     },
     users: [],
     listUsers: async () => fake.users,

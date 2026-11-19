@@ -5,7 +5,6 @@ import type { TaskStore } from '../task-store.ts';
 import type { Route } from './server.ts';
 import {
   parseAnswer,
-  parseAssignees,
   parseClarification,
   parseFollowUp,
   parseMove,
@@ -50,12 +49,8 @@ export function engineerRoutes(
     {
       method: 'PATCH',
       path: '/projects/:id',
-      handle: ({ params, body, principal }) => ({
-        status: 200,
-        body: projects.edit(params.id!, parseProjectEdit(body), principalOf(principal)),
-      }),
+      handle: ({ params, body }) => ({ status: 200, body: projects.edit(params.id!, parseProjectEdit(body)) }),
     },
-    { method: 'GET', path: '/projects/:id/changes', handle: ({ params }) => ({ status: 200, body: projects.changes(params.id!) }) },
     {
       method: 'GET',
       path: '/projects/:id/tasks',
@@ -85,14 +80,6 @@ export function engineerRoutes(
       handle: ({ params, body, principal }) => ({
         status: 200,
         body: view(service.edit(params.id!, parseTaskEdit(body), principalOf(principal))),
-      }),
-    },
-    {
-      method: 'PUT',
-      path: '/tasks/:id/assignees',
-      handle: ({ params, body, principal }) => ({
-        status: 200,
-        body: view(service.setAssignees(params.id!, parseAssignees(body), principalOf(principal))),
       }),
     },
     {

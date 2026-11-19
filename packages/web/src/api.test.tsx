@@ -56,22 +56,6 @@ test('other errors, a wrong current password included, do not redirect', async (
   expect(location.hash).toBe('#/account');
 });
 
-test('setting the assignees replaces them with a PUT of the whole list', async () => {
-  const response = reply(200, { id: 't1' });
-  stub(response, '#/tasks/t1');
-  await api.setAssignees('t1', ['u1', 'u2']);
-  expect(response).toHaveBeenCalledWith('/tasks/t1/assignees', {
-    method: 'PUT',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ assignees: ['u1', 'u2'] }),
-  });
-});
-
-test('a disabled user refused as assignee surfaces as its error code', async () => {
-  stub(reply(409, { error: { code: 'user_disabled', message: 'user u3 is disabled' } }), '#/tasks/t1');
-  await expect(api.setAssignees('t1', ['u3'])).rejects.toMatchObject({ status: 409, code: 'user_disabled', message: 'user u3 is disabled' });
-});
-
 test('redirectToLogin from home needs no return address', () => {
   const target = { hash: '' };
   redirectToLogin(target);

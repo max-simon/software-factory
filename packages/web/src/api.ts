@@ -1,4 +1,4 @@
-import type { ActivityEntry, NewProject, NewTask, Project, ProjectChange, ProjectEdit, Review, TaskChange, TaskEdit } from '@factory/core';
+import type { ActivityEntry, NewProject, NewTask, Project, ProjectEdit, Review, TaskChange, TaskEdit } from '@factory/core';
 import { href, parseRoute, type CurrentUser, type TaskView, type UserSummary } from './model.ts';
 
 export class ApiError extends Error {
@@ -77,7 +77,6 @@ export const api = {
   getProject: (id: string) => call<Project>('GET', project(id)),
   createProject: (input: NewProject) => call<Project>('POST', '/projects', input),
   editProject: (id: string, edit: ProjectEdit) => call<Project>('PATCH', project(id), edit),
-  listProjectChanges: (id: string) => call<ProjectChange[]>('GET', `${project(id)}/changes`),
   listProjectTasks: (id: string) => call<TaskView[]>('GET', `${project(id)}/tasks`),
   getTask: (id: string) => call<TaskView>('GET', task(id)),
   createTask: (input: NewTask) => call<TaskView>('POST', '/tasks', input),
@@ -85,7 +84,6 @@ export const api = {
   moveTask: (id: string, move: { before?: string }) => call<TaskView[]>('POST', `${task(id)}/move`, move),
   startTask: (id: string) => call<TaskView>('POST', `${task(id)}/start`),
   requestClarification: (id: string, note: string) => call<TaskView>('POST', `${task(id)}/clarification`, { note }),
-  setAssignees: (id: string, assignees: string[]) => call<TaskView>('PUT', `${task(id)}/assignees`, { assignees }),
   returnToDraft: (id: string) => call<TaskView>('DELETE', `${task(id)}/clarification`),
   listChanges: (id: string) => call<TaskChange[]>('GET', `${task(id)}/changes`),
   listActivity: (id: string) => call<ActivityEntry[]>('GET', `${task(id)}/activity`),

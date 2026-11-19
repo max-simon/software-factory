@@ -1,8 +1,8 @@
-import type { Project, ProjectChange, TaskChange } from '@factory/core';
+import type { Project, TaskChange } from '@factory/core';
 import type { ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, test } from 'vitest';
-import { describeChange, describeProjectChange, timeline, toUserMap, type TaskView, type UserSummary } from '../model.ts';
+import { describeChange, timeline, toUserMap, type TaskView, type UserSummary } from '../model.ts';
 import { ProjectHeader } from '../views/ProjectOverview.tsx';
 import { Header } from '../views/TaskDetail.tsx';
 import { Changelog } from './Changelog.tsx';
@@ -141,11 +141,4 @@ test('a follow-up the system sent shows as by the system, not as an engineer', (
   );
   expect(html).toContain('<span class="by-system">by the system</span>');
   expect(html).not.toContain('user-name');
-});
-
-test('the project changelog names users the same way', () => {
-  const projectChanges: ProjectChange[] = [{ at, actor: 'user', userId: 'u1', field: 'autoMerge', from: false, to: true }];
-  const html = withUsers([ada('Ada Lovelace')], <Changelog changes={projectChanges} describe={describeProjectChange} />);
-  expect(html).toContain('title="ada (u1)">Ada Lovelace</span>');
-  expect(html).toContain('Turned auto-merge on');
 });

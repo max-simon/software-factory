@@ -77,6 +77,7 @@ export class SqliteTaskRepository implements TaskRepository {
     this.#addChangeUserIds();
     this.#addExternalUrls();
     this.#rankUnrankedTasks();
+    this.#dropAssignees();
   }
 
   insert(task: Task, changes: readonly TaskChange[] = []): void {
@@ -194,6 +195,17 @@ export class SqliteTaskRepository implements TaskRepository {
     this.#db.exec('BEGIN');
     unranked.forEach(({ id }, i) => update.run(next + i, id));
     this.#db.exec('COMMIT');
+  }
+
+  /**
+   * Tasks stored while tasks had assignees keep them in `data`, and their
+   * changelog keeps the assignee changes, a field `TaskChange` no longer has; both go.
+   */
+  #dropAssignees(): void {
+    this.#transaction(() => {
+      this.#db.exec("UPDATE tasks SET data = json_remove(data, '$.assignees') WHERE json_type(data, '$.assignees') IS NOT NULL");
+      this.#db.exec("DELETE FROM task_changes WHERE field = 'assignees'");
+    });
   }
 
   #appendChanges(id: string, changes: readonly TaskChange[]): void {
