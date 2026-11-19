@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { resumePrompt, taskPrompt } from './prompts.ts';
 import { sampleTask } from './test-support.ts';
 
-const project = { id: 'p1', title: 'P', description: '', createdAt: 't', updatedAt: 't', autoMerge: false };
+const project = { id: 'p1', title: 'P', description: '', createdAt: 't', updatedAt: 't', autoMerge: false, taskProviders: [] };
 
 test('taskPrompt names the issue of a managed task', () => {
   const external = { provider: 'github', url: 'https://github.com/o/r/issues/12', key: 'o/r#12' };

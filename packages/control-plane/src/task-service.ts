@@ -41,8 +41,8 @@ export interface TaskServiceDeps {
   activity: ActivityFeed;
   runtime: ExecutionRuntime;
   newId?: () => string;
-  /** Where managed tasks' issues live; absent when no issue repositories are configured. */
-  issues?: IssueProvider;
+  /** Where managed tasks' issues live. */
+  issues: IssueProvider;
   /** Secret values to strip from logged errors. */
   secrets?: readonly string[];
   log?: (message: string) => void;
@@ -62,7 +62,7 @@ export class TaskService {
   readonly #activity: ActivityFeed;
   readonly #runtime: ExecutionRuntime;
   readonly #newId: () => string;
-  readonly #issues: IssueProvider | undefined;
+  readonly #issues: IssueProvider;
   readonly #secrets: readonly string[];
   readonly #log: (message: string) => void;
 
@@ -142,10 +142,6 @@ export class TaskService {
   /** Removes the factory labels from a managed task's issue and says so there; no-op for other tasks. */
   async #releaseIssue({ id, external }: Task): Promise<void> {
     if (external === undefined) return;
-    if (this.#issues === undefined) {
-      this.#log(`delete ${id}: no issue provider configured; the labels of ${external.key} were left untouched`);
-      return;
-    }
     try {
       await this.#issues.changeLabels(external.url, deletionLabelChanges());
     } catch (error) {

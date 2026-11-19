@@ -4,7 +4,7 @@ import type { NewTask, PullRequest, PullRequestReader, PullRequestReview, TaskEv
 import { SqliteTaskRepository } from './adapters/sqlite-task-repository.ts';
 import { PullRequestObserver } from './pull-request-observer.ts';
 import { createServices } from './services.ts';
-import { ada, sequentialItemIds } from './test-support.ts';
+import { ada, noIssues, sequentialItemIds } from './test-support.ts';
 
 class FakePullRequests implements PullRequestReader {
   /** What GitHub answers per URL; a string is thrown as an error. */
@@ -26,6 +26,7 @@ function setup() {
   let counter = 0;
   const services = createServices({
     repository: new SqliteTaskRepository(':memory:'),
+    issues: noIssues,
     runtime: { start: async () => ({ executionId: 'x' }), notify: async () => ({}), restart: async () => ({}), remove: async () => {}, listExecutions: async () => [] },
     newId: () => `t${++counter}`,
     newItemId: sequentialItemIds(),

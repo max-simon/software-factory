@@ -57,6 +57,7 @@ export function fakeTaskClient(tasks: TaskView[] = []): FakeTaskClient {
         title: input.title,
         description: input.description ?? '',
         autoMerge: input.autoMerge ?? false,
+        taskProviders: input.taskProviders ?? [],
       };
       fake.projects.push(project);
       return project;

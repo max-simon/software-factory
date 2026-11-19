@@ -26,7 +26,7 @@ import { ReviewTracker } from '../review-tracker.ts';
 import { createServices } from '../services.ts';
 import { engineerRoutes } from './engineer-routes.ts';
 import { createServer } from './server.ts';
-import { ada, sequentialItemIds, testAuth } from '../test-support.ts';
+import { ada, noIssues, sequentialItemIds, testAuth } from '../test-support.ts';
 
 const validTask = {
   projectId: 'p1',
@@ -78,7 +78,7 @@ async function startApi(
     newItemId: sequentialItemIds(),
     now: () => fixedNow,
     log: () => {},
-    ...(issues !== undefined && { issues }),
+    issues: issues ?? noIssues,
   });
   let projectCounter = 0;
   const projects = new ProjectService({
@@ -215,7 +215,16 @@ test('projects are created, listed, shown and edited', async (t) => {
   const { call } = await startApi(t);
   const created = await call('POST', '/projects', { title: 'Billing' });
   assert.equal(created.status, 201);
-  assert.deepEqual(created.json, { id: 'p2', createdAt: fixedNow, createdBy: 'u1', updatedAt: fixedNow, title: 'Billing', description: '', autoMerge: false });
+  assert.deepEqual(created.json, {
+    id: 'p2',
+    createdAt: fixedNow,
+    createdBy: 'u1',
+    updatedAt: fixedNow,
+    title: 'Billing',
+    description: '',
+    autoMerge: false,
+    taskProviders: [],
+  });
   assert.deepEqual((await call('GET', '/projects')).json.map((p: { id: string }) => p.id), ['p1', 'p2']);
   assert.equal((await call('GET', '/projects/p1')).json.description, 'Sign-in for the app');
   const edited = await call('PATCH', '/projects/p1', { description: '', autoMerge: true });
@@ -235,11 +244,33 @@ test('project bodies are validated', async (t) => {
     ['non-boolean autoMerge', 'POST', { title: 't', autoMerge: 'yes' }],
     ['empty title edit', 'PATCH', { title: '' }],
     ['unknown field edit', 'PATCH', { status: 'done' }],
+    ['task providers not a list', 'PATCH', { taskProviders: { provider: 'github-issues', repo: 'o/r' } }],
+    ['unknown task provider', 'POST', { title: 't', taskProviders: [{ provider: 'jira', repo: 'o/r' }] }],
+    ['task provider without config', 'PATCH', { taskProviders: [{ provider: 'github-issues' }] }],
+    ['task provider with unknown config', 'PATCH', { taskProviders: [{ provider: 'github-issues', repo: 'o/r', token: 'x' }] }],
+    ['malformed repository', 'PATCH', { taskProviders: [{ provider: 'github-issues', repo: 'https://github.com/o/r' }] }],
+    ['repository attached twice', 'PATCH', { taskProviders: [{ provider: 'github-issues', repo: 'o/r' }, { provider: 'github-issues', repo: 'O/R' }] }],
   ];
   for (const [name, method, body] of cases) {
     const path = method === 'POST' ? '/projects' : '/projects/p1';
     assert.equal((await call(method, path, body)).status, 400, name);
   }
+  assert.deepEqual((await call('GET', '/projects/p1')).json.taskProviders, []);
+});
+
+test('task providers are attached on creation and replaced as a whole on edit', async (t) => {
+  const { call } = await startApi(t);
+  const web = { provider: 'github-issues', repo: 'acme/web' };
+  const api = { provider: 'github-issues', repo: 'acme/api' };
+  const created = await call('POST', '/projects', { title: 'Billing', taskProviders: [web] });
+  assert.deepEqual(created.json.taskProviders, [web]);
+  const edited = await call('PATCH', '/projects/p2', { taskProviders: [web, api] });
+  assert.equal(edited.status, 200);
+  assert.deepEqual(edited.json.taskProviders, [web, api]);
+  // Leaving the field out keeps the list; an empty one removes every attachment.
+  assert.deepEqual((await call('PATCH', '/projects/p2', { title: 'Payments' })).json.taskProviders, [web, api]);
+  assert.deepEqual((await call('PATCH', '/projects/p2', { taskProviders: [] })).json.taskProviders, []);
+  assert.deepEqual((await call('GET', '/projects/p2')).json.taskProviders, []);
 });
 
 test('project tasks lists only that project, in rank order', async (t) => {

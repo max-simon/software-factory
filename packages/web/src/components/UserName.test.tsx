@@ -43,7 +43,7 @@ const task = (overrides: Partial<TaskView> = {}): TaskView => ({
   ...overrides,
 });
 
-const project: Project = { id: 'p1', createdAt: at, createdBy: 'u1', updatedAt: at, title: 'P', description: '', autoMerge: false };
+const project: Project = { id: 'p1', createdAt: at, createdBy: 'u1', updatedAt: at, title: 'P', description: '', autoMerge: false, taskProviders: [] };
 const changes: TaskChange[] = [
   { at, actor: 'user', userId: 'u1', field: 'created' },
   { at, actor: 'user', userId: 'u1', field: 'title', from: 'A', to: 'B' },

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import type { PullRequest, Task, TaskEvent } from '@factory/core';
 import { SqliteTaskRepository } from '../adapters/sqlite-task-repository.ts';
 import { createServices } from '../services.ts';
-import { ada, sequentialItemIds } from '../test-support.ts';
+import { ada, noIssues, sequentialItemIds } from '../test-support.ts';
 import { conflictFollowUp, PullRequestConflictedHook, resolveConflictSkill } from './pull-request-conflicted-hook.ts';
 
 const url = 'https://github.com/o/r/pull/1';
@@ -13,6 +13,7 @@ const url = 'https://github.com/o/r/pull/1';
 function setup() {
   const services = createServices({
     repository: new SqliteTaskRepository(':memory:'),
+    issues: noIssues,
     runtime: { start: async () => ({ executionId: 'x' }), notify: async () => ({}), restart: async () => ({}), remove: async () => {}, listExecutions: async () => [] },
     newId: () => 't1',
     newItemId: sequentialItemIds(),

@@ -1,3 +1,5 @@
+import type { TaskProviderAttachment } from './task-provider.ts';
+
 /** Groups tasks; every task belongs to exactly one project. */
 export interface Project {
   id: string;
@@ -10,6 +12,8 @@ export interface Project {
   description: string;
   /** Merges the pull requests the PR review rates low risk without a human. */
   autoMerge: boolean;
+  /** Where the project's managed tasks come from; empty for projects stored before attachments existed. */
+  taskProviders: TaskProviderAttachment[];
 }
 
 export interface NewProject {
@@ -18,12 +22,16 @@ export interface NewProject {
   description?: string;
   /** Defaults to off. */
   autoMerge?: boolean;
+  /** Defaults to none. */
+  taskProviders?: TaskProviderAttachment[];
 }
 
 export interface ProjectEdit {
   title?: string;
   description?: string;
   autoMerge?: boolean;
+  /** Replaces the whole list. */
+  taskProviders?: TaskProviderAttachment[];
 }
 
 // Pure, like the task operations: the caller stamps `updatedAt` when saving.
@@ -38,6 +46,7 @@ export function createProject(input: NewProject, meta: { id: string; now: string
     title: input.title,
     description: input.description ?? '',
     autoMerge: input.autoMerge ?? false,
+    taskProviders: input.taskProviders ?? [],
   };
 }
 
@@ -47,5 +56,6 @@ export function editProject(project: Project, edit: ProjectEdit): Project {
     title: edit.title ?? project.title,
     description: edit.description ?? project.description,
     autoMerge: edit.autoMerge ?? project.autoMerge,
+    taskProviders: edit.taskProviders ?? project.taskProviders,
   };
 }

@@ -25,7 +25,6 @@ test('applies defaults and keeps secrets out of the config', () => {
     sessionMaxDays: 7,
     credentials: ['ANTHROPIC_API_KEY'],
     agentCredentials: { claude: 'ANTHROPIC_API_KEY', opencode: 'ANTHROPIC_API_KEY' },
-    githubIssueRepos: [],
   });
 });
 
@@ -101,19 +100,3 @@ test('reads the session idle hours and maximum days, 12 and 7 by default, and re
   }
 });
 
-test('reads the GitHub issue repositories, none by default, and rejects a malformed list', () => {
-  assert.deepEqual(loadConfig(complete).githubIssueRepos, []);
-  assert.deepEqual(loadConfig({ ...complete, FACTORY_GITHUB_ISSUE_REPOS: '' }).githubIssueRepos, []);
-  assert.deepEqual(loadConfig({ ...complete, FACTORY_GITHUB_ISSUE_REPOS: '  ' }).githubIssueRepos, []);
-  assert.deepEqual(
-    loadConfig({ ...complete, FACTORY_GITHUB_ISSUE_REPOS: ' acme/web , acme-corp/api.v2_x,o/r ' }).githubIssueRepos,
-    ['acme/web', 'acme-corp/api.v2_x', 'o/r'],
-  );
-  for (const value of ['acme', 'acme/web/x', 'acme/web,', ',acme/web', 'acme/web,,o/r', 'https://github.com/acme/web', 'acme/', '/web', 'ac me/web', 'acme/..', 'acme_x/web']) {
-    assert.throws(
-      () => loadConfig({ ...complete, FACTORY_GITHUB_ISSUE_REPOS: value }),
-      (e: unknown) => e instanceof ConfigError && e.message.startsWith('FACTORY_GITHUB_ISSUE_REPOS must be a comma-separated list of owner/repo'),
-      value,
-    );
-  }
-});

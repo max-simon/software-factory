@@ -76,6 +76,7 @@ const domainStatus: Record<DomainErrorCode, number> = {
   invalid_display_name: 400,
   invalid_password: 400,
   invalid_token_name: 400,
+  invalid_task_provider: 400,
   invalid_token_expiry: 400,
   issue_provider_failed: 502,
 };

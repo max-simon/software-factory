@@ -13,25 +13,25 @@ class FakeIssues implements IssueProvider {
   comments: { url: string; key: string; body: string }[] = [];
   /** Commenting on these URLs fails with the error message. */
   failures = new Map<string, string>();
-  labelled: string[] = [];
+  /** The repositories and label of each `listIssues` call. */
+  listed: { repos: string[]; label: string }[] = [];
   /** Listing fails with this message while set. */
   listFailure: string | undefined;
-  /** Repository URLs `listIssues` looks in. */
-  repoUrls = ['https://github.com/o/r'];
   labelChanges: { url: string; add: string[]; remove: string[] }[] = [];
   /** Changing labels fails with this message while set. */
   labelFailure: string | undefined;
   /** Changing labels on these URLs fails with the error message. */
   labelFailures = new Map<string, string>();
 
-  async listIssues(label: string): Promise<ExternalIssue[]> {
-    this.labelled.push(label);
+  /** Every issue, whichever repositories are asked for; `covers` is what tells them apart. */
+  async listIssues(repos: readonly string[], label: string): Promise<ExternalIssue[]> {
+    this.listed.push({ repos: [...repos], label });
     if (this.listFailure !== undefined) throw new Error(this.listFailure);
     return this.issues.map((issue) => ({ ...issue, labels: [...issue.labels] }));
   }
 
-  covers(url: string): boolean {
-    return this.repoUrls.some((repoUrl) => url.startsWith(`${repoUrl}/`));
+  covers(url: string, repos: readonly string[]): boolean {
+    return repos.some((repo) => url.toLowerCase().startsWith(`https://github.com/${repo.toLowerCase()}/`));
   }
 
   async changeLabels(url: string, change: { add: string[]; remove: string[] }): Promise<void> {
@@ -89,7 +89,9 @@ function setup() {
     now: () => new Date(Date.UTC(2026, 10, 19, 10, 0, clock++)).toISOString(),
   });
   const projects = new SqliteProjectRepository(':memory:');
-  projects.insert(createProject({ title: 'P' }, { id: 'p1', now: '2026-11-19T09:00:00.000Z' }));
+  projects.insert(
+    createProject({ title: 'P', taskProviders: [{ provider: 'github-issues', repo: 'o/r' }] }, { id: 'p1', now: '2026-11-19T09:00:00.000Z' }),
+  );
   const logged: string[] = [];
   let ids = 0;
   const sync = new IssueSync({
@@ -100,7 +102,7 @@ function setup() {
     log: (message) => logged.push(message),
     newId: () => `t${++ids}`,
   });
-  return { provider, tasks, events, logged, sync };
+  return { provider, tasks, projects, events, logged, sync };
 }
 
 type Fixture = ReturnType<typeof setup>;
@@ -118,7 +120,7 @@ test('imports an open issue as a draft managed task, created by system, with a t
     issue(1, { labels: ['bug', 'factory', 'Factory:Project:p1', 'factory:supervised', 'factory:model:sonnet', 'ui', 'bug'] }),
   ];
   await f.sync.sync();
-  assert.deepEqual(f.provider.labelled, ['factory']);
+  assert.deepEqual(f.provider.listed, [{ repos: ['o/r'], label: 'factory' }]);
   const task = f.tasks.get('t1');
   assert.equal(task.status, 'draft');
   assert.equal(task.projectId, 'p1');
@@ -152,7 +154,42 @@ test('skips issues without a project label or with an unknown project silently, 
   await f.sync.sync();
   assert.deepEqual(f.tasks.list(), []);
   assert.deepEqual(f.provider.comments, []);
-  assert.deepEqual(f.logged, [`issue sync: skipped 2 issues without a known project label: ${issue(1).url}, ${issue(2).url}`]);
+  assert.deepEqual(f.logged, [
+    `issue sync: skipped 2 issues without the label of a project that attaches their repository: ${issue(1).url}, ${issue(2).url}`,
+  ]);
+});
+
+test('lists the repositories every project attaches, each once whatever its case', async () => {
+  const f = setup();
+  const attach = (id: string, ...repos: string[]) =>
+    f.projects.insert(
+      createProject({ title: id, taskProviders: repos.map((repo) => ({ provider: 'github-issues' as const, repo })) }, { id, now: f.tasks.now() }),
+    );
+  attach('p2', 'O/R', 'o/s');
+  attach('p3');
+  await f.sync.sync();
+  assert.deepEqual(f.provider.listed, [{ repos: ['o/r', 'o/s'], label: 'factory' }]);
+});
+
+test('an issue labelled for a project that does not attach its repository is skipped and logged', async () => {
+  const f = setup();
+  f.projects.insert(
+    createProject({ title: 'Other', taskProviders: [{ provider: 'github-issues', repo: 'o/s' }] }, { id: 'p2', now: f.tasks.now() }),
+  );
+  f.provider.issues = [issue(1, { labels: ['factory', 'factory:project:p2'] })];
+  await f.sync.sync();
+  assert.deepEqual(f.tasks.list(), []);
+  assert.deepEqual(f.provider.comments, []);
+  assert.match(f.logged[0]!, /skipped 1 issues without the label of a project that attaches their repository/);
+});
+
+test('without attachments the provider is asked for no repository and nothing is imported', async () => {
+  const f = setup();
+  f.projects.save({ ...f.projects.get('p1')!, taskProviders: [] });
+  f.provider.issues = [issue(1)];
+  await f.sync.sync();
+  assert.deepEqual(f.provider.listed, [{ repos: [], label: 'factory' }]);
+  assert.deepEqual(f.tasks.list(), []);
 });
 
 test('does not import closed issues', async () => {
@@ -399,7 +436,8 @@ test('nothing is deleted when the list call failed or does not cover the reposit
   await assert.rejects(f.sync.sync(), /timeout/);
   assert.equal(f.tasks.get(id).status, 'draft');
   f.provider.listFailure = undefined;
-  f.provider.repoUrls = ['https://github.com/o/other'];
+  // Detached: no project attaches the repository any more.
+  f.projects.save({ ...f.projects.get('p1')!, taskProviders: [] });
   await f.sync.sync();
   assert.equal(f.tasks.get(id).status, 'draft');
 });

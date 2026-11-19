@@ -155,7 +155,7 @@ Protocol, hooks, design decisions and known gaps:
 - Podman (on macOS: `podman machine init && podman machine start`)
 - An Anthropic API key and/or a Claude subscription token from `claude setup-token`
 - A GitHub token that can clone, push and open pull requests on your target repositories; for managed tasks it
-  also needs to write the issues of the repositories in `FACTORY_GITHUB_ISSUE_REPOS` (Issues: read and write)
+  also needs to write the issues of the repositories your projects attach (Issues: read and write)
 
 ### Configuration
 
@@ -176,7 +176,8 @@ Put these in `.env` in the repository root (git-ignored, loaded by `yarn start`)
 | `FACTORY_FOLLOW_UP_WINDOW_HOURS` | `24` | How long a failed task keeps its container for follow-ups |
 | `FACTORY_SESSION_IDLE_HOURS` | `12` | A login session ends after this many hours unused |
 | `FACTORY_SESSION_MAX_DAYS` | `7` | A login session ends this many days after login, however active |
-| `FACTORY_GITHUB_ISSUE_REPOS` | unset (off) | Comma-separated `owner/repo` list to look for managed-task issues in; a task's repository is the one its issue is in |
+
+Managed tasks come from the GitHub repositories each project attaches under **Task providers** on its edit page.
 
 ### Start
 

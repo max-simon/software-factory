@@ -8,7 +8,7 @@ import { ReviewTracker } from '../review-tracker.ts';
 import { createServices } from '../services.ts';
 import { Hooks } from './hooks.ts';
 import { PrReviewHook } from './pr-review-hook.ts';
-import { ada } from '../test-support.ts';
+import { ada, noIssues } from '../test-support.ts';
 
 const prUrl = (n: number) => `https://github.com/o/r/pull/${n}`;
 
@@ -71,6 +71,7 @@ function setup({ risks = { 1: 'low', 2: 'low' }, refusedMerges = new Set(), isCo
   const hooks = new Hooks((message) => logged.push(message));
   const { tasks, service, agent, lifecycle } = createServices({
     repository: new SqliteTaskRepository(':memory:'),
+    issues: noIssues,
     runtime: {} as ExecutionRuntime,
     onEvent: (event) => void pending.push(hooks.emit(event)),
     newId: () => `t${++counter}`,

@@ -29,7 +29,8 @@ export type DomainErrorCode =
   | 'invalid_password'
   | 'invalid_token_name'
   | 'invalid_token_expiry'
-  | 'issue_provider_failed';
+  | 'issue_provider_failed'
+  | 'invalid_task_provider';
 
 export class DomainError extends Error {
   readonly code: DomainErrorCode;

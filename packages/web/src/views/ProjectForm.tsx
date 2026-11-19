@@ -1,25 +1,32 @@
-import type { Project } from '@factory/core';
-import type { FormEvent } from 'react';
+import type { Project, TaskProviderAttachment } from '@factory/core';
+import { useState, type FormEvent } from 'react';
 import { api } from '../api.ts';
 import { ErrorText } from '../components/ErrorText.tsx';
+import { hasUnaddedTaskProvider, TaskProviders } from '../components/TaskProviders.tsx';
 import { useAction, usePolling } from '../hooks.ts';
 import { href } from '../model.ts';
 
 type OnSaved = (project: Project) => void;
 
-const fields = (form: FormData) => ({
-  title: String(form.get('title')).trim(),
-  description: String(form.get('description')),
-  autoMerge: form.get('autoMerge') === 'on',
-});
+/** Refuses a form with an attachment typed in but not added, which saving would silently drop. */
+function fields(form: FormData, taskProviders: TaskProviderAttachment[]) {
+  if (hasUnaddedTaskProvider(form)) throw new Error('Add the task provider you entered, or clear its fields, before saving.');
+  return {
+    title: String(form.get('title')).trim(),
+    description: String(form.get('description')),
+    autoMerge: form.get('autoMerge') === 'on',
+    taskProviders,
+  };
+}
 
 export function NewProject({ onSaved }: { onSaved: OnSaved }) {
   const { isBusy, error, run } = useAction();
+  const [taskProviders, setTaskProviders] = useState<TaskProviderAttachment[]>([]);
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const input = fields(new FormData(event.currentTarget));
+    const form = new FormData(event.currentTarget);
     void run(async () => {
-      const created = await api.createProject(input);
+      const created = await api.createProject(fields(form, taskProviders));
       onSaved(created);
       location.hash = href.project(created.id);
     });
@@ -27,7 +34,7 @@ export function NewProject({ onSaved }: { onSaved: OnSaved }) {
   return (
     <form className="task-form" onSubmit={submit}>
       <h1>New project</h1>
-      <ProjectFields />
+      <ProjectFields taskProviders={taskProviders} onTaskProvidersChange={setTaskProviders} />
       <ErrorText message={error} />
       <div className="actions">
         <button className="button primary" disabled={isBusy}>
@@ -43,21 +50,27 @@ export function NewProject({ onSaved }: { onSaved: OnSaved }) {
 
 export function EditProject({ id, onSaved }: { id: string; onSaved: OnSaved }) {
   const { data: project, error: loadError } = usePolling(() => api.getProject(id), `edit-project-${id}`);
-  const { isBusy, error, run } = useAction();
   if (!project) return <p className="muted">{loadError ? loadError.message : 'Loading…'}</p>;
+  return <EditProjectForm project={project} onSaved={onSaved} />;
+}
 
+// Mounted once the project loaded, so the attachments start from it and polling never resets them.
+function EditProjectForm({ project, onSaved }: { project: Project; onSaved: OnSaved }) {
+  const { id } = project;
+  const { isBusy, error, run } = useAction();
+  const [taskProviders, setTaskProviders] = useState(project.taskProviders);
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const edit = fields(new FormData(event.currentTarget));
+    const form = new FormData(event.currentTarget);
     void run(async () => {
-      onSaved(await api.editProject(id, edit));
+      onSaved(await api.editProject(id, fields(form, taskProviders)));
       location.hash = href.project(id);
     });
   };
   return (
     <form className="task-form" onSubmit={submit}>
       <h1>Edit project</h1>
-      <ProjectFields project={project} />
+      <ProjectFields project={project} taskProviders={taskProviders} onTaskProvidersChange={setTaskProviders} />
       <ErrorText message={error} />
       <div className="actions">
         <button className="button primary" disabled={isBusy}>
@@ -71,8 +84,16 @@ export function EditProject({ id, onSaved }: { id: string; onSaved: OnSaved }) {
   );
 }
 
-// Uncontrolled, so polling never overwrites what the engineer is typing.
-function ProjectFields({ project }: { project?: Project }) {
+// Uncontrolled but for the attachments, so polling never overwrites what the engineer is typing.
+function ProjectFields({
+  project,
+  taskProviders,
+  onTaskProvidersChange,
+}: {
+  project?: Project;
+  taskProviders: TaskProviderAttachment[];
+  onTaskProvidersChange: (next: TaskProviderAttachment[]) => void;
+}) {
   return (
     <>
       <label className="field">
@@ -90,6 +111,7 @@ function ProjectFields({ project }: { project?: Project }) {
           <span className="hint">Every pull request gets a PR review; merge those it rates low risk without a human.</span>
         </span>
       </label>
+      <TaskProviders value={taskProviders} onChange={onTaskProvidersChange} {...(project && { projectId: project.id })} />
     </>
   );
 }

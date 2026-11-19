@@ -10,7 +10,7 @@ import { createServices } from '../services.ts';
 import { agentRoutes } from './agent-routes.ts';
 import { engineerRoutes } from './engineer-routes.ts';
 import { createServer } from './server.ts';
-import { ada, sequentialItemIds, testAuth } from '../test-support.ts';
+import { ada, noIssues, sequentialItemIds, testAuth } from '../test-support.ts';
 
 const token = 'ab'.repeat(32);
 const otherToken = 'cd'.repeat(32);
@@ -48,6 +48,7 @@ async function startApi(t: TestContext, input: NewTask = supervisedTask, now = (
   let counter = 0;
   const { tasks, service, agent } = createServices({
     repository,
+    issues: noIssues,
     runtime: new FakeRuntime(),
     newId: () => `task-${++counter}`,
     newItemId: sequentialItemIds(),
@@ -543,6 +544,7 @@ test('an agent reads its own project', async (t) => {
     title: 'Checkout',
     description: 'Everything about checkout',
     autoMerge: false,
+    taskProviders: [],
     createdBy: 'u1',
     createdAt: json.project.createdAt,
     updatedAt: json.project.updatedAt,

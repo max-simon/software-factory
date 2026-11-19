@@ -6,7 +6,7 @@ Detail behind the [README](../README.md): packages, task lifecycle, the worker p
 
 | Package | Role |
 |---|---|
-| `packages/core` | Domain model and rules: task and project types (a started task carries its `Execution`: token hash, worker state, heartbeat, console), the views each audience gets (`TaskView`, `AgentTaskView`), the status machine, pure operations (`startTask`, `addDecision`, `markReady`, …) the worker lifecycle (`pendingWork`, `acceptWork`, `releaseWorker`, …), task and pull request events (`pullRequestEvents` derives the latter from two saved versions of a task), users and identity (`User`, `ExternalIdentity`, `Principal`, `createUser`, …), personal access token metadata and its validation (`AccessToken`, `parseAccessTokenName`, …), and the ports (`TaskRepository`, `ProjectRepository`, `UserRepository`, `AccessTokenRepository`, `Authenticator`, `PasswordHasher`, `ExecutionRuntime`, `PullRequestReader`, `PullRequestWriter`, `Reviewer`, `IssueProvider`). No I/O. |
+| `packages/core` | Domain model and rules: task and project types (a started task carries its `Execution`: token hash, worker state, heartbeat, console), the views each audience gets (`TaskView`, `AgentTaskView`), the status machine, pure operations (`startTask`, `addDecision`, `markReady`, …) the worker lifecycle (`pendingWork`, `acceptWork`, `releaseWorker`, …), task and pull request events (`pullRequestEvents` derives the latter from two saved versions of a task), users and identity (`User`, `ExternalIdentity`, `Principal`, `createUser`, …), personal access token metadata and its validation (`AccessToken`, `parseAccessTokenName`, …), the task provider registry and attachments of a project (`taskProviderTypes`, `parseTaskProviders`, …), and the ports (`TaskRepository`, `ProjectRepository`, `UserRepository`, `AccessTokenRepository`, `Authenticator`, `PasswordHasher`, `ExecutionRuntime`, `PullRequestReader`, `PullRequestWriter`, `Reviewer`, `IssueProvider`). No I/O. |
 | `packages/control-plane` | HTTP server on `127.0.0.1:4700`. Login (`/auth/*`), engineer API (`/projects`, `/tasks`) and MCP endpoint (`/mcp`), both behind a browser session or a personal access token; agent API (`/agent/*`, token-authenticated); static web UI. Reads go through the `TaskStore`; changes through one service per actor: `TaskService` (engineer), `AgentService` (agent and runner), `LifecycleService` (the dispatcher). Adapters: SQLite repositories (`node:sqlite`), `PodmanRuntime`, `PodmanReviewer`, `GitHubPullRequests` and `GitHubIssues` (REST API). The `Dispatcher` reconciles every 2 s; the `PullRequestObserver` polls GitHub every minute; `Hooks` react to task and pull request events. |
 | `packages/reviewer` | The reviewer image, with three roles picked by its first argument, each with its own system prompt. `spec` reads one task specification with its project and the project's other tasks; `input` reads a supervised task waiting for input, with its open questions and approval requests, and may read the repository and pull requests with `gh` and `git` for context; `pr` reads one pull request reference (URL, head commit, the task it was opened for) and lets the model read the pull request itself with `gh` and `git`. Each takes the request as JSON on stdin, runs one `claude -p` turn with structured output (without tools for `spec`), and prints the answer as JSON on stdout. |
 | `packages/executor` | The container image. Its runner asks the control plane for work, clones the repository, runs one agent turn per piece of work and, once there is none, waits for a nudge on its doorbell; the session state stays on the container's disk, so a restarted runner resumes it. Two agent adapters behind the `AgentSession` port: the `claude` CLI (one process per turn) and `opencode serve` (one HTTP session). The agent reports through a stdio MCP bridge (`report_plan`, `report_decision`, `ask_question`, `report_ready`, …). |
@@ -448,6 +448,19 @@ A managed task is created from an issue on an external provider (GitHub
 Issues first). The provider owns title, specification and labels; the
 factory owns everything else.
 
+- **Task providers per project.** A project attaches 0..n task providers
+  (`Project.taskProviders`), set on the project form or with `taskProviders`
+  on `POST`/`PATCH /projects` (the whole list; leaving it out keeps it). The
+  registry in `packages/core/src/task-provider.ts` lists the provider types
+  the form offers, each with its config fields and its own parser; only
+  `github-issues`, configured with `owner/repo`, so far. A repository is
+  checked against GitHub's naming rules, attached at most once per project
+  (ignoring case) and at most 20 attachments per project; anything else is
+  400 `invalid_task_provider`. Several projects may attach the same
+  repository. Projects stored before attachments existed attach none.
+  Nothing else is configured: the sync looks in exactly the repositories
+  projects attach.
+
 - **The link.** `Task.external` holds `provider`, the issue's browser `url`
   and a short display `key` (e.g. `owner/repo#12`). A task without it is an
   ordinary task. The URL is the link's identity: the SQLite repository keeps
@@ -502,16 +515,15 @@ start with `factory`, and each class has one owner:
 ### Issue provider
 
 - **The port.** `IssueProvider` offers what the factory needs of a provider:
-  `listIssues(label)` (every issue of the configured repositories carrying
+  `listIssues(repos, label)` (every issue of the given repositories carrying
   the label, open and closed, no pull requests; it fails as a whole when any
-  repository cannot be listed), `covers(url)` (whether `listIssues` looks
-  in that issue's repository), `changeLabels` (idempotent) and
+  repository cannot be listed), `covers(url, repos)` (whether the issue is
+  in one of those repositories), `changeLabels` (idempotent) and
   `comment(url, key, body)`, posted at most once per `(url, key)`.
   `listIssues` returns `ExternalIssue`s: the `ExternalLink` fields plus `repoUrl`,
   `title`, `body`, `labels` and `isOpen`.
 - **GitHub Issues** (`adapters/github-issues.ts`) uses the REST API with
-  `GITHUB_TOKEN` and looks in the repositories of
-  `FACTORY_GITHUB_ISSUE_REPOS`; it shares its request, Link-header paging and
+  `GITHUB_TOKEN` and looks in the repositories it is given; it shares its request, Link-header paging and
   Enterprise (`/api/v3`) helpers with `GitHubPullRequests`
   (`adapters/github-api.ts`). It remembers posted comment keys in its own
   `issue_comments` table, `(url, key, posted_at)`, in the factory's SQLite
@@ -520,15 +532,20 @@ start with `factory`, and each class has one owner:
   characters are truncated with a note.
 - **The repository comes from GitHub.** A managed task's `repoUrl`, and the
   issue's `key`, are derived from the `html_url` GitHub returns for the
-  issue, never from its title, body or labels, nor from the configured list:
-  that list only says where to look, and a transferred issue reports its new
-  repository. An issue whose repository cannot be derived is rejected.
+  issue, never from its title, body or labels, nor from the attached
+  repositories: they only say where to look, and a transferred issue reports
+  its new repository. An issue whose repository cannot be derived is
+  rejected. A renamed repository's issues report the new name, so its
+  attachment needs the new name too.
 
 ### Sync
 
 `IssueSync` (`control-plane/src/issue-sync-service.ts`) makes one pass over
-`listIssues('factory')`. `main.ts` runs it every minute, only when
-`FACTORY_GITHUB_ISSUE_REPOS` is configured; the first pass runs at start-up.
+`listIssues(repos, 'factory')`, where `repos` are the GitHub Issues
+repositories of every project's attachments (`gitHubIssueRepos`), read anew
+each pass, so an attachment counts from the next pass on. `main.ts` runs it
+every minute; the first pass runs at start-up. Without attachments a pass
+asks GitHub nothing.
 
 - **Import.** An open issue without a task becomes a `draft` task in the
   project its project label names, with the issue's title, body as the
@@ -538,7 +555,9 @@ start with `factory`, and each class has one owner:
   has no `createdBy`; the web UI shows it as created by `system`. The issue
   text goes into the task unchanged and is never interpreted, nor logged.
 - **Skipped issues.** A closed issue is not imported. Nor is an issue without
-  a project label, or whose label names no known project; it gets no comment,
+  a project label, or whose label names no known project or a project that
+  does not attach the issue's repository (another project's attachment lists
+  it, but must not let it into this one); it gets no comment,
   since adding the label later is the expected fix, and a pass logs one line
   at most listing such issues; that includes several project labels naming
   different projects, which therefore get no conflict comment. An issue with
@@ -574,10 +593,12 @@ start with `factory`, and each class has one owner:
   from the web UI works as before.
 - **Leaving before start.** A `draft` or `clarification_required` task is
   deleted when its issue is closed, or when the issue is missing from
-  `listIssues('factory')` because it lost the label. Absence counts only
+  `listIssues` because it lost the label. Absence counts only
   when the list call succeeded and `covers` the issue's repository: a failed
-  call aborts the pass before anything changes, and a repository no longer
-  configured is not looked at. Deletion goes through `assertDeletable`, like
+  call aborts the pass before anything changes, and a repository no project
+  attaches any more is not looked at: its unstarted tasks stay as they are,
+  no longer synced. A task keeps syncing while any project attaches its
+  repository, even if its own project detached it. Deletion goes through `assertDeletable`, like
   the engineer's: while an unstarted task depends on it, the task stays, the
   refusal is logged and the next pass tries again.
 - **After start** the issue no longer steers the task: edits, a closed issue
@@ -667,8 +688,9 @@ issue first, so the sync does not import it again:
   answers HTTP 502 with `issue_provider_failed`; the cause is logged with
   secrets redacted. If only the comment fails, it is logged and the task is
   deleted anyway: the labels are already gone.
-- **Feature off.** Without `FACTORY_GITHUB_ISSUE_REPOS` there is no provider:
-  the task is deleted, its issue left untouched, and one line is logged.
+- **Detached repositories.** The issue is released whether or not a project
+  still attaches its repository, so attaching it again does not import it
+  anew.
 - **Only the user's delete.** A deletion the sync performs itself (for an
   issue that was closed or lost its label) does not go through
   `TaskService.delete` and removes no labels.
