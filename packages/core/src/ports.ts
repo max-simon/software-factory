@@ -1,7 +1,7 @@
 import type { ProjectChange, TaskChange } from './changelog.ts';
 import type { Project } from './project.ts';
 import type { InputReview, InputReviewRequest, PrReview, PrReviewRequest, SpecReview, SpecReviewRequest } from './review.ts';
-import type { AgentConsole, Heartbeat, PullRequest, Task, TaskAgent, TaskModel, TaskStatus } from './task.ts';
+import type { AgentConsole, ExternalIssue, Heartbeat, PullRequest, Task, TaskAgent, TaskModel, TaskStatus } from './task.ts';
 import type { AccessToken } from './access-token.ts';
 import type { Session } from './session.ts';
 import type { Credentials, ExternalIdentity, User } from './user.ts';
@@ -98,6 +98,16 @@ export interface PullRequestWriter {
   comment(url: string, body: string): Promise<void>;
   /** Merges only while the pull request's head is still `headSha`, so commits pushed since are never merged unseen. */
   merge(url: string, headSha: string): Promise<void>;
+}
+
+/** The issues managed tasks are created from, on one provider (e.g. GitHub Issues). */
+export interface IssueProvider {
+  /** Every issue of the configured repositories that carries `label`, open and closed; pull requests excluded. */
+  listIssues(label: string): Promise<ExternalIssue[]>;
+  /** Idempotent: adding a label the issue has or removing one it lacks is not an error. */
+  changeLabels(url: string, change: { add: string[]; remove: string[] }): Promise<void>;
+  /** Posts `body` at most once per `(url, key)`; a later call with the same key does nothing. */
+  comment(url: string, key: string, body: string): Promise<void>;
 }
 
 /**

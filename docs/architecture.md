@@ -6,8 +6,8 @@ Detail behind the [README](../README.md): packages, task lifecycle, the worker p
 
 | Package | Role |
 |---|---|
-| `packages/core` | Domain model and rules: task and project types (a started task carries its `Execution`: token hash, worker state, heartbeat, console), the views each audience gets (`TaskView`, `AgentTaskView`), the status machine, pure operations (`startTask`, `addDecision`, `markReady`, …) the worker lifecycle (`pendingWork`, `acceptWork`, `releaseWorker`, …), task and pull request events (`pullRequestEvents` derives the latter from two saved versions of a task), users and identity (`User`, `ExternalIdentity`, `Principal`, `createUser`, …), personal access token metadata and its validation (`AccessToken`, `parseAccessTokenName`, …), and the ports (`TaskRepository`, `ProjectRepository`, `UserRepository`, `AccessTokenRepository`, `Authenticator`, `PasswordHasher`, `ExecutionRuntime`, `PullRequestReader`, `PullRequestWriter`, `Reviewer`). No I/O. |
-| `packages/control-plane` | HTTP server on `127.0.0.1:4700`. Login (`/auth/*`), engineer API (`/projects`, `/tasks`) and MCP endpoint (`/mcp`), both behind a browser session or a personal access token; agent API (`/agent/*`, token-authenticated); static web UI. Reads go through the `TaskStore`; changes through one service per actor: `TaskService` (engineer), `AgentService` (agent and runner), `LifecycleService` (the dispatcher). Adapters: SQLite repositories (`node:sqlite`), `PodmanRuntime`, `PodmanReviewer` and `GitHubPullRequests` (REST API). The `Dispatcher` reconciles every 2 s; the `PullRequestObserver` polls GitHub every minute; `Hooks` react to task and pull request events. |
+| `packages/core` | Domain model and rules: task and project types (a started task carries its `Execution`: token hash, worker state, heartbeat, console), the views each audience gets (`TaskView`, `AgentTaskView`), the status machine, pure operations (`startTask`, `addDecision`, `markReady`, …) the worker lifecycle (`pendingWork`, `acceptWork`, `releaseWorker`, …), task and pull request events (`pullRequestEvents` derives the latter from two saved versions of a task), users and identity (`User`, `ExternalIdentity`, `Principal`, `createUser`, …), personal access token metadata and its validation (`AccessToken`, `parseAccessTokenName`, …), and the ports (`TaskRepository`, `ProjectRepository`, `UserRepository`, `AccessTokenRepository`, `Authenticator`, `PasswordHasher`, `ExecutionRuntime`, `PullRequestReader`, `PullRequestWriter`, `Reviewer`, `IssueProvider`). No I/O. |
+| `packages/control-plane` | HTTP server on `127.0.0.1:4700`. Login (`/auth/*`), engineer API (`/projects`, `/tasks`) and MCP endpoint (`/mcp`), both behind a browser session or a personal access token; agent API (`/agent/*`, token-authenticated); static web UI. Reads go through the `TaskStore`; changes through one service per actor: `TaskService` (engineer), `AgentService` (agent and runner), `LifecycleService` (the dispatcher). Adapters: SQLite repositories (`node:sqlite`), `PodmanRuntime`, `PodmanReviewer`, `GitHubPullRequests` and `GitHubIssues` (REST API). The `Dispatcher` reconciles every 2 s; the `PullRequestObserver` polls GitHub every minute; `Hooks` react to task and pull request events. |
 | `packages/reviewer` | The reviewer image, with three roles picked by its first argument, each with its own system prompt. `spec` reads one task specification with its project and the project's other tasks; `input` reads a supervised task waiting for input, with its open questions and approval requests, and may read the repository and pull requests with `gh` and `git` for context; `pr` reads one pull request reference (URL, head commit, the task it was opened for) and lets the model read the pull request itself with `gh` and `git`. Each takes the request as JSON on stdin, runs one `claude -p` turn with structured output (without tools for `spec`), and prints the answer as JSON on stdout. |
 | `packages/executor` | The container image. Its runner asks the control plane for work, clones the repository, runs one agent turn per piece of work and, once there is none, waits for a nudge on its doorbell; the session state stays on the container's disk, so a restarted runner resumes it. Two agent adapters behind the `AgentSession` port: the `claude` CLI (one process per turn) and `opencode serve` (one HTTP session). The agent reports through a stdio MCP bridge (`report_plan`, `report_decision`, `ask_question`, `report_ready`, …). |
 | `packages/web` | React + Vite UI: login page, account page (display name, password, access tokens), project sidebar, per-project board and dashboard with its open pull requests, task detail with live activity, timeline, question and approval forms, follow-ups. Polls the engineer API. |
@@ -409,6 +409,29 @@ factory owns everything else.
   given. It goes through `TaskStore.update`, so the changelog records it.
   Answers, approvals, follow-ups, cancel, restart, assignees, rank and delete
   work as for any task.
+
+### Issue provider
+
+- **The port.** `IssueProvider` offers what the factory needs of a provider:
+  `listIssues(label)` (every issue of the configured repositories carrying
+  the label, open and closed, no pull requests), `changeLabels` (idempotent)
+  and `comment(url, key, body)`, posted at most once per `(url, key)`. It
+  returns `ExternalIssue`s: the `ExternalLink` fields plus `repoUrl`,
+  `title`, `body`, `labels` and `isOpen`. Nothing calls it yet.
+- **GitHub Issues** (`adapters/github-issues.ts`) uses the REST API with
+  `GITHUB_TOKEN` and looks in the repositories of
+  `FACTORY_GITHUB_ISSUE_REPOS`; it shares its request, Link-header paging and
+  Enterprise (`/api/v3`) helpers with `GitHubPullRequests`
+  (`adapters/github-api.ts`). It remembers posted comment keys in its own
+  `issue_comments` table, `(url, key, posted_at)`, in the factory's SQLite
+  file, recording a key only after GitHub accepted the comment: a crash in
+  between may post it twice, never lose it. Bodies over GitHub's 65,536
+  characters are truncated with a note.
+- **The repository comes from GitHub.** A managed task's `repoUrl`, and the
+  issue's `key`, are derived from the `html_url` GitHub returns for the
+  issue, never from its title, body or labels, nor from the configured list:
+  that list only says where to look, and a transferred issue reports its new
+  repository. An issue whose repository cannot be derived is rejected.
 
 ## Design decisions and reasoning
 

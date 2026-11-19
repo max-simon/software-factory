@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { createApiClient, createMcpHandler } from '@factory/mcp';
 import { ConfigError, loadConfig, unavailableAgent } from './config.ts';
+import { GitHubIssues } from './adapters/github-issues.ts';
 import { GitHubPullRequests } from './adapters/github-pull-requests.ts';
 import { PodmanRuntime } from './adapters/podman-runtime.ts';
 import { PodmanReviewer } from './adapters/podman-reviewer.ts';
@@ -74,6 +75,11 @@ function main(): void {
     anthropicCredential: config.agentCredentials.claude!,
   });
   const pullRequests = new GitHubPullRequests(process.env.GITHUB_TOKEN!);
+  // Nothing reads issues yet: the sync loop that creates managed tasks from them is still to come.
+  const issues =
+    config.githubIssueRepos.length > 0
+      ? new GitHubIssues({ token: process.env.GITHUB_TOKEN!, repos: config.githubIssueRepos, dbPath: config.dbPath })
+      : undefined;
   // The hooks record the reviews they run; the engineer API shows them.
   const reviews = new ReviewTracker();
   hooks.register(new SpecReviewHook({ tasks, service, projects, reviewer, reviews }));
