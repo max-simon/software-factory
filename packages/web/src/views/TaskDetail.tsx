@@ -19,6 +19,7 @@ import { Changelog } from '../components/Changelog.tsx';
 import { LiveActivity } from '../components/LiveActivity.tsx';
 import { DependenciesSection } from '../components/Dependencies.tsx';
 import { ErrorText } from '../components/ErrorText.tsx';
+import { IssueLink } from '../components/IssueLink.tsx';
 import { ArtifactModal } from '../components/ArtifactModal.tsx';
 import { ArtifactApprovalRequest, DecisionApprovalForm, QuestionForm } from '../components/InputItems.tsx';
 import { Markdown } from '../components/Markdown.tsx';
@@ -165,7 +166,7 @@ export function Header({ task, onChange }: { task: TaskView; onChange: (task: Ta
               Open in OpenCode
             </button>
           )}
-          {isEditable(task.status) && (
+          {isEditable(task.status) && task.external === undefined && (
             <a className="button" href={href.edit(task.id)}>
               Edit
             </a>
@@ -224,6 +225,7 @@ export function Header({ task, onChange }: { task: TaskView; onChange: (task: Ta
       <p className="meta">
         <StatusLabel status={task.status} isSpecUnderReview={task.isSpecUnderReview} />
         <HeartbeatNote task={task} />
+        {task.external && <IssueLink external={task.external} />}
         {task.repoUrl ? (
           <a href={task.repoUrl} target="_blank" rel="noreferrer">
             {repoName(task.repoUrl)}
@@ -246,6 +248,7 @@ export function Header({ task, onChange }: { task: TaskView; onChange: (task: Ta
         <span title={task.updatedAt}>updated {relativeTime(task.updatedAt)}</span>
         <span className="mono">{task.id}</span>
       </p>
+      {task.external && <p className="hint">Title, specification and labels come from the issue; change them there.</p>}
       <ErrorText message={error} />
       {isRequestingClarification && task.status === 'draft' && (
         <ClarificationForm
@@ -290,7 +293,9 @@ function ClarificationNote({ task, onChange }: { task: TaskView; onChange: (task
   return (
     <Section title="Needs clarification" className="needs-input">
       <Markdown>{task.clarification ?? ''}</Markdown>
-      <p className="muted">Edit the task to clarify it, then start it or move it back to draft.</p>
+      <p className="muted">
+        {task.external ? 'Clarify the issue' : 'Edit the task to clarify it'}, then start it or move it back to draft.
+      </p>
       <ErrorText message={error} />
       <div className="actions">
         <button className="button" disabled={isBusy} onClick={() => void run(async () => onChange(await api.returnToDraft(task.id)))}>

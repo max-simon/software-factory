@@ -3,6 +3,7 @@ import { useState, type DragEvent, type KeyboardEvent } from 'react';
 import { api } from '../api.ts';
 import { AssigneeBadges } from '../components/Assignees.tsx';
 import { ErrorText } from '../components/ErrorText.tsx';
+import { IssueLink } from '../components/IssueLink.tsx';
 import { HeartbeatNote, Spinner, specReviewLabel, StatusDot } from '../components/Status.tsx';
 import { useAction } from '../hooks.ts';
 import {
@@ -155,14 +156,17 @@ function TaskCard({
 }) {
   const summary = inputSummary(task);
   const heartbeat = heartbeatInfo(task);
+  // The card is a div whose title link stretches over it, since the issue link cannot nest inside another link.
   return (
-    <a
-      className="card"
-      href={href.task(task.id)}
-      onKeyDown={onKeyDown}
-      {...(onKeyDown && { 'aria-keyshortcuts': 'Alt+ArrowUp Alt+ArrowDown' })}
-    >
-      <span className="card-title">{task.title}</span>
+    <div className="card">
+      <a
+        className="card-title"
+        href={href.task(task.id)}
+        onKeyDown={onKeyDown}
+        {...(onKeyDown && { 'aria-keyshortcuts': 'Alt+ArrowUp Alt+ArrowDown' })}
+      >
+        {task.title}
+      </a>
       <span className="card-meta" title={heartbeat?.tooltip}>
         <StatusDot status={task.status} />
         {summary ? (
@@ -177,8 +181,9 @@ function TaskCard({
         <span className="card-time">{relativeTime(task.updatedAt)}</span>
         <AssigneeBadges assignees={task.assignees} />
       </span>
-      {(task.repoUrl || task.labels.length > 0) && (
+      {(task.repoUrl || task.external || task.labels.length > 0) && (
         <span className="card-meta">
+          {task.external && <IssueLink external={task.external} />}
           {task.repoUrl && <span>{repoName(task.repoUrl)}</span>}
           {task.labels.map((label) => (
             <span key={label} className="label">
@@ -187,6 +192,6 @@ function TaskCard({
           ))}
         </span>
       )}
-    </a>
+    </div>
   );
 }
