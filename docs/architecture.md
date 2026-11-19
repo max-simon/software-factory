@@ -48,11 +48,12 @@ Detail behind the [README](../README.md): packages, task lifecycle, the worker p
   appended to the `task_changes` table with its time, old and new value and
   actor: `user` for the engineer API (web UI and MCP server), `agent` for the
   agent API (the agent and its runner), `reviewer` for the reviewer acting on
-  the engineer's behalf, `system` for the dispatcher. A `user` entry also
-  carries the `userId` of the signed-in user (entries from before users have
-  none). The task page shows it as a compact timeline; `GET /tasks/:id/changes`
-  returns it. Projects keep the same changelog of title, description and
-  auto-merge in `project_changes`; `GET /projects/:id/changes` returns it.
+  the engineer's behalf, `system` for the dispatcher and the issue sync. A
+  `user` entry also carries the `userId` of the signed-in user (entries from
+  before users have none). The task page shows it as a compact timeline;
+  `GET /tasks/:id/changes` returns it. Projects keep the same changelog of
+  title, description and auto-merge in `project_changes`;
+  `GET /projects/:id/changes` returns it.
 - **Who did what:** the engineer API passes the request's `Principal` to the
   services, which record the user's id, never a name: `createdBy` on tasks and
   projects, `authorId` on follow-ups, `answeredBy` on answers, `reviewedBy` on
@@ -449,7 +450,7 @@ start with `factory`, and each class has one owner:
   the label, open and closed, no pull requests), `changeLabels` (idempotent)
   and `comment(url, key, body)`, posted at most once per `(url, key)`. It
   returns `ExternalIssue`s: the `ExternalLink` fields plus `repoUrl`,
-  `title`, `body`, `labels` and `isOpen`. Nothing calls it yet.
+  `title`, `body`, `labels` and `isOpen`.
 - **GitHub Issues** (`adapters/github-issues.ts`) uses the REST API with
   `GITHUB_TOKEN` and looks in the repositories of
   `FACTORY_GITHUB_ISSUE_REPOS`; it shares its request, Link-header paging and
@@ -464,6 +465,42 @@ start with `factory`, and each class has one owner:
   issue, never from its title, body or labels, nor from the configured list:
   that list only says where to look, and a transferred issue reports its new
   repository. An issue whose repository cannot be derived is rejected.
+
+### Sync
+
+`IssueSync` (`control-plane/src/issue-sync-service.ts`) makes one pass over
+`listIssues('factory')`. `main.ts` runs it every minute, only when
+`FACTORY_GITHUB_ISSUE_REPOS` is configured; the first pass runs at start-up.
+
+- **Import.** An open issue without a task becomes a `draft` task in the
+  project its project label names, with the issue's title, body as the
+  specification, content labels, autonomy mode and model from its config
+  labels, the issue's `repoUrl`, the default agent and `external` set to the
+  issue's link. The changelog records it as created by `system`, and the task
+  has no `createdBy`; the web UI shows it as created by `system`. The issue
+  text goes into the task unchanged and is never interpreted, nor logged.
+- **Skipped issues.** A closed issue is not imported. Nor is an issue without
+  a project label, or whose label names no known project; it gets no comment,
+  since adding the label later is the expected fix, and a pass logs one line
+  at most listing such issues. An issue with an empty body gets one comment
+  saying it needs a description, and is skipped until it has one.
+- **Task-id comment.** The issue gets a comment naming its task. The sync
+  ensures it on every pass; the provider posts each key once, so this only
+  recovers a comment whose first attempt failed.
+- **Updates before start.** While the task is `draft` or
+  `clarification_required`, a pass copies title, body, content labels,
+  autonomy mode and model into it through `syncManagedContent`, as `system`.
+  Nothing is saved when nothing differs. A changed title or body takes a task
+  waiting for clarification back to `draft` in the same change, and the spec
+  review runs on the new text, as for an engineer's edit; a label-only change
+  leaves it waiting. An empty body is not synced; the issue gets the same one
+  comment. Once the task is queued, the sync leaves it alone. The project is
+  fixed at import: a changed project label is ignored.
+- **Conflicts.** Contradictory config or project labels get one comment
+  listing the notes and saying the defaults apply. Its key is derived from
+  the notes, so the same conflicts are noted once and a new one again.
+- **Errors.** One failing issue does not stop the others; its error is logged
+  with the issue's URL and secrets redacted.
 
 ## Design decisions and reasoning
 

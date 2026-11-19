@@ -241,7 +241,8 @@ export function Header({ task, onChange }: { task: TaskView; onChange: (task: Ta
           </span>
         ))}
         <span className="created-by">
-          created by <UserName id={task.createdBy} />
+          {/* Managed tasks the control plane imported have no creator; like the changelog, show the actor. */}
+          created by {task.createdBy === undefined && task.external ? 'system' : <UserName id={task.createdBy} />}
         </span>
         <span title={task.updatedAt}>updated {relativeTime(task.updatedAt)}</span>
         <span className="mono">{task.id}</span>

@@ -16,14 +16,16 @@ export interface SpecReviewHookDeps {
 }
 
 /**
- * A draft is reviewed when it is created, when the engineer edits its title,
- * specification or dependencies, and when it returns to draft from a clarification. The
- * reviewer's own clarification request leaves draft, so it triggers nothing.
+ * A draft is reviewed when it is created, when the engineer (or, for a managed
+ * task, the issue sync) changes its title, specification or dependencies, and
+ * when it returns to draft from a clarification. The reviewer's own
+ * clarification request leaves draft, so it triggers nothing.
  */
 export function triggersSpecReview(event: TaskEvent): boolean {
   if (event.task.status !== 'draft') return false;
   if (event.type === 'task.created') return true;
-  return event.type === 'task.updated' && event.actor === 'user' && event.changes.some((change) => ['title', 'specification', 'dependsOn', 'status'].includes(change.field));
+  if (event.type !== 'task.updated' || (event.actor !== 'user' && event.actor !== 'system')) return false;
+  return event.changes.some((change) => ['title', 'specification', 'dependsOn', 'status'].includes(change.field));
 }
 
 export function specReviewRequest(task: Task, project: Project, projectTasks: readonly Task[]): SpecReviewRequest {

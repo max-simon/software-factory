@@ -29,6 +29,7 @@ import { engineerRoutes } from './http/engineer-routes.ts';
 import { createServer, mcpPath } from './http/server.ts';
 import { staticFiles } from './http/static-files.ts';
 import { tokenRoutes } from './http/token-routes.ts';
+import { IssueSync, issueSyncIntervalMs } from './issue-sync-service.ts';
 import { PauseWatch } from './pause-watch.ts';
 import { ProjectService } from './project-service.ts';
 import { PullRequestObserver, pullRequestPollIntervalMs } from './pull-request-observer.ts';
@@ -66,7 +67,8 @@ function main(): void {
   // Hooks need the services, which publish to the hooks, so they are registered once the services exist.
   const hooks = new Hooks();
   const { tasks, service, agent, lifecycle } = createServices({ repository, runtime, users, onEvent: (event) => void hooks.emit(event) });
-  const projects = new ProjectService({ repository: new SqliteProjectRepository(config.dbPath) });
+  const projectRepository = new SqliteProjectRepository(config.dbPath);
+  const projects = new ProjectService({ repository: projectRepository });
   // One image, three roles: it reviews task specifications, the input agents ask for, and pull requests.
   const reviewer = new PodmanReviewer({
     image: config.reviewerImage,
@@ -75,7 +77,6 @@ function main(): void {
     anthropicCredential: config.agentCredentials.claude!,
   });
   const pullRequests = new GitHubPullRequests(process.env.GITHUB_TOKEN!);
-  // Nothing reads issues yet: the sync loop that creates managed tasks from them is still to come.
   const issues =
     config.githubIssueRepos.length > 0
       ? new GitHubIssues({ token: process.env.GITHUB_TOKEN!, repos: config.githubIssueRepos, dbPath: config.dbPath })
@@ -135,10 +136,12 @@ function main(): void {
   });
   // Polls GitHub for pull request changes; replaceable by a webhook that records the same changes.
   const pullRequestObserver = new PullRequestObserver({ tasks, lifecycle, pullRequests, secrets });
+  const issueSync = issues && new IssueSync({ tasks, projects: projectRepository, provider: issues, secrets });
   server.listen(config.port, host, () => {
     console.log(`control plane listening on http://${host}:${config.port} (MCP at ${mcpPath})`);
     runLoop('dispatcher', () => dispatcher.reconcile(), reconcileIntervalMs);
     runLoop('pull request observer', () => pullRequestObserver.observe(), pullRequestPollIntervalMs);
+    if (issueSync) runLoop('issue sync', () => issueSync.sync(), issueSyncIntervalMs);
   });
 }
 
