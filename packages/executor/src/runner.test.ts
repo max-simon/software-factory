@@ -305,6 +305,63 @@ test('a failure that cannot be reported is logged and the runner asks for work a
   assert.match(h.fake.task.failureReason!, /ended its turn without reporting/, 'the control plane fails it instead');
 });
 
+// What claude prints when the account's limit refuses a request; see claude-session.test.ts.
+const rejectedEvent = '{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1795146000,"rateLimitType":"five_hour"}}';
+const limitResult = '{"type":"result","is_error":true,"result":"You\'ve hit your limit"}';
+const limited: Turn = async () => 1;
+const nineDaysMs = 9 * 24 * 60 * 60_000;
+
+test('a usage limit pauses the task, and the resumed session gets the cut-off turn again', async () => {
+  const h = harness({ turns: [ask, limited, ready], claudeLines: [rejectedEvent], claudeOutputs: ['', limitResult, ''] });
+  await h.start();
+  answerAll(h.fake, ['8080']);
+  assert.equal(await h.start(), 0);
+  assert.ok(h.fake.calls.includes('reportUsageLimit'));
+  assert.equal(h.fake.task.status, 'in_progress', 'not failed while paused');
+  assert.equal(h.saved?.interruptedPrompt, h.prompts[1]);
+  assert.ok(h.logs.includes('usage limit reached, resets at 2026-11-20T03:40:00.000Z'));
+
+  h.fake.passTime(nineDaysMs);
+  assert.equal(await h.start(), 0);
+  assert.deepEqual(claudeTurns(h), ['claude start', 'claude resume', 'claude resume']);
+  assert.match(h.prompts[2]!, /^Your previous turn was cut off by a usage limit[\s\S]*Answer: 8080/);
+  assert.equal(h.saved?.interruptedPrompt, undefined);
+  assert.equal(h.fake.task.status, 'ready');
+});
+
+test('work that arrived during a usage-limit pause joins the cut-off turn', async () => {
+  const h = harness({ turns: [ask, limited, ready], claudeLines: [rejectedEvent], claudeOutputs: ['', limitResult, ''] });
+  await h.start();
+  answerAll(h.fake, ['8080']);
+  await h.start();
+  sendFollowUp(h.fake, 'Prefer 8443');
+  h.fake.passTime(nineDaysMs);
+  await h.start();
+  assert.match(h.prompts[2]!, /Answer: 8080[\s\S]*- f1: Prefer 8443/);
+});
+
+test('a usage limit in the first turn keeps no session: the resumed task starts over', async () => {
+  const h = harness({ turns: [limited, ready], claudeLines: [rejectedEvent], claudeOutputs: [limitResult, ''] });
+  assert.equal(await h.start(), 0);
+  assert.equal(h.saved, undefined);
+  assert.equal(h.fake.task.status, 'in_progress');
+  h.fake.passTime(nineDaysMs);
+  assert.equal(await h.start(), 0);
+  assert.deepEqual(claudeTurns(h), ['claude start', 'claude start']);
+  assert.match(h.prompts[1]!, /^# Task: Add a greeting/);
+  assert.equal(h.fake.task.status, 'ready');
+});
+
+test('a usage limit that cannot be reported fails the task with the CLI error', async () => {
+  const h = harness({ turns: [limited], claudeLines: [rejectedEvent], claudeOutputs: [limitResult] });
+  h.fake.reportUsageLimit = async () => {
+    throw new Error('connection refused');
+  };
+  assert.equal(await h.start(), 0);
+  assert.ok(h.logs.includes('could not report usage limit: connection refused'));
+  assert.equal(h.fake.task.failureReason, "claude session exited with code 1: You've hit your limit");
+});
+
 test('asking for work is retried while the control plane cannot be reached', async () => {
   const h = harness({ turns: [ready] });
   const requestWork = h.fake.requestWork;

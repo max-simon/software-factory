@@ -1,5 +1,18 @@
 import { readFileSync } from 'node:fs';
-import { pendingWork, type Approval, type Heartbeat, type Project, type AgentTaskView, type Question, type SessionMetrics, type TaskStatus } from '@factory/core';
+import {
+  isPausedForUsageLimit,
+  pendingWork,
+  recordUsageLimit,
+  type Approval,
+  type Heartbeat,
+  type Project,
+  type AgentTaskView,
+  type Question,
+  type SessionMetrics,
+  type Task,
+  type TaskStatus,
+  type UsageLimit,
+} from '@factory/core';
 import { AgentApiError, type AgentClient } from './agent-client.ts';
 
 export function sampleTask(overrides: Partial<AgentTaskView> = {}): AgentTaskView {
@@ -53,6 +66,8 @@ export interface FakeAgentClient extends AgentClient {
   activity: string[][];
   /** Every reported delta, in order. */
   metrics: SessionMetrics[];
+  /** Moves the fake's clock on, e.g. past the end of a usage-limit pause. */
+  passTime(ms: number): void;
 }
 
 /** The time the fake stamps on reported items. */
@@ -69,9 +84,16 @@ export function fakeAgentClient(task: AgentTaskView = sampleTask()): FakeAgentCl
   const stamp = () => new Date(now).toISOString();
   // The control plane keeps this on the task's execution, which agents do not see.
   let workAcceptedAt: string | undefined;
-  const withExecution = () => ({
+  let usageLimit: UsageLimit | undefined;
+  const withExecution = (): Task => ({
     ...fake.task,
-    execution: { id: 'c1', tokenHash: 'h', worker: { state: 'working' as const, since: sampleNow }, ...(workAcceptedAt && { workAcceptedAt }) },
+    execution: {
+      id: 'c1',
+      tokenHash: 'h',
+      worker: { state: 'working' as const, since: sampleNow },
+      ...(workAcceptedAt && { workAcceptedAt }),
+      ...(usageLimit && { usageLimit }),
+    },
   });
   const fake: FakeAgentClient = {
     task,
@@ -81,6 +103,9 @@ export function fakeAgentClient(task: AgentTaskView = sampleTask()): FakeAgentCl
     heartbeats: [],
     activity: [],
     metrics: [],
+    passTime: (ms) => {
+      now += ms;
+    },
     getTask: async () => record('getTask', {}),
     reportPlan: async (plan) => record('reportPlan', { plan }),
     reportDecision: async ({ requestApproval, ...decision }) => {
@@ -109,16 +134,20 @@ export function fakeAgentClient(task: AgentTaskView = sampleTask()): FakeAgentCl
     },
     reportReady: async () => record('reportReady', { status: 'ready' }),
     reportFailure: async (failureReason) => record('reportFailure', { status: 'failed', failureReason, failedAt: stamp() }),
+    reportUsageLimit: async (resetsAt) => {
+      usageLimit = recordUsageLimit(withExecution(), resetsAt, stamp()).execution!.usageLimit;
+      return record('reportUsageLimit', {});
+    },
     sendHeartbeat: async (heartbeat) => {
       fake.heartbeats.push({ ...heartbeat });
     },
     sendActivity: async (entries) => {
       fake.activity.push([...entries]);
     },
-    // Like the control plane: no work idles the worker and fails a task still in progress.
+    // Like the control plane: no work idles the worker and fails a task still in progress, unless it is paused.
     requestWork: async () => {
       const work = pendingWork(withExecution(), stamp());
-      const isLost = work === undefined && fake.task.status === 'in_progress';
+      const isLost = work === undefined && fake.task.status === 'in_progress' && !isPausedForUsageLimit(withExecution(), stamp());
       const failure = 'the agent ended its turn without reporting ready, failure or a question';
       record('requestWork', isLost ? { status: 'failed', failureReason: failure, failedAt: stamp() } : {});
       return work;
@@ -131,6 +160,7 @@ export function fakeAgentClient(task: AgentTaskView = sampleTask()): FakeAgentCl
         ids.includes(f.id) && f.deliveredAt === undefined ? { ...f, deliveredAt: accepted } : f,
       );
       workAcceptedAt = accepted;
+      usageLimit = undefined;
       return record('acceptWork', { followUps });
     },
     getProject: async () => fake.project,

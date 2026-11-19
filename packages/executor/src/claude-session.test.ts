@@ -2,7 +2,16 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { RunCommand } from './run-command.ts';
 import type { SessionTurn } from './agent-session.ts';
-import { claudeArgs, createClaudeSession, mcpConfig, parseTotalCostUsd, parseTotalTokens, sessionError, type ClaudeSessionSettings } from './claude-session.ts';
+import {
+  claudeArgs,
+  createClaudeSession,
+  mcpConfig,
+  parseTotalCostUsd,
+  parseTotalTokens,
+  rateLimitOfLine,
+  sessionError,
+  type ClaudeSessionSettings,
+} from './claude-session.ts';
 import { claudeFixture } from './test-support.ts';
 
 const firstTurn = claudeFixture('result-first-turn.jsonl');
@@ -42,11 +51,11 @@ test('passes the model alias to the CLI', () => {
 test('runs claude in the repository, teeing output to the execution server log', async () => {
   const calls: unknown[] = [];
   const run: RunCommand = async (command, args, options) => {
-    calls.push([command, args[0], options]);
+    calls.push([command, args[0], options?.cwd, options?.teeOutput]);
     return { code: 0, stdout: '', stderr: '' };
   };
   assert.deepEqual(await runTurn(run, { prompt: 'x', sessionId: 'sid', isResume: false }), {});
-  assert.deepEqual(calls, [['claude', '-p', { cwd: '/work', teeOutput: true }]]);
+  assert.deepEqual(calls, [['claude', '-p', '/work', true]]);
 });
 
 test('reports the CLI activity from each streamed stdout line', async () => {
@@ -70,6 +79,52 @@ test('a failed turn reports the error from the final result event', async () => 
   assert.deepEqual(await runTurn(run, { prompt: 'x', sessionId: 'sid', isResume: false }), {
     failure: 'claude session exited with code 1: Credit balance is too low',
   });
+});
+
+// Shapes as claude 2.1.311 prints them. The `allowed` line is real output; a
+// `rejected` one could not be provoked, so it follows the CLI's event schema.
+const allowedEvent =
+  '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1795146000,"rateLimitType":"five_hour","overageStatus":"allowed","overageResetsAt":1796083200,"isUsingOverage":false},"uuid":"u1","session_id":"s1"}';
+const rejectedEvent =
+  '{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1795146000,"rateLimitType":"five_hour","isUsingOverage":false},"uuid":"u2","session_id":"s1"}';
+const limitResult = '{"type":"result","subtype":"success","is_error":true,"result":"You\'ve hit your limit · resets 3:40am (UTC)"}';
+const streaming = (lines: string[], code: number, stdout = ''): RunCommand => async (_command, _args, options) => {
+  lines.forEach((line) => options!.onStdoutLine!(line));
+  return { code, stdout, stderr: '' };
+};
+
+test('rateLimitOfLine reads status and reset time of a rate limit event, and nothing else', () => {
+  assert.deepEqual(rateLimitOfLine(allowedEvent), { isRejected: false, resetsAt: '2026-11-20T03:40:00.000Z' });
+  assert.deepEqual(rateLimitOfLine(rejectedEvent), { isRejected: true, resetsAt: '2026-11-20T03:40:00.000Z' });
+  assert.deepEqual(rateLimitOfLine('{"type":"rate_limit_event","rate_limit_info":{"status":"rejected"}}'), { isRejected: true });
+  for (const resetsAt of ['"soon"', '1.5', '-1', '1e20']) {
+    const line = `{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":${resetsAt}}}`;
+    assert.deepEqual(rateLimitOfLine(line), { isRejected: true }, resetsAt);
+  }
+  for (const line of ['{"type":"assistant","message":{"content":[{"type":"text","text":"rate_limit_event"}]}}', '{"type":"rate_limit_event"}', '"rate_limit_event" {']) {
+    assert.equal(rateLimitOfLine(line), undefined, line);
+  }
+});
+
+test('a turn that fails after a rejected rate limit event hit the usage limit', async () => {
+  const outcome = await runTurn(streaming([allowedEvent, rejectedEvent, limitResult], 1, limitResult), { prompt: 'x', sessionId: 'sid', isResume: true });
+  assert.deepEqual(outcome, {
+    failure: "claude session exited with code 1: You've hit your limit · resets 3:40am (UTC)",
+    usageLimit: { resetsAt: '2026-11-20T03:40:00.000Z' },
+  });
+});
+
+test('an error result after a rejected event hits the limit even when the CLI exits with 0', async () => {
+  const outcome = await runTurn(streaming([rejectedEvent.replace(',"resetsAt":1795146000', '')], 0, limitResult), { prompt: 'x', sessionId: 'sid', isResume: true });
+  assert.deepEqual(outcome.usageLimit, {});
+  assert.match(outcome.failure!, /hit your limit/);
+});
+
+test('a rejected event is no usage limit when the turn succeeded, nor an allowed one when it failed', async () => {
+  assert.deepEqual(await runTurn(streaming([rejectedEvent, allowedEvent], 0), { prompt: 'x', sessionId: 'sid', isResume: true }), {});
+  assert.deepEqual(await runTurn(streaming([rejectedEvent], 0), { prompt: 'x', sessionId: 'sid', isResume: true }), {});
+  const failed = await runTurn(streaming([rejectedEvent, allowedEvent], 1), { prompt: 'x', sessionId: 'sid', isResume: true });
+  assert.equal(failed.usageLimit, undefined);
 });
 
 test('a turn carries the running cost and token totals, also when it failed', async () => {

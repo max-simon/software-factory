@@ -1,5 +1,5 @@
 import type { TaskModel, TokenUsage } from '@factory/core';
-import type { AgentSession, SessionTurn, TurnOutcome } from './agent-session.ts';
+import type { AgentSession, SessionTurn, TurnOutcome, UsageLimitHit } from './agent-session.ts';
 import { activityOfLine } from './claude-status.ts';
 import type { BridgeConfig } from './config.ts';
 import type { RunCommand } from './run-command.ts';
@@ -58,21 +58,59 @@ async function runTurn(
   turn: SessionTurn,
   onActivity?: (activity: string) => void,
 ): Promise<TurnOutcome> {
-  const onStdoutLine = onActivity && ((line: string) => {
+  // Watched on the stream rather than in the captured tail, which a long turn may have cut it from.
+  let rateLimit: RateLimitState | undefined;
+  const onStdoutLine = (line: string) => {
+    rateLimit = rateLimitOfLine(line) ?? rateLimit;
+    if (!onActivity) return;
     const activity = activityOfLine(line);
     if (activity !== undefined) onActivity(activity);
-  });
-  const options = { cwd: settings.cwd, teeOutput: true, ...(onStdoutLine && { onStdoutLine }) };
-  const result = await run('claude', claudeArgs(settings, turn), options);
+  };
+  const result = await run('claude', claudeArgs(settings, turn), { cwd: settings.cwd, teeOutput: true, onStdoutLine });
   const totalCostUsd = parseTotalCostUsd(result.stdout);
   const totalTokens = parseTotalTokens(result.stdout);
-  const failure = result.code === 0 ? undefined : failureOf(result.code, sessionError(result.stdout, result.stderr));
+  const isError = result.code !== 0 || lastResultEvent(result.stdout)?.is_error === true;
+  const usageLimit = isError && rateLimit?.isRejected ? usageLimitOf(rateLimit) : undefined;
+  const failure = result.code !== 0 || usageLimit ? failureOf(result.code, sessionError(result.stdout, result.stderr)) : undefined;
   return {
     ...(failure !== undefined && { failure }),
+    ...(usageLimit !== undefined && { usageLimit }),
     ...(totalCostUsd !== undefined && { totalCostUsd }),
     ...(totalTokens !== undefined && { totalTokens }),
   };
 }
+
+/** What the latest `rate_limit_event` said: whether requests are refused, and when the limit resets. */
+export interface RateLimitState {
+  isRejected: boolean;
+  resetsAt?: string;
+}
+
+/**
+ * The CLI prints a `rate_limit_event` whenever the account's limit status
+ * changes: `rate_limit_info.status` is `allowed`, `allowed_warning` or
+ * `rejected`, and `resetsAt` is when the limit resets, in Unix seconds. A
+ * turn that ends in an error after a `rejected` one hit the limit.
+ */
+export function rateLimitOfLine(line: string): RateLimitState | undefined {
+  // Cheap test first: every line of the stream passes through here.
+  if (!line.includes('"rate_limit_event"')) return undefined;
+  const event = parseEvent(line);
+  const info = event?.type === 'rate_limit_event' ? event.rate_limit_info : undefined;
+  if (typeof info !== 'object' || info === null) return undefined;
+  const status = Reflect.get(info, 'status');
+  if (typeof status !== 'string') return undefined;
+  const resetsAt = timestampOf(Reflect.get(info, 'resetsAt'));
+  return { isRejected: status === 'rejected', ...(resetsAt !== undefined && { resetsAt }) };
+}
+
+// Unix seconds, up to the largest time a Date holds.
+function timestampOf(seconds: unknown): string | undefined {
+  if (typeof seconds !== 'number' || !Number.isSafeInteger(seconds) || seconds <= 0 || seconds * 1000 > 8.64e15) return undefined;
+  return new Date(seconds * 1000).toISOString();
+}
+
+const usageLimitOf = ({ resetsAt }: RateLimitState): UsageLimitHit => (resetsAt === undefined ? {} : { resetsAt });
 
 function failureOf(exitCode: number, error: string | undefined): string {
   return `claude session exited with code ${exitCode}${error ? `: ${error}` : ''}`;
@@ -139,6 +177,8 @@ function lastResultEvent(stdout: string): StreamEvent | undefined {
 interface StreamEvent {
   type?: unknown;
   result?: unknown;
+  is_error?: unknown;
+  rate_limit_info?: unknown;
   total_cost_usd?: unknown;
   modelUsage?: unknown;
 }
