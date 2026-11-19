@@ -1,6 +1,9 @@
 export type DomainErrorCode =
   | 'invalid_transition'
   | 'not_editable'
+  | 'externally_managed'
+  | 'not_managed'
+  | 'duplicate_external_link'
   | 'not_active'
   | 'questions_not_allowed'
   | 'approvals_not_allowed'

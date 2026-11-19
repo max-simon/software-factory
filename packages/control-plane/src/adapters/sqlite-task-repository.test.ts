@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { createTask, markInProgress, restartTask, startTask, type Task } from '@factory/core';
+import { createTask, DomainError, markInProgress, restartTask, startTask, type ExternalLink, type Task } from '@factory/core';
 import { SqliteTaskRepository } from './sqlite-task-repository.ts';
 
 const draft = (id: string, now = '2026-11-12T10:00:00.000Z', rank = 0): Task =>
@@ -18,6 +18,50 @@ test('inserts and gets a task unchanged', () => {
   repo.insert(task);
   assert.deepEqual(repo.get('a'), task);
   assert.equal(repo.get('missing'), undefined);
+});
+
+const issue = (n: number): ExternalLink => ({ provider: 'github', url: `https://github.com/o/r/issues/${n}`, key: `o/r#${n}` });
+
+const managed = (id: string, link: ExternalLink): Task =>
+  createTask({ projectId: 'p1', title: id, specification: 'spec' }, { id, now: '2026-11-12T10:00:00.000Z', rank: 0, external: link });
+
+test('finds a managed task by the URL of its issue', () => {
+  const repo = repository();
+  repo.insert(draft('plain'));
+  repo.insert(managed('a', issue(1)));
+  assert.deepEqual(repo.get('a')?.external, issue(1));
+  assert.equal(repo.findByExternalUrl(issue(1).url)?.id, 'a');
+  assert.equal(repo.findByExternalUrl(issue(2).url), undefined);
+  repo.save(restartTask({ ...startTask(repo.get('a')!), status: 'failed' }));
+  assert.equal(repo.findByExternalUrl(issue(1).url)?.id, 'a');
+  repo.delete('a');
+  assert.equal(repo.findByExternalUrl(issue(1).url), undefined);
+});
+
+test('refuses a second task linking the same issue', () => {
+  const repo = repository();
+  repo.insert(managed('a', issue(1)));
+  assert.throws(
+    () => repo.insert(managed('b', issue(1))),
+    (error: unknown) => error instanceof DomainError && error.code === 'duplicate_external_link',
+  );
+  assert.equal(repo.get('b'), undefined);
+  repo.insert(managed('c', issue(2)));
+  assert.deepEqual(repo.list().map((task) => task.id), ['a', 'c']);
+});
+
+test('adds the external URL column to a database created before managed tasks existed', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'repo-'));
+  t.after(() => rmSync(dir, { recursive: true }));
+  const path = join(dir, 'tasks.db');
+  const old = new DatabaseSync(path);
+  old.exec('CREATE TABLE tasks (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, status TEXT NOT NULL, token_hash TEXT UNIQUE, execution_id TEXT, data TEXT NOT NULL)');
+  old.close();
+  const repo = new SqliteTaskRepository(path);
+  repo.insert(managed('a', issue(1)));
+  assert.equal(repo.findByExternalUrl(issue(1).url)?.id, 'a');
+  assert.throws(() => repo.insert(managed('b', issue(1))), DomainError);
+  repo.close();
 });
 
 test('rejects inserting the same id twice', () => {

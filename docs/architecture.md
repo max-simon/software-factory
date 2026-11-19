@@ -388,7 +388,27 @@ Users are a core domain concept (`packages/core/src/user.ts`); their storage, th
 ## Managed tasks
 
 A managed task is created from an issue on an external provider (GitHub
-Issues first).
+Issues first). The provider owns title, specification and labels; the
+factory owns everything else.
+
+- **The link.** `Task.external` holds `provider`, the issue's browser `url`
+  and a short display `key` (e.g. `owner/repo#12`). A task without it is an
+  ordinary task. The URL is the link's identity: the SQLite repository keeps
+  it in a column with a unique index, so a second task linking the same issue
+  is refused with `duplicate_external_link`, and `findByExternalUrl` looks
+  a managed task up by its issue. Only a server-side caller creates managed
+  tasks, through `createTask`'s `meta.external`; `NewTask` has no such
+  field, so neither the engineer API nor MCP can set it. A restart keeps the
+  link, and both views show it.
+- **The edit lock.** `editTask` refuses title, specification and labels of a
+  managed task in every status (`externally_managed`, HTTP 409);
+  `dependsOn` stays editable under the usual rules. The only way to change
+  those fields, plus autonomy mode and model, is `syncManagedContent`, which
+  works while the task is `draft` or `clarification_required` and throws
+  `not_editable` afterwards, like an edit: the agent works on what it was
+  given. It goes through `TaskStore.update`, so the changelog records it.
+  Answers, approvals, follow-ups, cancel, restart, assignees, rank and delete
+  work as for any task.
 
 ### Labels
 
