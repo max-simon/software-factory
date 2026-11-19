@@ -27,10 +27,12 @@ import {
   restartTask,
   returnToDraft,
   startTask,
+  syncManagedContent,
   updatePullRequests,
+  type ManagedContent,
   type NewQuestion,
 } from './operations.ts';
-import type { PullRequest, Question, Task, TaskStatus } from './task.ts';
+import type { ExternalLink, PullRequest, Question, Task, TaskStatus } from './task.ts';
 
 const repoUrl = 'https://github.com/O/r.git';
 
@@ -139,6 +141,72 @@ describe('editTask', () => {
     const task = taskIn('draft');
     const before = frozen(task);
     editTask(task, { title: 'x' }, []);
+    assert.deepEqual(task, before);
+  });
+});
+
+const external: ExternalLink = { provider: 'github', url: 'https://github.com/O/r/issues/12', key: 'O/r#12' };
+
+const managedIn = (status: TaskStatus, overrides: Partial<Task> = {}): Task => taskIn(status, { external, ...overrides });
+
+describe('managed tasks', () => {
+  const content: ManagedContent = {
+    title: 'From issue',
+    specification: 'Issue body',
+    labels: ['bug'],
+    autonomyMode: 'supervised',
+    model: 'sonnet',
+  };
+
+  it('creates a task with the link only when the caller passes one', () => {
+    const meta = { id: 'task-1', now: '2026-01-01T00:00:00Z', rank: 0 };
+    const input = { projectId: 'p1', title: 't', specification: 's' };
+    assert.deepEqual(createTask(input, { ...meta, external }).external, external);
+    assert.equal('external' in createTask(input, meta), false);
+  });
+
+  it('refuses edits of title, specification and labels in every status', () => {
+    const statuses = ['draft', 'clarification_required', 'queued', 'in_progress', 'input_required', 'ready', 'done', 'failed'] as const;
+    for (const status of statuses) {
+      for (const edit of [{ title: 'x' }, { specification: 'x' }, { labels: ['x'] }]) {
+        assert.throws(() => editTask(managedIn(status), edit, []), rejectsWith('externally_managed'), status);
+      }
+    }
+  });
+
+  it('keeps dependencies editable under the usual rules', () => {
+    const dependency = taskIn('draft', { id: 'dep' });
+    for (const status of ['draft', 'queued'] as const) {
+      const task = managedIn(status);
+      assert.deepEqual(editTask(task, { dependsOn: ['dep'] }, [dependency, task]).dependsOn, ['dep']);
+    }
+  });
+
+  it('syncs the provider-owned fields before the task is queued and keeps the rest', () => {
+    for (const status of ['draft', 'clarification_required'] as const) {
+      const task = managedIn(status, { dependsOn: ['dep'] });
+      assert.deepEqual(syncManagedContent(task, content), { ...task, ...content });
+    }
+  });
+
+  it('refuses to sync once the task is queued', () => {
+    for (const status of ['queued', 'in_progress', 'input_required', 'ready', 'done', 'failed'] as const) {
+      assert.throws(() => syncManagedContent(managedIn(status), content), rejectsWith('not_editable'), status);
+    }
+  });
+
+  it('refuses to sync an ordinary task', () => {
+    assert.throws(() => syncManagedContent(taskIn('draft'), content), rejectsWith('not_managed'));
+  });
+
+  it('keeps the link on restart', () => {
+    assert.deepEqual(restartTask(managedIn('failed')).external, external);
+  });
+
+  it('does not mutate its input', () => {
+    const task = managedIn('draft');
+    const before = frozen(task);
+    syncManagedContent(task, content);
     assert.deepEqual(task, before);
   });
 });

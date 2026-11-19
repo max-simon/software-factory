@@ -49,6 +49,9 @@ const maxBodyBytes = 1024 * 1024;
 const domainStatus: Record<DomainErrorCode, number> = {
   invalid_transition: 409,
   not_editable: 409,
+  externally_managed: 409,
+  not_managed: 409,
+  duplicate_external_link: 409,
   not_active: 409,
   questions_not_allowed: 409,
   approvals_not_allowed: 409,

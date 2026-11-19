@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import { DomainError } from '@factory/core';
 import type {
   AgentConsole,
   ChangeActor,
@@ -15,8 +16,8 @@ import type {
   Worker,
 } from '@factory/core';
 
-// Status, token hash and execution id are duplicated into columns because the
-// dispatcher and the agent API query by them; `data` stays the source of truth.
+// Status, token hash, execution id and external URL are duplicated into columns
+// because the dispatcher, the agent API and the issue sync query by them; `data` stays the source of truth.
 // Rank is read from `data` directly: boards are small enough to sort without an index.
 const schema = `
   CREATE TABLE IF NOT EXISTS tasks (
@@ -25,6 +26,7 @@ const schema = `
     status TEXT NOT NULL,
     token_hash TEXT UNIQUE,
     execution_id TEXT,
+    external_url TEXT,
     data TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS tasks_status ON tasks (status);
@@ -73,16 +75,19 @@ export class SqliteTaskRepository implements TaskRepository {
     this.#db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;');
     this.#db.exec(schema);
     this.#addChangeUserIds();
+    this.#addExternalUrls();
     this.#rankUnrankedTasks();
   }
 
   insert(task: Task, changes: readonly TaskChange[] = []): void {
     this.#transaction(() => {
-      this.#db
-        .prepare(
-          'INSERT INTO tasks (id, created_at, status, token_hash, execution_id, data) VALUES (?, ?, ?, ?, ?, ?)',
-        )
-        .run(task.id, task.createdAt, task.status, ...executionColumns(task), toData(task));
+      this.#writeTask(task, () =>
+        this.#db
+          .prepare(
+            'INSERT INTO tasks (id, created_at, status, token_hash, execution_id, external_url, data) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          )
+          .run(task.id, task.createdAt, task.status, ...executionColumns(task), externalUrl(task), toData(task)),
+      );
       this.#writeHeartbeat(task.id, task.execution?.lastHeartbeat);
       this.#appendChanges(task.id, changes);
     });
@@ -103,9 +108,11 @@ export class SqliteTaskRepository implements TaskRepository {
 
   save(task: Task, changes: readonly TaskChange[] = []): void {
     this.#transaction(() => {
-      const result = this.#db
-        .prepare('UPDATE tasks SET status = ?, token_hash = ?, execution_id = ?, data = ? WHERE id = ?')
-        .run(task.status, ...executionColumns(task), toData(task), task.id);
+      const result = this.#writeTask(task, () =>
+        this.#db
+          .prepare('UPDATE tasks SET status = ?, token_hash = ?, execution_id = ?, external_url = ?, data = ? WHERE id = ?')
+          .run(task.status, ...executionColumns(task), externalUrl(task), toData(task), task.id),
+      );
       if (result.changes === 0) throw new Error(`cannot save task ${task.id}: it does not exist`);
       this.#writeHeartbeat(task.id, task.execution?.lastHeartbeat);
       this.#appendChanges(task.id, changes);
@@ -135,6 +142,10 @@ export class SqliteTaskRepository implements TaskRepository {
     return this.#one(`${selectTasks} WHERE t.token_hash = ?`, tokenHash);
   }
 
+  findByExternalUrl(url: string): Task | undefined {
+    return this.#one(`${selectTasks} WHERE t.external_url = ?`, url);
+  }
+
   close(): void {
     this.#db.close();
   }
@@ -144,6 +155,30 @@ export class SqliteTaskRepository implements TaskRepository {
     const columns = this.#db.prepare('PRAGMA table_info(task_changes)').all() as unknown as Array<{ name: string }>;
     if (columns.some((column) => column.name === 'user_id')) return;
     this.#db.exec('ALTER TABLE task_changes ADD COLUMN user_id TEXT');
+  }
+
+  /**
+   * Databases created before managed tasks existed lack the column; their
+   * tasks are all ordinary. The index goes here, not in the schema, because it
+   * needs the column, and SQLite cannot add a column with a UNIQUE constraint.
+   */
+  #addExternalUrls(): void {
+    const columns = this.#db.prepare('PRAGMA table_info(tasks)').all() as unknown as Array<{ name: string }>;
+    if (!columns.some((column) => column.name === 'external_url')) {
+      this.#db.exec('ALTER TABLE tasks ADD COLUMN external_url TEXT');
+    }
+    this.#db.exec('CREATE UNIQUE INDEX IF NOT EXISTS tasks_external_url ON tasks (external_url)');
+  }
+
+  #writeTask<T>(task: Task, write: () => T): T {
+    try {
+      return write();
+    } catch (error) {
+      if (isExternalUrlConflict(error)) {
+        throw new DomainError('duplicate_external_link', `another task already links ${task.external?.url}`);
+      }
+      throw error;
+    }
   }
 
   /** Tasks stored before ranks existed go below the ranked ones, oldest first. */
@@ -244,6 +279,11 @@ const toDecision = ({ chosen, ...decision }: StoredDecision): Decision => {
   if (index >= 0) return { ...decision, chosen: index };
   return { ...decision, options: [...decision.options, chosen], chosen: decision.options.length };
 };
+
+const isExternalUrlConflict = (error: unknown): boolean =>
+  error instanceof Error && /UNIQUE constraint failed: tasks\.external_url/.test(error.message);
+
+const externalUrl = ({ external }: Task): string | null => external?.url ?? null;
 
 const executionColumns = ({ execution }: Task): [string | null, string | null] => [
   execution?.tokenHash ?? null,

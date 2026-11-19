@@ -356,6 +356,29 @@ test('edit after start returns 409 not_editable', async (t) => {
   assert.equal(json.error.code, 'not_editable');
 });
 
+test('edit of a managed task returns 409 externally_managed, but its dependencies stay editable', async (t) => {
+  const api = await startApi(t);
+  await api.call('POST', '/tasks', validTask);
+  await api.call('POST', '/tasks', validTask);
+  const external = { provider: 'github', url: 'https://github.com/acme/app/issues/1', key: 'acme/app#1' };
+  api.repository.save({ ...api.repository.get('task-1')!, external });
+  const { status, json } = await api.call('PATCH', '/tasks/task-1', { title: 'New' });
+  assert.equal(status, 409);
+  assert.equal(json.error.code, 'externally_managed');
+  const edited = await api.call('PATCH', '/tasks/task-1', { dependsOn: ['task-2'] });
+  assert.equal(edited.status, 200);
+  assert.deepEqual(edited.json.dependsOn, ['task-2']);
+  assert.deepEqual(edited.json.external, external);
+});
+
+test('create ignores an external link: only the issue sync creates managed tasks', async (t) => {
+  const { call } = await startApi(t);
+  const external = { provider: 'github', url: 'https://github.com/acme/app/issues/1', key: 'acme/app#1' };
+  const { status, json } = await call('POST', '/tasks', { ...validTask, external });
+  assert.equal(status, 201);
+  assert.equal('external' in json, false);
+});
+
 test('start queues a draft and rejects a second start', async (t) => {
   const { call } = await startApi(t);
   await call('POST', '/tasks', validTask);

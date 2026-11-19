@@ -219,6 +219,19 @@ export interface FollowUp {
   deliveredAt?: string;
 }
 
+/**
+ * The issue on an external provider a managed task was created from. The
+ * provider owns title, specification and labels; the factory owns the rest.
+ */
+export interface ExternalLink {
+  /** E.g. `github`. */
+  provider: string;
+  /** The issue's browser URL; identifies the link, so at most one task has it. */
+  url: string;
+  /** Short display reference, e.g. `owner/repo#12`. */
+  key: string;
+}
+
 export interface Task {
   id: string;
   createdAt: string;
@@ -239,6 +252,8 @@ export interface Task {
   model: TaskModel;
   /** Agent the execution server runs; tasks stored before agents were chosen per task read as `claude`. */
   agent: TaskAgent;
+  /** Set exactly for managed tasks; unset for ordinary tasks, including all stored before managed tasks existed. */
+  external?: ExternalLink;
   /** Unset for tasks that only produce plan, decisions and artifacts. */
   repoUrl?: string;
   /** Unset means the repository's default branch; only set with `repoUrl`. */
