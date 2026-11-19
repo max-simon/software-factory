@@ -569,11 +569,15 @@ start with `factory`, and each class has one owner:
   - each artifact, by title and kind only;
   - each pending approval request of a decision or artifact, saying it is
     reviewed in the factory;
+  - each approved decision, naming the option that stands: the reviewer's
+    pick when it overrides the agent's, since the decision comment itself is
+    posted once with the agent's pick;
   - each open pull request once the task is `ready`;
   - a failure, without the reason, pointing to the factory; keyed by
     `failedAt` (the last update for tasks that failed before it existed).
 
-  Item keys are `<task id>:<item id>` (`…:approval` for requests), so a
+  Item keys are `<task id>:<item id>` (`…:approval` for requests,
+  `…:approved` for approved decisions), so a
   restart, whose items have new ids, and a new failure time are reported
   again. Left out on purpose: artifact content (long, and reviewed in the
   factory) and the failure reason (it can quote container output). Comments
