@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   autonomyLabels,
+  deletedCommentBody,
+  deletedCommentKey,
+  deletionLabelChanges,
   factoryLabel,
   modelLabels,
   parseManagedLabels,
@@ -163,5 +166,40 @@ describe('statusLabelChanges', () => {
   it('never touches labels outside the status prefix', () => {
     const changes = statusLabelChanges([factoryLabel, startLabel, autonomyLabels.supervised, 'factory:project:p1', 'status:done'], 'failed');
     assert.deepEqual(changes, { add: ['factory:status:failed'], remove: [] });
+  });
+});
+
+describe('deletionLabelChanges', () => {
+  it('removes the marker, the start command and every status label, adding nothing', () => {
+    assert.deepEqual(deletionLabelChanges(), {
+      add: [],
+      remove: [
+        factoryLabel,
+        startLabel,
+        'factory:status:draft',
+        'factory:status:clarification-required',
+        'factory:status:queued',
+        'factory:status:in-progress',
+        'factory:status:input-required',
+        'factory:status:ready',
+        'factory:status:done',
+        'factory:status:failed',
+      ],
+    });
+  });
+
+  it('keeps project and config labels', () => {
+    const { remove } = deletionLabelChanges();
+    for (const kept of ['factory:project:p1', ...Object.values(autonomyLabels), ...Object.values(modelLabels)]) {
+      assert.equal(remove.includes(kept), false, kept);
+    }
+  });
+});
+
+describe('the deletion comment', () => {
+  it('has a fixed key and tells how to import the issue again', () => {
+    assert.equal(deletedCommentKey, 'task-deleted');
+    assert.match(deletedCommentBody, /deleted in the factory/);
+    assert.match(deletedCommentBody, /`factory` label again/);
   });
 });

@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net';
 import {
   addDecision,
   addPullRequest,
+  createTask,
   detachExecution,
   disableUser,
   askQuestion,
@@ -13,6 +14,7 @@ import {
   renameUser,
   startTask,
   type ExecutionRuntime,
+  type IssueProvider,
   type NewQuestion,
   type Task,
   type TaskAgent,
@@ -60,7 +62,12 @@ interface Api {
 }
 
 /** `unavailableAgent` defaults to every agent being available. */
-async function startApi(t: TestContext, unavailableAgent?: (agent: TaskAgent) => string | undefined, reviews?: ReviewTracker): Promise<Api> {
+async function startApi(
+  t: TestContext,
+  unavailableAgent?: (agent: TaskAgent) => string | undefined,
+  reviews?: ReviewTracker,
+  issues?: IssueProvider,
+): Promise<Api> {
   const repository = new SqliteTaskRepository(':memory:');
   const runtime = new FakeRuntime();
   let counter = 0;
@@ -72,6 +79,8 @@ async function startApi(t: TestContext, unavailableAgent?: (agent: TaskAgent) =>
     newId: () => `task-${++counter}`,
     newItemId: sequentialItemIds(),
     now: () => fixedNow,
+    log: () => {},
+    ...(issues !== undefined && { issues }),
   });
   let projectCounter = 0;
   const projects = new ProjectService({
@@ -577,6 +586,24 @@ test('delete removes a task in any status, stopping its execution server first',
   assert.deepEqual(api.runtime.removed, ['c-1']);
   assert.deepEqual(api.repository.list(), []);
   assert.equal((await api.call('DELETE', '/tasks/task-1')).status, 404);
+});
+
+test('delete of a managed task whose issue labels cannot be removed answers 502 and keeps the task', async (t) => {
+  const issues: IssueProvider = {
+    listIssues: async () => [],
+    changeLabels: async () => {
+      throw new Error('GitHub is down');
+    },
+    comment: async () => {},
+  };
+  const api = await startApi(t, undefined, undefined, issues);
+  const external = { provider: 'github' as const, url: 'https://github.com/o/r/issues/7', key: 'o/r#7' };
+  api.repository.insert(createTask(validTask, { id: 'm1', now: fixedNow, rank: 1, external }));
+  const { status, json } = await api.call('DELETE', '/tasks/m1');
+  assert.equal(status, 502);
+  assert.equal(json.error.code, 'issue_provider_failed');
+  assert.match(json.error.message, /o\/r#7/);
+  assert.equal((await api.call('GET', '/tasks/m1')).status, 200);
 });
 
 test('dependencies are set on create, replaced until the task starts, and validated', async (t) => {

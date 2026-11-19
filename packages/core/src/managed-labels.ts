@@ -1,3 +1,4 @@
+import { transitions } from './status.ts';
 import type { AutonomyMode, TaskModel, TaskStatus } from './task.ts';
 
 /*
@@ -104,3 +105,18 @@ export function statusLabelChanges(current: readonly string[], status: TaskStatu
     remove: statusLabels.filter((label) => label !== kept),
   };
 }
+
+/**
+ * What deleting a managed task removes from its issue, so the sync does not
+ * import it again: the marker, the start command and every status label.
+ * Project and config labels stay, so adding `factory` again restores the setup.
+ */
+export function deletionLabelChanges(): { add: string[]; remove: string[] } {
+  const statuses = Object.keys(transitions) as TaskStatus[];
+  return { add: [], remove: [factoryLabel, startLabel, ...statuses.map(statusLabel)] };
+}
+
+export const deletedCommentKey = 'task-deleted';
+export const deletedCommentBody =
+  'The task for this issue was deleted in the factory, and its factory labels were removed. ' +
+  `Add the \`${factoryLabel}\` label again to import this issue as a new task.`;

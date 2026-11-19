@@ -129,6 +129,9 @@ export {
 export { type Session } from './session.ts';
 export {
   autonomyLabels,
+  deletedCommentBody,
+  deletedCommentKey,
+  deletionLabelChanges,
   factoryLabel,
   modelLabels,
   parseManagedLabels,

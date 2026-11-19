@@ -77,6 +77,7 @@ const domainStatus: Record<DomainErrorCode, number> = {
   invalid_password: 400,
   invalid_token_name: 400,
   invalid_token_expiry: 400,
+  issue_provider_failed: 502,
 };
 
 export interface ServerOptions {
