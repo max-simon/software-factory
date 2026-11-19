@@ -78,6 +78,14 @@ export class GitHubIssues implements IssueProvider {
     return issues;
   }
 
+  covers(url: string): boolean {
+    const ref = this.#parseIssueUrl(url);
+    if (ref === undefined) return false;
+    // GitHub matches owner and repository names case-insensitively.
+    const name = `${ref.owner}/${ref.repo}`.toLowerCase();
+    return this.#repos.some((repo) => repo.toLowerCase() === name);
+  }
+
   async changeLabels(url: string, change: { add: string[]; remove: string[] }): Promise<void> {
     const issueApi = this.#issueApi(url);
     for (const label of change.remove) {

@@ -1,10 +1,14 @@
 import { createHash, randomBytes } from 'node:crypto';
 import {
+  assertDeletable,
   createTask,
   factoryLabel,
+  isEditable,
   nextRank,
   parseManagedLabels,
   returnToDraft,
+  startLabel,
+  startTask,
   syncManagedContent,
   type ExternalIssue,
   type IssueProvider,
@@ -18,7 +22,7 @@ import { redact } from './redact.ts';
 import type { TaskStore } from './task-store.ts';
 
 export interface IssueSyncDeps {
-  tasks: Pick<TaskStore, 'findByExternalUrl' | 'insert' | 'update' | 'list' | 'now'>;
+  tasks: Pick<TaskStore, 'findByExternalUrl' | 'insert' | 'update' | 'delete' | 'list' | 'now'>;
   projects: Pick<ProjectRepository, 'get'>;
   provider: IssueProvider;
   /** Secret values to strip from logged errors. */
@@ -58,9 +62,10 @@ const isContentChanged = (task: Task, content: ManagedContent): boolean =>
 
 /**
  * Creates managed tasks from the provider's issues that carry the factory
- * label, and keeps their title, specification, labels and configuration in
- * step until they start. Issue text is untrusted: it goes into the task as
- * it is and never into the log.
+ * label, keeps their title, specification, labels and configuration in step
+ * until they start, starts them on the start label, and deletes them when
+ * their issue is closed or loses the factory label before they start. Issue
+ * text is untrusted: it goes into the task as it is and never into the log.
  */
 export class IssueSync {
   readonly #deps: IssueSyncDeps;
@@ -75,18 +80,44 @@ export class IssueSync {
 
   /** One pass over every labelled issue; one failing issue does not stop the others. */
   async sync(): Promise<void> {
+    // A failed list throws before anything changes, so a provider that did not answer deletes nothing.
+    const issues = await this.#deps.provider.listIssues(factoryLabel);
     const withoutProject: string[] = [];
-    for (const issue of await this.#deps.provider.listIssues(factoryLabel)) {
-      try {
-        await this.#sync(issue, withoutProject);
-      } catch (error) {
-        this.#log(`issue sync: ${issue.url}: ${redact(describe(error), this.#deps.secrets)}`);
-      }
+    for (const issue of issues) {
+      await this.#guard(issue.url, () => this.#sync(issue, withoutProject));
     }
+    await this.#deleteUnlabelled(new Set(issues.map((issue) => issue.url)));
     // One line per pass, not per issue: an issue waiting for its project label is no error.
     if (withoutProject.length > 0) {
       this.#log(`issue sync: skipped ${withoutProject.length} issues without a known project label: ${withoutProject.join(', ')}`);
     }
+  }
+
+  async #guard(url: string, step: () => Promise<void> | void): Promise<void> {
+    try {
+      await step();
+    } catch (error) {
+      this.#log(`issue sync: ${url}: ${redact(describe(error), this.#deps.secrets)}`);
+    }
+  }
+
+  /**
+   * An unstarted managed task whose issue is missing from the list lost the
+   * factory label, but only if the list covers the issue's repository: one
+   * no longer configured is not looked at.
+   */
+  async #deleteUnlabelled(listed: ReadonlySet<string>): Promise<void> {
+    for (const task of this.#deps.tasks.list()) {
+      const url = task.external?.url;
+      if (url === undefined || !isEditable(task.status) || listed.has(url) || !this.#deps.provider.covers(url)) continue;
+      await this.#guard(url, () => this.#delete(task));
+    }
+  }
+
+  /** As the engineer's delete: refused while an unstarted task depends on it, so a later pass tries again. */
+  #delete(task: Task): void {
+    assertDeletable(task.id, this.#deps.tasks.list());
+    this.#deps.tasks.delete(task.id);
   }
 
   async #sync(issue: ExternalIssue, withoutProject: string[]): Promise<void> {
@@ -101,10 +132,22 @@ export class IssueSync {
     // Ensured on every pass: the provider posts a key once, so this only
     // recovers a comment whose first attempt failed after the task was saved.
     await this.#commentTaskId(issue, task);
-    if (task.status !== 'draft' && task.status !== 'clarification_required') return;
+    // After start the issue no longer steers the task; a start label left by a failed removal goes now.
+    if (!isEditable(task.status)) {
+      if (parsed.wantsStart) await this.#removeStartLabel(issue);
+      return;
+    }
+    if (!issue.isOpen) return this.#delete(task);
     await this.#commentConflicts(issue, parsed);
+    // Nothing to vouch for yet: the start waits, label and all, until the issue has a description.
     if (isEmpty(issue.body)) return this.#deps.provider.comment(issue.url, emptyBodyKey, emptyBodyComment);
-    const content = contentOf(issue, parsed);
+    this.#syncContent(task, contentOf(issue, parsed));
+    if (!parsed.wantsStart) return;
+    this.#deps.tasks.update(task.id, 'system', startTask);
+    await this.#removeStartLabel(issue);
+  }
+
+  #syncContent(task: Task, content: ManagedContent): void {
     if (!isContentChanged(task, content)) return;
     const isTextChange = isTextChanged(task, content);
     // Back to draft in the same change, so the spec review sees the new text.
@@ -112,6 +155,12 @@ export class IssueSync {
       const synced = syncManagedContent(current, content);
       return isTextChange && synced.status === 'clarification_required' ? returnToDraft(synced) : synced;
     });
+  }
+
+  /** Removes the start label as written on the issue, since labels match case-insensitively. */
+  #removeStartLabel(issue: ExternalIssue): Promise<void> {
+    const remove = issue.labels.filter((label) => label.toLowerCase() === startLabel);
+    return this.#deps.provider.changeLabels(issue.url, { add: [], remove });
   }
 
   async #import(issue: ExternalIssue, parsed: ManagedLabels, withoutProject: string[]): Promise<void> {

@@ -168,6 +168,15 @@ test('listIssues rejects malformed responses', async () => {
   await assert.rejects(setup().issues.listIssues('a,b'), /comma/);
 });
 
+test('covers only issues of the configured repositories on the configured host, ignoring case', () => {
+  const { issues } = setup([], { repos: ['o/r', 'Team/App'] });
+  assert.equal(issues.covers('https://github.com/o/r/issues/1'), true);
+  assert.equal(issues.covers('https://github.com/team/app/issues/2'), true);
+  assert.equal(issues.covers('https://github.com/o/other/issues/1'), false);
+  assert.equal(issues.covers('https://git.example.com/o/r/issues/1'), false);
+  assert.equal(issues.covers('not a url'), false);
+});
+
 test('listIssues accepts labels given as names', async () => {
   const [issue] = await setup([{ body: [gitHubIssue(1, { labels: ['factory', { name: 'bug' }] })] }]).issues.listIssues('factory');
   assert.deepEqual(issue!.labels, ['factory', 'bug']);
