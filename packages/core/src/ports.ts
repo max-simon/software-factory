@@ -7,7 +7,10 @@ import type { Session } from './session.ts';
 import type { Credentials, ExternalIdentity, User } from './user.ts';
 
 export interface TaskRepository {
-  /** Writes the task and appends `changes` to its changelog in one transaction. */
+  /**
+   * Writes the task and appends `changes` to its changelog in one transaction;
+   * throws a `DomainError` `duplicate_external_link` when another task links the same `external.url`.
+   */
   insert(task: Task, changes?: readonly TaskChange[]): void;
   get(id: string): Task | undefined;
   /** All tasks, or only those in one of `statuses`, in rank order. */
@@ -21,6 +24,8 @@ export interface TaskRepository {
   /** Removes the task with its changelog; does nothing when the task does not exist. */
   delete(id: string): void;
   findByTokenHash(tokenHash: string): Task | undefined;
+  /** The managed task linked to the issue at `url`. */
+  findByExternalUrl(url: string): Task | undefined;
 }
 
 export interface ProjectRepository {

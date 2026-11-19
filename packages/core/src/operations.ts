@@ -6,6 +6,7 @@ import type {
   Artifact,
   AutonomyMode,
   Decision,
+  ExternalLink,
   FollowUp,
   PlanStep,
   PullRequest,
@@ -103,8 +104,14 @@ function assertActive(task: Task): void {
   }
 }
 
-/** `meta.createdBy` is the id of the user who creates the task. */
-export function createTask(input: NewTask, meta: { id: string; now: string; rank: number; createdBy?: string }): Task {
+/**
+ * `meta.createdBy` is the id of the user who creates the task. `meta.external`
+ * makes it a managed task; it is not part of `NewTask`, so no API client can set it.
+ */
+export function createTask(
+  input: NewTask,
+  meta: { id: string; now: string; rank: number; createdBy?: string; external?: ExternalLink },
+): Task {
   const task: Task = {
     id: meta.id,
     createdAt: meta.now,
@@ -129,6 +136,7 @@ export function createTask(input: NewTask, meta: { id: string; now: string; rank
   };
   return {
     ...task,
+    ...(meta.external !== undefined && { external: meta.external }),
     ...(input.repoUrl !== undefined && { repoUrl: input.repoUrl }),
     ...(input.baseBranch !== undefined && { baseBranch: input.baseBranch }),
   };
@@ -149,6 +157,9 @@ export function editTask(task: Task, edit: TaskEdit, tasks: readonly Task[]): Ta
 }
 
 function editContent(task: Task, edit: Omit<TaskEdit, 'dependsOn'>): Task {
+  if (task.external !== undefined) {
+    throw new DomainError('externally_managed', `task is managed by ${task.external.key}, change it there`);
+  }
   if (!isEditable(task.status)) {
     throw new DomainError('not_editable', `task is ${task.status}, only tasks that are not queued yet can be edited`);
   }
@@ -158,6 +169,30 @@ function editContent(task: Task, edit: Omit<TaskEdit, 'dependsOn'>): Task {
     specification: edit.specification ?? task.specification,
     labels: edit.labels ?? task.labels,
   };
+}
+
+/** What the provider of a managed task owns, as last read from its issue. */
+export interface ManagedContent {
+  title: string;
+  specification: string;
+  labels: string[];
+  autonomyMode: AutonomyMode;
+  model: TaskModel;
+}
+
+/**
+ * The only way to change the provider-owned fields of a managed task. Like an
+ * edit, it stops once the task is queued: the agent works on what it was given.
+ */
+export function syncManagedContent(task: Task, content: ManagedContent): Task {
+  if (task.external === undefined) {
+    throw new DomainError('not_managed', `task ${task.id} is not linked to an external issue`);
+  }
+  if (!isEditable(task.status)) {
+    throw new DomainError('not_editable', `task is ${task.status}, only tasks that are not queued yet can be synced`);
+  }
+  const { title, specification, labels, autonomyMode, model } = content;
+  return { ...task, title, specification, labels, autonomyMode, model };
 }
 
 /** Rank of a task added below every task on the board. */

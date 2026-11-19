@@ -76,6 +76,10 @@ export class TaskStore {
     return this.#repository.findByTokenHash(tokenHash);
   }
 
+  findByExternalUrl(url: string): Task | undefined {
+    return this.#repository.findByExternalUrl(url);
+  }
+
   /** `by` is the user who created the task. */
   insert(task: Task, by: Principal): void {
     this.#repository.insert(task, [{ ...changeMeta(task.createdAt, by), field: 'created' }]);
