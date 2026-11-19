@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { managedComments, neutralizeMentions } from './managed-comments.ts';
 import { createTask } from './operations.ts';
-import type { Task, TaskStatus } from './task.ts';
+import type { Decision, Task, TaskStatus } from './task.ts';
 
 const digest = (text: string): string => `#${text.length}`;
 
@@ -95,7 +95,19 @@ describe('managedComments', () => {
       decisions: task.decisions.map((d) => ({ ...d, approval: { status: 'approved' as const } })),
       artifacts: task.artifacts.map((a) => ({ ...a, approval: { status: 'changes_requested' as const } })),
     };
-    assert.deepEqual(keys(reviewed), ['t1:q1', 't1:d1', 't1:a1']);
+    assert.deepEqual(keys(reviewed), ['t1:q1', 't1:d1', 't1:d1:approved', 't1:a1']);
+  });
+
+  it('notes an approved decision with the option that stands, the reviewer’s pick over the agent’s', () => {
+    const decision = { id: 'd1', createdAt: 'x', problem: 'P', options: ['x', 'y'], chosen: 1, reasoning: 'R' };
+    const approved = (approval: Decision['approval']): Task => taskIn('in_progress', { decisions: [{ ...decision, approval }] });
+    assert.equal(bodyOf(approved({ status: 'approved' }), 't1:d1:approved'), '**Decision approved:** P\n\n**Chosen:** y');
+    assert.equal(bodyOf(approved({ status: 'approved', chosen: 0 }), 't1:d1:approved'), '**Decision approved:** P\n\n**Chosen in review:** x');
+    const withoutOptions = taskIn('in_progress', {
+      decisions: [{ id: 'd1', createdAt: 'x', problem: 'P', options: [], reasoning: 'R', approval: { status: 'approved' } }],
+    });
+    assert.equal(bodyOf(withoutOptions, 't1:d1:approved'), '**Decision approved:** P');
+    assert.deepEqual(keys(approved({ status: 'changes_requested' })), ['t1:d1']);
   });
 
   it('notes each open pull request once the task is ready', () => {
@@ -137,12 +149,15 @@ describe('managedComments', () => {
     const at = '@x';
     const task = taskIn('ready', {
       questions: [{ id: 'q1', createdAt: 'x', problem: at, type: 'radio', options: [at] }],
-      decisions: [{ id: 'd1', createdAt: 'x', problem: at, options: [at], chosen: 0, reasoning: at, approval: pendingApproval }],
+      decisions: [
+        { id: 'd1', createdAt: 'x', problem: at, options: [at], chosen: 0, reasoning: at, approval: pendingApproval },
+        { id: 'd2', createdAt: 'x', problem: at, options: ['plain', at], chosen: 0, reasoning: at, approval: { status: 'approved', chosen: 1 } },
+      ],
       artifacts: [{ id: 'a1', createdAt: 'x', title: at, kind: at, content: 'c', approval: pendingApproval }],
       pullRequests: [{ url: 'https://github.com/o/r/pull/1', title: at, status: 'open' }],
     });
     const comments = [...managedComments(task, digest), ...managedComments(taskIn('clarification_required', { clarification: at }), digest)];
-    assert.equal(comments.length, 7);
+    assert.equal(comments.length, 9);
     for (const { body } of comments) {
       assert.ok(body.includes('@​x'), body);
       assert.equal(/@(?!​)/.test(body), false, body);

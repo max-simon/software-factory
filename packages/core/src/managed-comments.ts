@@ -58,6 +58,21 @@ const approvalComment = (task: Task, item: { id: string }, name: string): Manage
   body: `**Approval requested:** ${name}\n\n${inFactory}`,
 });
 
+/**
+ * The decision comment is posted once, with the agent's pick; a reviewer who
+ * approves another option changes the outcome, so the approval gets its own
+ * comment naming the option that stands.
+ */
+function decisionApprovedComment(task: Task, decision: Decision): ManagedComment {
+  const body = `**Decision approved:** ${neutralizeMentions(decision.problem)}`;
+  const key = `${task.id}:${decision.id}:approved`;
+  const chosen = decision.approval?.chosen ?? decision.chosen;
+  const option = chosen === undefined ? undefined : decision.options[chosen];
+  if (option === undefined) return { key, body };
+  const label = decision.approval?.chosen === undefined ? 'Chosen' : 'Chosen in review';
+  return { key, body: `${body}\n\n**${label}:** ${neutralizeMentions(option)}` };
+}
+
 const isPending = (item: Decision | Artifact): boolean => item.approval?.status === 'pending';
 
 // A task the PR review has wait for the engineer may leave ready before the
@@ -83,6 +98,7 @@ export function managedComments(task: Task, digest: (text: string) => string): M
   for (const decision of task.decisions) {
     comments.push(decisionComment(task, decision));
     if (isPending(decision)) comments.push(approvalComment(task, decision, `decision "${neutralizeMentions(decision.problem)}"`));
+    if (decision.approval?.status === 'approved') comments.push(decisionApprovedComment(task, decision));
   }
   for (const artifact of task.artifacts) {
     comments.push(artifactComment(task, artifact));

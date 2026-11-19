@@ -589,13 +589,17 @@ start with `factory`, and each class has one owner:
   - each artifact, by title and kind only;
   - each pending approval request of a decision or artifact, saying it is
     reviewed in the factory;
+  - each approved decision, naming the option that stands: the reviewer's
+    pick when it overrides the agent's, since the decision comment itself is
+    posted once with the agent's pick;
   - each open pull request once the task is `ready`, and each the PR review
     left open while the task is `input_required` (the same key, so it is
     not commented twice);
   - a failure, without the reason, pointing to the factory; keyed by
     `failedAt` (the last update for tasks that failed before it existed).
 
-  Item keys are `<task id>:<item id>` (`…:approval` for requests), so a
+  Item keys are `<task id>:<item id>` (`…:approval` for requests,
+  `…:approved` for approved decisions), so a
   restart, whose items have new ids, and a new failure time are reported
   again. Left out on purpose: artifact content (long, and reviewed in the
   factory) and the failure reason (it can quote container output). Comments
@@ -652,7 +656,11 @@ issue first, so the sync does not import it again:
 - **One task, one container, one session.** The container is the sandbox: the
   agent runs without permission prompts and installs toolchains with `mise`.
   The orchestrator prompt makes the agent delegate planning, implementation and
-  verification to subagents to keep its own context small.
+  verification to subagents to keep its own context small. For a managed task
+  the first message names the issue, and the agent links its pull requests to
+  it by URL: `Closes` in the final one, `Part of` in the others. Linking is
+  the agent's job because it writes the pull request body; the control plane
+  does not check it.
 - **Autonomy is per task.** `autonomous` tasks record decisions and artifacts
   but never block; the API rejects questions and approval requests. `supervised`
   tasks may stop for input.
