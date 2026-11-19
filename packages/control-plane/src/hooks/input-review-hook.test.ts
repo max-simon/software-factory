@@ -213,3 +213,16 @@ test('a task shows under input review while the reviewer decides, and no longer 
   await settled();
   assert.equal(reviews.isInputUnderReview(id), false);
 });
+
+test('a task the control plane has wait for its pull requests is not reviewed: only the agent asks for input', async () => {
+  const { service, lifecycle, agent, reviewer, settled } = setup();
+  const { id } = service.create({ projectId: 'p1', title: 't', specification: 's', autonomyMode: 'supervised', repoUrl: 'https://github.com/o/r' }, ada);
+  service.start(id, ada);
+  lifecycle.markInProgress(id, { tokenHash: 'h', executionId: 'c' });
+  agent.addPullRequest(id, { url: 'https://github.com/o/r/pull/1', title: 'PR 1' });
+  agent.markReady(id);
+  lifecycle.recordPrReview(id, 'https://github.com/o/r/pull/1', { result: 'risky', risk: 'high' });
+  assert.equal(lifecycle.requireInputForPullRequests(id).status, 'input_required');
+  await settled();
+  assert.deepEqual(reviewer.requests, []);
+});

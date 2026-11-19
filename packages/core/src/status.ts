@@ -9,9 +9,11 @@ export const transitions: Readonly<Record<TaskStatus, readonly TaskStatus[]>> = 
   clarification_required: ['draft', 'queued'],
   queued: ['in_progress', 'failed'],
   in_progress: ['input_required', 'ready', 'failed', 'queued'],
-  input_required: ['in_progress', 'failed', 'queued'],
+  // Done: a task left waiting on its pull requests is done once none of them is open any more.
+  input_required: ['in_progress', 'done', 'failed', 'queued'],
   // Follow-ups move a ready task, or a failed one whose execution server still exists, back to work.
-  ready: ['in_progress', 'done', 'failed', 'queued'],
+  // Input required: the PR review left a pull request open for the engineer.
+  ready: ['in_progress', 'input_required', 'done', 'failed', 'queued'],
   done: ['queued'],
   failed: ['in_progress', 'queued'],
 };

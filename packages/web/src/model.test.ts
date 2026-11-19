@@ -284,6 +284,29 @@ test('openInput and inputSummary count open questions and pending approvals only
   assert.equal(inputSummary(task('u', 'in_progress', '2026-01-01')), '');
 });
 
+test('openInput and inputSummary count the pull requests the PR review left open, while the task waits for input only', () => {
+  const pr = (n: number, overrides: Partial<TaskView['pullRequests'][number]> = {}) => ({
+    url: `https://github.com/o/r/pull/${n}`,
+    title: `PR ${n}`,
+    status: 'open' as const,
+    isUnderReview: false,
+    ...overrides,
+  });
+  const reviewedAt = '2026-01-01T00:00:00Z';
+  const pullRequests = [
+    pr(1, { prReview: { result: 'risky', risk: 'high', reviewedAt } }),
+    pr(2, { prReview: { result: 'review_failed', reviewedAt } }),
+    pr(3, { prReview: { result: 'merged', risk: 'low', reviewedAt } }),
+    pr(4, { status: 'closed', prReview: { result: 'risky', risk: 'medium', reviewedAt } }),
+    pr(5),
+  ];
+  const t = task('t', 'input_required', '2026-01-01', { pullRequests });
+  assert.deepEqual(openInput(t).pullRequests.map((p) => p.url), [pr(1).url, pr(2).url]);
+  assert.equal(inputSummary(t), '2 pull requests');
+  assert.equal(inputSummary(task('u', 'input_required', '2026-01-01', { pullRequests: [pullRequests[0]!] })), '1 pull request');
+  assert.equal(inputSummary(task('v', 'in_progress', '2026-01-01', { pullRequests })), '');
+});
+
 test('timeline interleaves settled items newest first and leaves out open ones', () => {
   const at = (minute: number) => `2026-01-01T10:${String(minute).padStart(2, '0')}:00Z`;
   const t = task('t', 'input_required', '2026-01-01', {

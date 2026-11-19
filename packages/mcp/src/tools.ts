@@ -169,7 +169,8 @@ export function registerTools(server: McpServer, client: ApiClient): void {
   server.registerTool(
     'get_task',
     {
-      description: 'Fetch a task with its specification, plan, decisions, artifacts, questions and pull requests.',
+      description:
+        'Fetch a task with its specification, plan, decisions, artifacts, questions and pull requests; each pull request carries the outcome of the factory\'s own PR review once reviewed (prReview).',
       inputSchema: { id: z.string().min(1) },
     },
     ({ id }) => relay(() => client.getTask(id)),

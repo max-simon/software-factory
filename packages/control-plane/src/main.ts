@@ -93,7 +93,7 @@ function main(): void {
   const reviews = new ReviewTracker();
   hooks.register(new SpecReviewHook({ tasks, service, projects, reviewer, reviews }));
   hooks.register(new InputReviewHook({ tasks, service, projects, reviewer, reviews }));
-  hooks.register(new PrReviewHook({ tasks, pullRequests, reviewer, projects, reviews }));
+  hooks.register(new PrReviewHook({ tasks, lifecycle, pullRequests, reviewer, projects, reviews }));
   hooks.register(new PullRequestReviewedHook({ lifecycle }));
   hooks.register(new PullRequestConflictedHook({ lifecycle }));
   const sessionStore = new SqliteSessionRepository(config.dbPath);

@@ -1,4 +1,5 @@
-import type { PrReview, PrReviewRequest, PullRequestWriter, Reviewer, Task, TaskEvent } from '@factory/core';
+import type { PrReview, PrReviewOutcome, PrReviewRequest, PullRequestWriter, Reviewer, Task, TaskEvent } from '@factory/core';
+import type { LifecycleService } from '../lifecycle-service.ts';
 import type { ProjectService } from '../project-service.ts';
 import { ReviewTracker } from '../review-tracker.ts';
 import type { TaskStore } from '../task-store.ts';
@@ -7,6 +8,8 @@ import { describe, findTask, type Hook } from './hooks.ts';
 export interface PrReviewHookDeps {
   /** Read again before a decision is posted or merged: the task may have moved on during the review. */
   tasks: Pick<TaskStore, 'get'>;
+  /** Records each outcome, and once a run is over, whether the task needs the engineer. */
+  lifecycle: Pick<LifecycleService, 'recordPrReview' | 'requireInputForPullRequests'>;
   pullRequests: PullRequestWriter;
   reviewer: Pick<Reviewer, 'reviewPr'>;
   projects: ProjectService;
@@ -43,11 +46,16 @@ const unmergedComment = '**PR review did not merge this pull request.** Its task
  * refused merge. Nothing is retried. Its comments are conversation comments,
  * which the factory never reads back, so a review never resumes the task.
  *
+ * It records each outcome on its pull request. Once a run has handled every
+ * open pull request, it has the task wait for the engineer (`input_required`)
+ * if it left one open; the task moves only if it is still `ready`.
+ *
  * A review takes minutes, and the task may move on meanwhile: a follow-up, a
  * cancel or a restart. One run per task goes at a time, and a newer run (the
  * task turned ready again) outdates the running one. A decision is posted, and
  * a pull request merged, only while its run is the latest, the task is still
- * `ready` and the pull request is still one of its open ones.
+ * `ready` and the pull request is still one of its open ones; an outdated run
+ * moves no task.
  */
 export class PrReviewHook implements Hook {
   readonly name = 'pr-review';
@@ -79,7 +87,7 @@ export class PrReviewHook implements Hook {
     }
   }
 
-  /** Reviews the open pull requests of the task as saved now, one after another. */
+  /** Reviews the open pull requests of the task as saved now, one after another, then settles the task's status. */
   async #reviewAll(id: string, generation: number): Promise<void> {
     const task = findTask(this.#deps.tasks, id);
     if (task === undefined) return;
@@ -88,6 +96,12 @@ export class PrReviewHook implements Hook {
       await this.#review(task, url, generation).catch((error: unknown) =>
         this.#log(`pr review: cannot review ${url} of task ${id}: ${describe(error)}`),
       );
+    }
+    if (this.#runs.get(id)?.generation !== generation) return;
+    try {
+      this.#deps.lifecycle.requireInputForPullRequests(id);
+    } catch (error) {
+      this.#log(`pr review: cannot have task ${id} wait for its pull requests: ${describe(error)}`);
     }
   }
 
@@ -120,21 +134,35 @@ export class PrReviewHook implements Hook {
       review = await reviewer.reviewPr(request);
     } catch (error) {
       this.#log(`pr review: cannot review ${url} of task ${task.id}: ${describe(error)}`);
-      if (this.#isCurrent(task.id, generation, url)) await pullRequests.comment(url, unreviewedComment);
+      if (!this.#isCurrent(task.id, generation, url)) return;
+      this.#record(task.id, url, { result: 'review_failed' });
+      await pullRequests.comment(url, unreviewedComment);
       return;
     }
     if (!this.#isCurrent(task.id, generation, url)) {
       this.#log(`pr review: task ${task.id} changed while ${url} was reviewed; the decision is dropped`);
       return;
     }
+    const { risk } = review;
     // Read once the review is done, so a switch the engineer made meanwhile counts.
-    const isMerging = review.risk === 'low' && projects.get(task.projectId).autoMerge;
+    const isMerging = risk === 'low' && projects.get(task.projectId).autoMerge;
+    if (!isMerging) {
+      // Recorded first, so a comment that fails still leaves the pull request to the engineer.
+      this.#record(task.id, url, { result: risk === 'low' ? 'auto_merge_off' : 'risky', risk });
+      await pullRequests.comment(url, decisionComment(review, false));
+      return;
+    }
     // Commented first, so no pull request is merged without its reason on it.
-    await pullRequests.comment(url, decisionComment(review, isMerging));
-    if (!isMerging) return;
+    try {
+      await pullRequests.comment(url, decisionComment(review, true));
+    } catch (error) {
+      this.#record(task.id, url, { result: 'review_failed', risk });
+      throw error;
+    }
     // Checked again: the task may have changed while the comment was posted.
     if (!this.#isCurrent(task.id, generation, url)) {
       this.#log(`pr review: task ${task.id} changed while the decision on ${url} was posted; not merged`);
+      this.#record(task.id, url, { result: 'merge_dropped', risk });
       await pullRequests.comment(url, unmergedComment);
       return;
     }
@@ -142,7 +170,20 @@ export class PrReviewHook implements Hook {
       await pullRequests.merge(url, request.pullRequest.headSha);
     } catch (error) {
       this.#log(`pr review: cannot merge ${url} of task ${task.id}: ${describe(error)}`);
+      this.#record(task.id, url, { result: 'merge_refused', risk });
       await pullRequests.comment(url, `**PR review could not merge this pull request.** It is left open for a human review.\n\n> ${describe(error)}`);
+      return;
+    }
+    // A merged pull request stays open in the task until the control plane reads it again; this keeps it from counting as left open.
+    this.#record(task.id, url, { result: 'merged', risk });
+  }
+
+  /** A task restarted or finished meanwhile no longer takes the outcome; that is no reason to stop the review. */
+  #record(id: string, url: string, outcome: Omit<PrReviewOutcome, 'reviewedAt'>): void {
+    try {
+      this.#deps.lifecycle.recordPrReview(id, url, outcome);
+    } catch (error) {
+      this.#log(`pr review: cannot record the review of ${url} of task ${id}: ${describe(error)}`);
     }
   }
 }

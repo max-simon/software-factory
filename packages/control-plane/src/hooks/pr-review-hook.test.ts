@@ -80,7 +80,7 @@ function setup({ risks = { 1: 'low', 2: 'low' }, refusedMerges = new Set(), isCo
   const projects = new ProjectService({ repository: new SqliteProjectRepository(':memory:'), newId: () => `p${++projectCounter}` });
   const autoMerged = projects.create({ title: 'Auto', autoMerge: true }, ada);
   const manual = projects.create({ title: 'Manual' }, ada);
-  hooks.register(new PrReviewHook({ tasks, pullRequests, reviewer, projects, reviews, log: (message) => logged.push(message) }));
+  hooks.register(new PrReviewHook({ tasks, lifecycle, pullRequests, reviewer, projects, reviews, log: (message) => logged.push(message) }));
   /** A task in progress in `projectId` that reported one pull request per number. */
   const workingTask = (projectId: string, numbers: number[]): string => {
     const { id } = service.create({ projectId, title: 't', specification: 's', repoUrl: 'https://github.com/o/r' }, ada);
@@ -167,14 +167,68 @@ test('merges nothing whose decision it cannot comment', async () => {
   assert.deepEqual(logged, [`pr review: cannot review ${prUrl(1)} of task ${id}: GitHub answered 403`]);
 });
 
-test('leaves the task as it is: the review resumes no agent', async () => {
+test('resumes no agent: a pull request left open has the task wait for the engineer', async () => {
   const { tasks, agent, autoMerged, workingTask, settled } = setup({ risks: { 1: 'high' } });
   const id = workingTask(autoMerged.id, [1]);
   agent.markReady(id);
-  const before = tasks.get(id);
   await settled();
-  assert.deepEqual(tasks.get(id), before);
-  assert.deepEqual(tasks.get(id).followUps, []);
+  const task = tasks.get(id);
+  assert.equal(task.status, 'input_required');
+  assert.deepEqual(task.followUps, []);
+  assert.deepEqual(tasks.changes(id).at(-1), { at: task.updatedAt, actor: 'system', field: 'status', from: 'ready', to: 'input_required' });
+});
+
+/** The status the task ends in and the outcome recorded on pull request 1. */
+async function outcomeOf(fakes: ReturnType<typeof setup>, projectId: string) {
+  const id = fakes.workingTask(projectId, [1]);
+  fakes.agent.markReady(id);
+  await fakes.settled();
+  const { status, pullRequests } = fakes.tasks.get(id);
+  const { reviewedAt: _stamped, ...prReview } = pullRequests[0]!.prReview ?? { reviewedAt: '' };
+  return { status, prReview };
+}
+
+test('records each outcome on the pull request and has the task wait for the engineer unless it merged', async () => {
+  const risky = setup({ risks: { 1: 'medium' } });
+  assert.deepEqual(await outcomeOf(risky, risky.autoMerged.id), { status: 'input_required', prReview: { result: 'risky', risk: 'medium' } });
+  const manual = setup();
+  assert.deepEqual(await outcomeOf(manual, manual.manual.id), { status: 'input_required', prReview: { result: 'auto_merge_off', risk: 'low' } });
+  const failed = setup({ risks: {} });
+  assert.deepEqual(await outcomeOf(failed, failed.autoMerged.id), { status: 'input_required', prReview: { result: 'review_failed' } });
+  const refused = setup({ refusedMerges: new Set([prUrl(1)]) });
+  assert.deepEqual(await outcomeOf(refused, refused.autoMerged.id), { status: 'input_required', prReview: { result: 'merge_refused', risk: 'low' } });
+  const merged = setup();
+  assert.deepEqual(await outcomeOf(merged, merged.autoMerged.id), { status: 'ready', prReview: { result: 'merged', risk: 'low' } });
+});
+
+test('records a failed review even when its comment is refused', async () => {
+  const fakes = setup({ risks: { 1: 'high' }, isCommentRefused: true });
+  assert.deepEqual(await outcomeOf(fakes, fakes.autoMerged.id), { status: 'input_required', prReview: { result: 'risky', risk: 'high' } });
+});
+
+test('an outdated run, or one whose task left ready, changes no status', async () => {
+  const followedUp = setup({ isHeld: true, risks: { 1: 'high' } });
+  const id = followedUp.workingTask(followedUp.autoMerged.id, [1]);
+  followedUp.agent.markReady(id);
+  await tick();
+  followedUp.service.addFollowUp(id, 'Rename the flag', ada);
+  await followedUp.release();
+  await followedUp.settled();
+  assert.equal(followedUp.tasks.get(id).status, 'in_progress');
+  assert.equal(followedUp.tasks.get(id).pullRequests[0]!.prReview, undefined);
+
+  const outdated = setup({ isHeld: true, risks: { 1: 'high' } });
+  const other = outdated.workingTask(outdated.autoMerged.id, [1]);
+  outdated.agent.markReady(other);
+  await tick();
+  outdated.service.addFollowUp(other, 'Rename the flag', ada);
+  outdated.agent.markReady(other);
+  await tick();
+  await outdated.release();
+  assert.equal(outdated.tasks.get(other).status, 'ready', 'the outdated run moves nothing');
+  await outdated.release();
+  await outdated.settled();
+  assert.equal(outdated.tasks.get(other).status, 'input_required', 'the newer run decides');
 });
 
 test('shows each pull request under review from reading its head until its decision and merge are over, one at a time', async () => {

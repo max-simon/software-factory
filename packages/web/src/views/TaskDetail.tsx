@@ -2,6 +2,7 @@ import {
   formatCost,
   formatDuration,
   formatTokens,
+  hasOpenInput,
   hasStarted,
   isCancellable,
   isEditable,
@@ -21,7 +22,7 @@ import { DependenciesSection } from '../components/Dependencies.tsx';
 import { ErrorText } from '../components/ErrorText.tsx';
 import { IssueLink } from '../components/IssueLink.tsx';
 import { ArtifactModal } from '../components/ArtifactModal.tsx';
-import { ArtifactApprovalRequest, DecisionApprovalForm, QuestionForm } from '../components/InputItems.tsx';
+import { ArtifactApprovalRequest, DecisionApprovalForm, PullRequestReviewRequest, QuestionForm } from '../components/InputItems.tsx';
 import { Markdown } from '../components/Markdown.tsx';
 import { PlanPipeline } from '../components/PlanPipeline.tsx';
 import { PullRequestIndicator } from '../components/PullRequestIndicator.tsx';
@@ -53,7 +54,7 @@ export function TaskDetail({ id, projects }: { id: string; projects: Project[] |
   }, [task?.title]);
 
   if (!task) return <p className="muted">{error ? error.message : 'Loading…'}</p>;
-  const { questions, approvals } = openInput(task);
+  const { questions, approvals, pullRequests } = openInput(task);
   const entries = timeline(task);
   const openArtifact = task.artifacts.find((a) => a.id === openArtifactId);
 
@@ -83,7 +84,7 @@ export function TaskDetail({ id, projects }: { id: string; projects: Project[] |
         </Section>
       )}
 
-      {questions.length + approvals.length > 0 && (
+      {questions.length + approvals.length + pullRequests.length > 0 && (
         <Section
           title={
             <>
@@ -103,6 +104,9 @@ export function TaskDetail({ id, projects }: { id: string; projects: Project[] |
               <ArtifactApprovalRequest key={review.item.id} artifact={review.item} onOpen={() => setOpenArtifactId(review.item.id)} />
             ),
           )}
+          {pullRequests.map((pullRequest) => (
+            <PullRequestReviewRequest key={pullRequest.url} pullRequest={pullRequest} />
+          ))}
         </Section>
       )}
 
@@ -361,7 +365,7 @@ function FollowUpForm({ task, onSent }: { task: TaskView; onSent: (task: TaskVie
         onChange={(e) => setMessage(e.target.value)}
         rows={3}
         placeholder={
-          task.status === 'in_progress' || task.status === 'input_required'
+          task.status === 'in_progress' || (task.status === 'input_required' && hasOpenInput(task))
             ? 'Message for the agent; it gets it when its current turn ends'
             : 'Message for the agent; it resumes work on the task'
         }
