@@ -106,6 +106,7 @@ export function fakeTaskClient(tasks: TaskView[] = []): FakeTaskClient {
       const task = find(id);
       task.status = 'failed';
       task.failureReason = 'Cancelled by the engineer';
+      task.failedAt = '2026-11-12T00:00:00.000Z';
       return task;
     },
     restartTask: async (id) => {

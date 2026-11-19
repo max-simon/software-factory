@@ -4,6 +4,7 @@ import {
   createTask,
   factoryLabel,
   isEditable,
+  managedComments,
   nextRank,
   parseManagedLabels,
   returnToDraft,
@@ -39,9 +40,11 @@ const emptyBodyKey = 'empty-body';
 const emptyBodyComment =
   'This issue has no description, so the factory does not take it as a task. Describe what should be done; the factory picks it up on its next pass.';
 
-const lateEditKey = 'late-edit';
 const lateEditComment =
   'The task for this issue has already started, so this change to the issue is not incorporated: the task keeps the title, description, labels and configuration it started with. For a changed specification, open a new issue.';
+
+/** Short and stable, for comment keys derived from text. */
+const digest = (text: string): string => createHash('sha256').update(text).digest('hex').slice(0, 16);
 
 const isEmpty = (text: string): boolean => text.trim() === '';
 
@@ -70,8 +73,9 @@ const isContentChanged = (task: Task, content: ManagedContent): boolean =>
  * label, keeps their title, specification, labels and configuration in step
  * until they start, starts them on the start label, and deletes them when
  * their issue is closed or loses the factory label before they start. It
- * reports each task's status as a label on its issue, and notes once when an
- * issue is edited after its task started. Issue
+ * reports each task's status as a label on its issue, notes once when an
+ * issue is edited after its task started, and comments on what happens on the
+ * task (`managedComments`). Comments on the issue are never read back. Issue
  * text is untrusted: it goes into the task as it is and never into the log.
  */
 export class IssueSync {
@@ -92,8 +96,9 @@ export class IssueSync {
     const withoutProject: string[] = [];
     for (const issue of issues) {
       await this.#guard(issue.url, () => this.#sync(issue, withoutProject));
-      // Separately guarded, so a failure earlier for this issue does not hold back its status.
+      // Separately guarded, so a failure earlier for this issue does not hold back its status or comments.
       await this.#guard(issue.url, () => this.#reportStatus(issue));
+      await this.#guard(issue.url, () => this.#postComments(issue));
     }
     await this.#deleteUnlabelled(new Set(issues.map((issue) => issue.url)));
     // One line per pass, not per issue: an issue waiting for its project label is no error.
@@ -147,7 +152,7 @@ export class IssueSync {
       return this.#commentLateEdit(task, issue, parsed);
     }
     if (!issue.isOpen) return this.#delete(task);
-    await this.#commentConflicts(issue, parsed);
+    await this.#commentConflicts(issue, parsed, task);
     // Nothing to vouch for yet: the start waits, label and all, until the issue has a description.
     if (isEmpty(issue.body)) return this.#deps.provider.comment(issue.url, emptyBodyKey, emptyBodyComment);
     this.#syncContent(task, contentOf(issue, parsed));
@@ -173,7 +178,7 @@ export class IssueSync {
    */
   #commentLateEdit(task: Task, issue: ExternalIssue, parsed: ManagedLabels): Promise<void> {
     if (!isContentChanged(task, contentOf(issue, parsed))) return Promise.resolve();
-    return this.#deps.provider.comment(issue.url, lateEditKey, lateEditComment);
+    return this.#deps.provider.comment(issue.url, `${task.id}:late-edit`, lateEditComment);
   }
 
   /**
@@ -189,6 +194,16 @@ export class IssueSync {
     return this.#deps.provider.changeLabels(issue.url, { add: [...add], remove: [...remove] });
   }
 
+  /**
+   * Posts everything the task should have said on every pass; the provider
+   * posts each key once, so only new items and earlier failures go out.
+   */
+  async #postComments(issue: ExternalIssue): Promise<void> {
+    const task = this.#deps.tasks.findByExternalUrl(issue.url);
+    if (task === undefined) return;
+    for (const { key, body } of managedComments(task, digest)) await this.#deps.provider.comment(issue.url, key, body);
+  }
+
   /** Removes the start label as written on the issue, since labels match case-insensitively. */
   #removeStartLabel(issue: ExternalIssue): Promise<void> {
     const remove = issue.labels.filter((label) => label.toLowerCase() === startLabel);
@@ -197,7 +212,6 @@ export class IssueSync {
 
   async #import(issue: ExternalIssue, parsed: ManagedLabels, withoutProject: string[]): Promise<void> {
     if (!issue.isOpen) return;
-    await this.#commentConflicts(issue, parsed);
     const { projectId } = parsed;
     if (projectId === undefined || this.#deps.projects.get(projectId) === undefined) {
       withoutProject.push(issue.url);
@@ -212,17 +226,22 @@ export class IssueSync {
     );
     tasks.insert(task, 'system');
     await this.#commentTaskId(issue, task);
+    await this.#commentConflicts(issue, parsed, task);
   }
 
   #commentTaskId(issue: ExternalIssue, task: Task): Promise<void> {
-    return this.#deps.provider.comment(issue.url, 'task-id', `The factory tracks this issue as task \`${task.id}\`.`);
+    return this.#deps.provider.comment(issue.url, `${task.id}:task-id`, `The factory tracks this issue as task \`${task.id}\`.`);
   }
 
-  /** Keyed by the conflicts, so the same ones are noted once and new ones again. */
-  #commentConflicts(issue: ExternalIssue, parsed: ManagedLabels): Promise<void> {
+  /**
+   * Keyed by the conflicts, so the same ones are noted once and new ones again.
+   * Scoped by task like every key, so an issue that never becomes a task gets
+   * no note; its skip is logged instead.
+   */
+  #commentConflicts(issue: ExternalIssue, parsed: ManagedLabels, task: Task): Promise<void> {
     if (parsed.conflicts.length === 0) return Promise.resolve();
     const notes = parsed.conflicts.join('\n');
-    const key = `config-conflict:${createHash('sha256').update(notes).digest('hex').slice(0, 16)}`;
+    const key = `${task.id}:config-conflict:${digest(notes)}`;
     const body = `Some factory labels contradict each other; the defaults apply:\n\n${parsed.conflicts.map((note) => `- ${note}`).join('\n')}`;
     return this.#deps.provider.comment(issue.url, key, body);
   }

@@ -89,7 +89,7 @@ export const markWorking = (task: Task, now: string): Task => updateExecution(ta
  */
 export function releaseWorker(task: Task, reason: string, now: string): Task {
   const idle = updateExecution(task, { worker: { state: 'idle', since: now } });
-  return task.status === 'in_progress' ? markFailed(idle, reason) : idle;
+  return task.status === 'in_progress' ? markFailed(idle, reason, now) : idle;
 }
 
 /** Whether the task's execution server is idle although work waits for it. */

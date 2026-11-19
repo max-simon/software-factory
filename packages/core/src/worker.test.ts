@@ -131,7 +131,7 @@ describe('worker state', () => {
 
   it('releaseWorker fails a task still in progress with the reason', () => {
     const task = releaseWorker(taskIn('in_progress'), 'the agent stopped', at(3));
-    assert.deepEqual([task.status, task.failureReason, task.execution?.worker.state], ['failed', 'the agent stopped', 'idle']);
+    assert.deepEqual([task.status, task.failureReason, task.failedAt, task.execution?.worker.state], ['failed', 'the agent stopped', at(3), 'idle']);
   });
 
   it('needsNotify holds for an idle worker with pending work only', () => {

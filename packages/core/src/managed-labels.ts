@@ -116,7 +116,8 @@ export function deletionLabelChanges(): { add: string[]; remove: string[] } {
   return { add: [], remove: [factoryLabel, startLabel, ...statuses.map(statusLabel)] };
 }
 
-export const deletedCommentKey = 'task-deleted';
+/** Scoped by task, so a task imported again from the same issue and deleted again gets its own comment. */
+export const deletedCommentKey = (taskId: string): string => `${taskId}:task-deleted`;
 export const deletedCommentBody =
   'The task for this issue was deleted in the factory, and its factory labels were removed. ' +
   `Add the \`${factoryLabel}\` label again to import this issue as a new task.`;

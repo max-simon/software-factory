@@ -487,16 +487,17 @@ test('follow-up on a task awaiting input keeps it waiting', async (t) => {
 
 test('follow-up resumes a failed task that still has its execution server', async (t) => {
   const api = await startApi(t);
-  await running(api, (task) => markFailed(task, 'tests fail'));
+  await running(api, (task) => markFailed(task, 'tests fail', fixedNow));
   const { status, json } = await api.call('POST', '/tasks/task-1/follow-ups', { message: 'Skip the flaky test' });
   assert.equal(status, 200);
   assert.equal(json.status, 'in_progress');
   assert.equal('failureReason' in json, false);
+  assert.equal('failedAt' in json, false);
 });
 
 test('follow-up on a failed task whose execution server was removed returns 409', async (t) => {
   const api = await startApi(t);
-  await running(api, (task) => detachExecution(markFailed(task, 'tests fail')));
+  await running(api, (task) => detachExecution(markFailed(task, 'tests fail', fixedNow)));
   const { status, json } = await api.call('POST', '/tasks/task-1/follow-ups', { message: 'Try again' });
   assert.equal(status, 409);
   assert.equal(json.error.code, 'no_execution');
@@ -536,6 +537,7 @@ test('cancel fails a running task, revokes its token and removes its execution s
   assert.equal(status, 200);
   assert.equal(json.status, 'failed');
   assert.equal(json.failureReason, 'Cancelled by the engineer');
+  assert.equal(json.failedAt, fixedNow);
   assert.equal('execution' in json, false);
   assert.deepEqual(api.runtime.removed, ['c-1']);
   assert.equal(api.repository.findByTokenHash('h'), undefined);
@@ -591,6 +593,7 @@ test('delete removes a task in any status, stopping its execution server first',
 test('delete of a managed task whose issue labels cannot be removed answers 502 and keeps the task', async (t) => {
   const issues: IssueProvider = {
     listIssues: async () => [],
+    covers: () => true,
     changeLabels: async () => {
       throw new Error('GitHub is down');
     },

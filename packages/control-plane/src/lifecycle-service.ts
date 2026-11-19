@@ -49,7 +49,7 @@ export class LifecycleService {
   }
 
   markFailed(id: string, reason: string): Task {
-    return this.#tasks.update(id, 'system', (task) => markFailed(task, reason));
+    return this.#tasks.update(id, 'system', (task) => markFailed(task, reason, this.#tasks.now()));
   }
 
   markDone(id: string): Task {
