@@ -15,6 +15,7 @@ import {
   parsePlan,
   parseNewPullRequest,
   parseSessionMetrics,
+  parseUsageLimit,
 } from './validation.ts';
 
 const bearerToken = /^Bearer ([0-9a-f]{64})$/;
@@ -107,5 +108,6 @@ export function agentRoutes(tasks: TaskStore, agent: AgentService, projects: Pro
     route('POST', '/agent/metrics', ({ id }, body) => agent.addSessionMetrics(id, parseSessionMetrics(body))),
     route('POST', '/agent/ready', ({ id }) => agent.markReady(id)),
     route('POST', '/agent/failure', ({ id }, body) => agent.markFailed(id, parseFailure(body))),
+    route('POST', '/agent/usage-limit', ({ id }, body) => agent.recordUsageLimit(id, parseUsageLimit(body))),
   ];
 }

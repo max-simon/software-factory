@@ -88,6 +88,7 @@ export {
   acceptWork,
   agentConsoleOf,
   heartbeatTimeoutMs,
+  isPausedForUsageLimit,
   isWorking,
   markWorking,
   moveAgentConsole,
@@ -95,6 +96,7 @@ export {
   pendingFollowUps,
   pendingWork,
   recordHeartbeat,
+  recordUsageLimit,
   releaseWorker,
 } from './worker.ts';
 export {

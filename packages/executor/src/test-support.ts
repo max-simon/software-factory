@@ -117,7 +117,7 @@ export function fakeAgentClient(task: AgentTaskView = sampleTask()): FakeAgentCl
     },
     // Like the control plane: no work idles the worker and fails a task still in progress.
     requestWork: async () => {
-      const work = pendingWork(withExecution());
+      const work = pendingWork(withExecution(), stamp());
       const isLost = work === undefined && fake.task.status === 'in_progress';
       const failure = 'the agent ended its turn without reporting ready, failure or a question';
       record('requestWork', isLost ? { status: 'failed', failureReason: failure, failedAt: stamp() } : {});

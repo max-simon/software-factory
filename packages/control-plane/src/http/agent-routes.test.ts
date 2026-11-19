@@ -195,6 +195,36 @@ test('failure records the reason', async (t) => {
   assertAgentView(json);
 });
 
+test('a usage limit keeps the task in progress, and asking for work idles it without failing it', async (t) => {
+  const call = await startApi(t);
+  const { status, json } = await call('POST', '/agent/usage-limit', { body: { resetsAt: '2026-11-12T15:00:00Z' } });
+  assert.equal(status, 200);
+  assert.equal(json.task.status, 'in_progress');
+  assertAgentView(json);
+  const work = await call('POST', '/agent/heartbeat', { body: { phase: 'awaiting_work' } });
+  assert.deepEqual(work.json, {});
+  const { json: view } = await call('GET', '/tasks/task-1');
+  assert.equal(view.status, 'in_progress');
+  assert.equal(view.execution.worker.state, 'idle');
+  assert.deepEqual(view.execution.usageLimit, {
+    since: fixedNow,
+    resetsAt: '2026-11-12T15:00:00.000Z',
+    resumesAt: '2026-11-12T15:01:00.000Z',
+  });
+});
+
+test('a usage limit without a reset time falls back, and is refused once the task left in_progress', async (t) => {
+  const call = await startApi(t);
+  const { json } = await call('POST', '/agent/usage-limit', { body: {} });
+  assert.equal(json.task.status, 'in_progress');
+  const { json: view } = await call('GET', '/tasks/task-1');
+  assert.deepEqual(view.execution.usageLimit, { since: fixedNow, resumesAt: '2026-11-12T10:30:00.000Z' });
+  await call('POST', '/agent/ready');
+  const refused = await call('POST', '/agent/usage-limit', { body: {} });
+  assert.equal(refused.status, 409);
+  assert.equal(refused.json.error.code, 'not_active');
+});
+
 test('session metrics add up, also after the task has ended', async (t) => {
   const call = await startApi(t);
   const first = await call('POST', '/agent/metrics', { body: { durationMs: 60_000, costUsd: 0.5 } });
@@ -408,6 +438,12 @@ test('invalid bodies return 400 invalid_request', async (t) => {
     ['POST', '/agent/questions', { ...radioQuestion, options: ['github', 'github'] }],
     ['POST', '/agent/failure', {}],
     ['POST', '/agent/failure', { reason: ' ' }],
+    ['POST', '/agent/usage-limit', undefined],
+    ['POST', '/agent/usage-limit', { resetsAt: 1795146000 }],
+    ['POST', '/agent/usage-limit', { resetsAt: 'tomorrow at 3' }],
+    ['POST', '/agent/usage-limit', { resetsAt: '2026-11-12T15:00:00+02:00' }],
+    ['POST', '/agent/usage-limit', { resetsAt: '2026-13-45T15:00:00.000Z' }],
+    ['POST', '/agent/usage-limit', { resetsAt: '2026-11-12T15:00:00.000Z', reason: 'limit' }],
     ['POST', '/agent/decisions', '{not json'],
     ['POST', '/agent/heartbeat', {}],
     ['POST', '/agent/heartbeat', { phase: 'sleeping' }],
