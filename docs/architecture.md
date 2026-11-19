@@ -29,14 +29,20 @@ Detail behind the [README](../README.md): packages, task lifecycle, the worker p
   Cycles are refused, and so is deleting a task an unstarted one depends on.
 - **in_progress:** the runner prompts the agent; the agent reports a plan,
   decisions, artifacts and pull requests as it works.
-- **input_required:** supervised tasks only. The agent asked a question or
+- **input_required:** supervised tasks: the agent asked a question or
   requested approval of a decision or artifact; the task resumes once every
   question is answered and every approval reviewed. The input review hook
   (see *Hooks*) settles what it can on the engineer's behalf first.
-- **ready → done:** the agent reported its work complete. Once its worker is
-  idle and none of its pull requests is open as last recorded (see *Pull
-  request events*), the dispatcher marks it `done` (immediately when it has
-  none), then removes the execution server.
+- **ready → input_required:** any task, once the PR review hook (see *Hooks*)
+  left one of its pull requests open, logged with actor `system`. The
+  engineer acts on the pull request: once none is open any more, the
+  dispatcher marks the task `done` as for `ready`; a follow-up moves it back
+  to `in_progress`, also as for `ready`.
+- **ready → done, input_required → done:** the agent reported its work
+  complete. Once its worker is idle and none of its pull requests is open as
+  last recorded (see *Pull request events*), the dispatcher marks it `done`
+  (immediately when it has none), then removes the execution server. A task
+  with an unanswered question or a pending approval is never marked `done`.
 - **failed:** the agent or runner reported a failure, the engineer cancelled, a
   turn ended without an outcome, or a working execution server sent no
   heartbeat for 60 s (5 min after it was started or notified). Time the
@@ -72,8 +78,9 @@ Detail behind the [README](../README.md): packages, task lifecycle, the worker p
   underspecified moves to `clarification_required` with its comment as the
   note, logged with actor `reviewer`.
 - **Follow-ups:** while the task has its execution server, the engineer can
-  send messages; one moves a `ready` or `failed` task back to `in_progress` and
-  notifies the execution server.
+  send messages; one moves a `ready` or `failed` task, or an
+  `input_required` one without open questions or approvals, back to
+  `in_progress` and notifies the execution server.
 - **Item ids:** questions, decisions, artifacts and follow-ups get random ids
   with a kind prefix (`q-…`, `d-…`, `a-…`, `f-…`). A restart empties these
   lists, so counted ids would repeat, and a review still running from the
@@ -241,6 +248,17 @@ merges the pull request into its base branch; the dispatcher reads it as merged
 and marks the task `done`. Anything else stays open, and the comment lists what
 a human reviewer should check.
 
+The hook records each outcome on its pull request as `prReview`: `result`
+(`merged`, `risky`, `auto_merge_off`, `review_failed`, `merge_refused` or
+`merge_dropped`), the `risk` if the reviewer gave one, and `reviewedAt`. A
+later review replaces it, and reading the pull request from GitHub keeps it.
+Once a run has handled every open pull request, it asks the lifecycle service
+to have the task wait for the engineer: a task still `ready` with an open pull
+request whose outcome is not `merged` moves to `input_required` (a merged one
+stays `open` until the observer reads it). The web UI lists those pull
+requests under "Needs your input" with their risk and reason, and counts them
+on the board card; MCP's `get_task` returns `prReview` with each pull request.
+
 - The comment is posted before the merge. If it cannot be posted, nothing is
   merged.
 - Auto-merge is read once the review is done, so switching it meanwhile counts.
@@ -266,7 +284,9 @@ a human reviewer should check.
   the running review: its decisions are dropped, and the newer run reviews the
   open pull requests once the earlier one ended.
 - A review never resumes the task: the hook's comments are conversation
-  comments, which the factory never reads back.
+  comments, which the factory never reads back. An outdated run, or one whose
+  task left `ready`, moves no task; the input review hook reacts only to the
+  agent's own changes, so this `input_required` does not trigger it.
 - The reviewer gets the full tool set and the factory's GitHub token, with
   write access. Only its instructions keep it from commenting, merging,
   pushing or running the repository's code. It reads text the coding agent
@@ -572,7 +592,9 @@ start with `factory`, and each class has one owner:
   - each approved decision, naming the option that stands: the reviewer's
     pick when it overrides the agent's, since the decision comment itself is
     posted once with the agent's pick;
-  - each open pull request once the task is `ready`;
+  - each open pull request once the task is `ready`, and each the PR review
+    left open while the task is `input_required` (the same key, so it is
+    not commented twice);
   - a failure, without the reason, pointing to the factory; keyed by
     `failedAt` (the last update for tasks that failed before it existed).
 

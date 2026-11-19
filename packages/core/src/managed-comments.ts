@@ -1,4 +1,5 @@
-import type { Artifact, Decision, Question, Task } from './task.ts';
+import { isLeftOpenByReview } from './operations.ts';
+import type { Artifact, Decision, PullRequest, Question, Task } from './task.ts';
 
 /*
  * What a managed task reports on its issue as comments. The provider posts
@@ -74,6 +75,15 @@ function decisionApprovedComment(task: Task, decision: Decision): ManagedComment
 
 const isPending = (item: Decision | Artifact): boolean => item.approval?.status === 'pending';
 
+// A task the PR review has wait for the engineer may leave ready before the
+// issue is synced; the same keys keep that from commenting twice.
+const pullRequestsToReview = (task: Task): PullRequest[] =>
+  task.status === 'ready'
+    ? task.pullRequests.filter((pr) => pr.status === 'open')
+    : task.status === 'input_required'
+      ? task.pullRequests.filter(isLeftOpenByReview)
+      : [];
+
 /**
  * The comments `task` should have on its issue, in a fixed order. `digest`
  * maps a clarification note to a short stable hash, so a new note gets a new
@@ -94,10 +104,8 @@ export function managedComments(task: Task, digest: (text: string) => string): M
     comments.push(artifactComment(task, artifact));
     if (isPending(artifact)) comments.push(approvalComment(task, artifact, `artifact ${artifactName(artifact)}`));
   }
-  if (task.status === 'ready') {
-    for (const pr of task.pullRequests.filter((candidate) => candidate.status === 'open')) {
-      comments.push({ key: `${task.id}:${pr.url}`, body: `**Pull request to review:** ${neutralizeMentions(pr.title)}\n\n${pr.url}` });
-    }
+  for (const pr of pullRequestsToReview(task)) {
+    comments.push({ key: `${task.id}:${pr.url}`, body: `**Pull request to review:** ${neutralizeMentions(pr.title)}\n\n${pr.url}` });
   }
   if (task.status === 'failed') {
     // Tasks that failed before `failedAt` existed fall back to their last update.

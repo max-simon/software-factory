@@ -1,9 +1,9 @@
-import type { Artifact, Decision, Question } from '@factory/core';
+import type { Artifact, Decision, PullRequest, Question } from '@factory/core';
 import { useState } from 'react';
 import { api } from '../api.ts';
 import { useAction } from '../hooks.ts';
 import { CheckIcon } from './CheckIcon.tsx';
-import type { TaskView } from '../model.ts';
+import { prReviewReasons, pullRequestNumber, type TaskView } from '../model.ts';
 import { ErrorText } from './ErrorText.tsx';
 import { Markdown } from './Markdown.tsx';
 
@@ -160,6 +160,27 @@ export function DecisionBody({ decision, choice }: { decision: Decision; choice?
         </ol>
       )}
       <p className="muted">{decision.reasoning}</p>
+    </div>
+  );
+}
+
+/** A pull request the PR review left open: the engineer reviews, merges or closes it on GitHub. */
+export function PullRequestReviewRequest({ pullRequest }: { pullRequest: PullRequest }) {
+  const outcome = pullRequest.prReview;
+  return (
+    <div className="input-item">
+      <p className="input-kind">Review pull request</p>
+      <div className="request-row">
+        <a href={pullRequest.url} target="_blank" rel="noreferrer">
+          <span className="mono muted">{pullRequestNumber(pullRequest.url)}</span> {pullRequest.title}
+        </a>
+      </div>
+      {outcome && (
+        <p className="muted">
+          {outcome.risk && `${outcome.risk} risk · `}
+          {prReviewReasons[outcome.result]}
+        </p>
+      )}
     </div>
   );
 }

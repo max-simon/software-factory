@@ -122,6 +122,15 @@ describe('managedComments', () => {
     assert.deepEqual(keys(taskIn('in_progress', { pullRequests })), []);
   });
 
+  it('notes the pull requests the PR review left open once it has the task wait for the engineer', () => {
+    const prReview = { result: 'risky' as const, risk: 'high' as const, reviewedAt: 'x' };
+    const pullRequests = [
+      { url: 'https://github.com/o/r/pull/1', title: 'Fix', status: 'open' as const, prReview },
+      { url: 'https://github.com/o/r/pull/2', title: 'New', status: 'open' as const },
+    ];
+    assert.deepEqual(keys(taskIn('input_required', { pullRequests })), ['t1:https://github.com/o/r/pull/1']);
+  });
+
   it('notes a failure keyed by its time, falling back to the last update', () => {
     const failed = taskIn('failed', { failureReason: 'boom', failedAt: '2026-01-02T00:00:00Z' });
     assert.deepEqual(managedComments(failed, digest), [{ key: 't1:failed:2026-01-02T00:00:00Z', body: '**Failed:** the task failed. The factory shows the details.' }]);

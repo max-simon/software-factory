@@ -292,6 +292,16 @@ test('get_task returns the full task', async () => {
     createdBy: 'u1',
     assignees: ['u2'],
     followUps: [{ id: 'f1', createdAt: '2026-11-12T00:00:00.000Z', message: 'Say hi', authorId: 'u2' }],
+    // With the recorded outcome of the factory's own PR review.
+    pullRequests: [
+      {
+        url: 'https://github.com/o/r/pull/1',
+        title: 'Hi',
+        status: 'open',
+        isUnderReview: false,
+        prReview: { result: 'risky', risk: 'high', reviewedAt: '2026-11-12T00:00:00.000Z' },
+      },
+    ],
   });
   fake = fakeTaskClient([task]);
   assert.deepEqual(JSON.parse((await call('get_task', { id: 't1' })).text), task);

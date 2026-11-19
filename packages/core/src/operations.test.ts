@@ -11,6 +11,9 @@ import {
   askQuestion,
   cancelTask,
   hasOpenInput,
+  isLeftOpenByReview,
+  recordPrReview,
+  requireInputForPullRequests,
   reviewItem,
   createTask,
   detachExecution,
@@ -32,7 +35,7 @@ import {
   type ManagedContent,
   type NewQuestion,
 } from './operations.ts';
-import type { ExternalLink, PullRequest, Question, Task, TaskStatus } from './task.ts';
+import type { ExternalLink, PrReviewOutcome, PullRequest, Question, Task, TaskStatus } from './task.ts';
 
 const repoUrl = 'https://github.com/O/r.git';
 
@@ -549,6 +552,14 @@ describe('updatePullRequests', () => {
     assert.equal('hasConflicts' in updatePullRequests(watched('ready'), [first]).pullRequests[0]!, false);
   });
 
+  it('keeps the recorded PR review, which the host knows nothing of', () => {
+    const prReview = { result: 'risky' as const, risk: 'high' as const, reviewedAt: '2026-01-02T00:00:00Z' };
+    const reviewed = taskIn('input_required', { pullRequests: [{ ...first, prReview }, second] });
+    const merged = { ...first, status: 'merged' as const };
+    assert.deepEqual(updatePullRequests(reviewed, [merged]).pullRequests[0], { ...merged, prReview });
+    assert.equal('prReview' in updatePullRequests(watched('ready'), [first]).pullRequests[0]!, false);
+  });
+
   it('is accepted while the runner runs and rejected before dispatch and after the end', () => {
     for (const status of ['in_progress', 'input_required', 'ready', 'failed'] as const) {
       assert.doesNotThrow(() => updatePullRequests(watched(status), [first]));
@@ -568,6 +579,62 @@ describe('updatePullRequests', () => {
     const before = frozen(task);
     updatePullRequests(task, [{ ...first, status: 'closed' }]);
     assert.deepEqual(task, before);
+  });
+});
+
+describe('recordPrReview', () => {
+  const first = { url: 'https://github.com/o/r/pull/1', title: 'One', status: 'open' as const };
+  const second = { url: 'https://github.com/o/r/pull/2', title: 'Two', status: 'open' as const };
+  const outcome = { result: 'risky' as const, risk: 'medium' as const, reviewedAt: '2026-01-02T00:00:00Z' };
+
+  it('records the outcome on the pull request and replaces an earlier one', () => {
+    const task = recordPrReview(taskIn('ready', { pullRequests: [first, second] }), first.url, { result: 'review_failed', reviewedAt: 'x' });
+    assert.deepEqual(recordPrReview(task, first.url, outcome).pullRequests, [{ ...first, prReview: outcome }, second]);
+  });
+
+  it('rejects a pull request the agent never reported', () => {
+    assert.throws(() => recordPrReview(taskIn('ready', { pullRequests: [first] }), second.url, outcome), rejectsWith('unknown_pull_request'));
+  });
+
+  it('is rejected once the task is done', () => {
+    assert.throws(() => recordPrReview(taskIn('done', { pullRequests: [first] }), first.url, outcome), rejectsWith('not_active'));
+  });
+});
+
+describe('requireInputForPullRequests', () => {
+  const pr = (prReview?: PrReviewOutcome, status: PullRequest['status'] = 'open'): PullRequest => ({
+    url: 'https://github.com/o/r/pull/1',
+    title: 'One',
+    status,
+    ...(prReview && { prReview }),
+  });
+  const leftOpen: PrReviewOutcome = { result: 'auto_merge_off', risk: 'low', reviewedAt: '2026-01-02T00:00:00Z' };
+
+  it('moves a ready task with a pull request the review left open to input_required', () => {
+    for (const result of ['risky', 'auto_merge_off', 'review_failed', 'merge_refused', 'merge_dropped'] as const) {
+      const task = taskIn('ready', { pullRequests: [pr({ result, reviewedAt: 'x' })] });
+      assert.equal(requireInputForPullRequests(task).status, 'input_required', result);
+    }
+  });
+
+  it('keeps a ready task whose pull requests were merged, closed or not reviewed', () => {
+    for (const pullRequest of [pr({ ...leftOpen, result: 'merged' }), pr(leftOpen, 'closed'), pr(leftOpen, 'merged'), pr()]) {
+      const task = taskIn('ready', { pullRequests: [pullRequest] });
+      assert.equal(requireInputForPullRequests(task), task);
+    }
+  });
+
+  it('changes nothing on a task that is no longer ready', () => {
+    for (const status of ['in_progress', 'input_required', 'done', 'failed', 'queued'] as const) {
+      const task = taskIn(status, { pullRequests: [pr(leftOpen)] });
+      assert.equal(requireInputForPullRequests(task), task, status);
+    }
+  });
+
+  it('counts open, reviewed, unmerged pull requests only as left open', () => {
+    assert.equal(isLeftOpenByReview(pr(leftOpen)), true);
+    assert.equal(isLeftOpenByReview(pr({ ...leftOpen, result: 'merged' })), false);
+    assert.equal(isLeftOpenByReview(pr()), false);
   });
 });
 
@@ -892,6 +959,10 @@ describe('addFollowUp', () => {
     const task = addFollowUp(withServer(supervised('input_required', [question('q1', 'text')])), followUp('f1'));
     assert.equal(task.status, 'input_required');
     assert.deepEqual(task.followUps.map((f) => f.id), ['f1']);
+  });
+
+  it('moves a task awaiting the engineer on its pull requests only back to in_progress', () => {
+    assert.equal(addFollowUp(withServer(taskIn('input_required')), followUp('f1')).status, 'in_progress');
   });
 
   it('appends in order', () => {

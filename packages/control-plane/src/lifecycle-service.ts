@@ -6,8 +6,11 @@ import {
   markInProgress,
   markWorking,
   moveAgentConsole,
+  recordPrReview,
   releaseWorker,
+  requireInputForPullRequests,
   updatePullRequests,
+  type PrReviewOutcome,
   type PullRequest,
   type StartedExecution,
   type Task,
@@ -59,6 +62,19 @@ export class LifecycleService {
   /** The single entry for pull request state, polled or pushed by a webhook; the task store derives the pull request events from it. */
   updatePullRequests(id: string, updates: readonly PullRequest[]): Task {
     return this.#tasks.update(id, 'system', (task) => updatePullRequests(task, updates));
+  }
+
+  /** How the PR review of pull request `url` ended; `reviewedAt` is stamped here. */
+  recordPrReview(id: string, url: string, outcome: Omit<PrReviewOutcome, 'reviewedAt'>): Task {
+    return this.#tasks.update(id, 'system', (task) => recordPrReview(task, url, { ...outcome, reviewedAt: this.#tasks.now() }));
+  }
+
+  /** The PR review is over: a ready task waits for the engineer if it left a pull request open. */
+  requireInputForPullRequests(id: string): Task {
+    // Most runs merge everything or find the task moved on: no save, so no new `updatedAt` and no event.
+    const task = this.#tasks.get(id);
+    if (requireInputForPullRequests(task) === task) return task;
+    return this.#tasks.update(id, 'system', requireInputForPullRequests);
   }
 
   /** A message for the agent that the control plane sends on its own, e.g. when a pull request was reviewed. */

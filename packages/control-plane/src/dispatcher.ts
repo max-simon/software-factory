@@ -1,4 +1,5 @@
 import {
+  hasOpenInput,
   heartbeatTimeoutMs,
   isBlocked,
   isWorking,
@@ -45,11 +46,15 @@ export const orphanSweepIntervalMs = 10 * 60_000;
 const workerSince = (task: Task): number => Date.parse(task.execution!.worker.since);
 
 /**
- * Ready, its last reports have arrived, and none of its pull requests is open
- * as last recorded; recording them is the pull request observer's job.
+ * Ready, or waiting for the engineer on its pull requests only; its last
+ * reports have arrived, and none of its pull requests is open as last
+ * recorded, which is the pull request observer's job. A task waiting for an
+ * answer or approval is never done, whatever its pull requests.
  */
 const isSettleable = (task: Task): boolean =>
-  task.status === 'ready' && !isWorking(task) && task.pullRequests.every((pr) => pr.status !== 'open');
+  (task.status === 'ready' || (task.status === 'input_required' && !hasOpenInput(task))) &&
+  !isWorking(task) &&
+  task.pullRequests.every((pr) => pr.status !== 'open');
 
 export class Dispatcher {
   readonly #deps: DispatcherDeps;
@@ -74,8 +79,9 @@ export class Dispatcher {
    * One pass: remove orphaned execution servers when a sweep is due, restart
    * silent workers, notify idle workers that have work, start queued tasks
    * whose dependencies are done in rank order while fewer workers than the
-   * limit are working, mark ready tasks done once none of their pull requests
-   * is open, and remove execution servers no task needs.
+   * limit are working, mark ready tasks, and those waiting for the engineer
+   * on their pull requests only, done once none of their pull requests is
+   * open, and remove execution servers no task needs.
    */
   async reconcile(): Promise<void> {
     const { tasks, lifecycle, maxRunning } = this.#deps;
@@ -86,7 +92,7 @@ export class Dispatcher {
     const freeSlots = Math.max(0, maxRunning - all.filter(isWorking).length);
     const startable = tasks.list(['queued']).filter((task) => !isBlocked(task, all));
     await this.#forEach(startable.slice(0, freeSlots), (task) => this.#dispatch(task));
-    await this.#forEach(tasks.list(['ready']).filter(isSettleable), async (task) => {
+    await this.#forEach(tasks.list(['ready', 'input_required']).filter(isSettleable), async (task) => {
       lifecycle.markDone(task.id);
     });
     await this.#forEach(tasks.list(['done']), (task) => this.#removeExecution(task));
