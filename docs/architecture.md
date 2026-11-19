@@ -447,9 +447,11 @@ start with `factory`, and each class has one owner:
 
 - **The port.** `IssueProvider` offers what the factory needs of a provider:
   `listIssues(label)` (every issue of the configured repositories carrying
-  the label, open and closed, no pull requests), `changeLabels` (idempotent)
-  and `comment(url, key, body)`, posted at most once per `(url, key)`. It
-  returns `ExternalIssue`s: the `ExternalLink` fields plus `repoUrl`,
+  the label, open and closed, no pull requests; it fails as a whole when any
+  repository cannot be listed), `covers(url)` (whether `listIssues` looks
+  in that issue's repository), `changeLabels` (idempotent) and
+  `comment(url, key, body)`, posted at most once per `(url, key)`.
+  `listIssues` returns `ExternalIssue`s: the `ExternalLink` fields plus `repoUrl`,
   `title`, `body`, `labels` and `isOpen`.
 - **GitHub Issues** (`adapters/github-issues.ts`) uses the REST API with
   `GITHUB_TOKEN` and looks in the repositories of
@@ -494,8 +496,30 @@ start with `factory`, and each class has one owner:
   waiting for clarification back to `draft` in the same change, and the spec
   review runs on the new text, as for an engineer's edit; a label-only change
   leaves it waiting. An empty body is not synced; the issue gets the same one
-  comment. Once the task is queued, the sync leaves it alone. The project is
-  fixed at import: a changed project label is ignored.
+  comment. The project is fixed at import: a changed project label is
+  ignored.
+- **Start.** `factory:start` on the issue of a `draft` or
+  `clarification_required` task first applies any pending update, so the
+  task starts with the issue's current text, then starts it with
+  `startTask`, the engineer's start, recorded as `system`, and finally
+  removes the label (as written on the issue) through `changeLabels`. Whoever
+  sets the label vouches for the text as it is; the factory does not check
+  who did. While the body is empty the start waits and the label stays. A
+  label whose removal failed is seen again on the started task next pass,
+  and only removed; on a task in any other status, too, the label is only
+  removed. An issue imported in a pass is started in the next one. Starting
+  from the web UI works as before.
+- **Leaving before start.** A `draft` or `clarification_required` task is
+  deleted when its issue is closed, or when the issue is missing from
+  `listIssues('factory')` because it lost the label. Absence counts only
+  when the list call succeeded and `covers` the issue's repository: a failed
+  call aborts the pass before anything changes, and a repository no longer
+  configured is not looked at. Deletion goes through `assertDeletable`, like
+  the engineer's: while an unstarted task depends on it, the task stays, the
+  refusal is logged and the next pass tries again.
+- **After start** the issue no longer steers the task: edits, a closed issue
+  or a removed `factory` label have no effect, and it finishes and reports
+  as usual.
 - **Conflicts.** Contradictory config or project labels get one comment
   listing the notes and saying the defaults apply. Its key is derived from
   the notes, so the same conflicts are noted once and a new one again.

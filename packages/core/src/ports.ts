@@ -102,8 +102,13 @@ export interface PullRequestWriter {
 
 /** The issues managed tasks are created from, on one provider (e.g. GitHub Issues). */
 export interface IssueProvider {
-  /** Every issue of the configured repositories that carries `label`, open and closed; pull requests excluded. */
+  /**
+   * Every issue of the configured repositories that carries `label`, open and
+   * closed; pull requests excluded. Fails as a whole when any repository cannot be listed.
+   */
   listIssues(label: string): Promise<ExternalIssue[]>;
+  /** Whether `listIssues` looks in the repository of the issue at `url`, so that its absence from the list means it lacks the label. */
+  covers(url: string): boolean;
   /** Idempotent: adding a label the issue has or removing one it lacks is not an error. */
   changeLabels(url: string, change: { add: string[]; remove: string[] }): Promise<void>;
   /** Posts `body` at most once per `(url, key)`; a later call with the same key does nothing. */

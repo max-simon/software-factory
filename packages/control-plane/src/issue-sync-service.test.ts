@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createProject, requestClarification, startTask, type ExternalIssue, type IssueProvider, type TaskEvent } from '@factory/core';
+import { createProject, createTask, requestClarification, startTask, type ExternalIssue, type IssueProvider, type TaskEvent } from '@factory/core';
 import { SqliteProjectRepository } from './adapters/sqlite-project-repository.ts';
 import { SqliteTaskRepository } from './adapters/sqlite-task-repository.ts';
 import { IssueSync } from './issue-sync-service.ts';
@@ -13,13 +13,30 @@ class FakeIssues implements IssueProvider {
   /** Commenting on these URLs fails with the error message. */
   failures = new Map<string, string>();
   labelled: string[] = [];
+  /** Listing fails with this message while set. */
+  listFailure: string | undefined;
+  /** Repository URLs `listIssues` looks in. */
+  repoUrls = ['https://github.com/o/r'];
+  labelChanges: { url: string; add: string[]; remove: string[] }[] = [];
+  /** Changing labels fails with this message while set. */
+  labelFailure: string | undefined;
 
   async listIssues(label: string): Promise<ExternalIssue[]> {
     this.labelled.push(label);
+    if (this.listFailure !== undefined) throw new Error(this.listFailure);
     return this.issues.map((issue) => ({ ...issue, labels: [...issue.labels] }));
   }
 
-  async changeLabels(): Promise<void> {}
+  covers(url: string): boolean {
+    return this.repoUrls.some((repoUrl) => url.startsWith(`${repoUrl}/`));
+  }
+
+  async changeLabels(url: string, change: { add: string[]; remove: string[] }): Promise<void> {
+    if (this.labelFailure !== undefined) throw new Error(this.labelFailure);
+    this.labelChanges.push({ url, ...change });
+    const issue = this.issues.find((candidate) => candidate.url === url);
+    if (issue) issue.labels = [...issue.labels.filter((label) => !change.remove.includes(label)), ...change.add];
+  }
 
   async comment(url: string, key: string, body: string): Promise<void> {
     const failure = this.failures.get(url);
@@ -264,4 +281,141 @@ test('one failing issue does not stop the others, and its error is logged redact
   assert.deepEqual(f.tasks.list().map((t) => t.external?.url), [issue(1).url, issue(2).url]);
   assert.deepEqual(f.provider.keys(issue(2).url), ['task-id']);
   assert.deepEqual(f.logged, [`issue sync: ${issue(1).url}: bad credentials [redacted]`]);
+});
+
+const startable = (n: number, fields: Partial<ExternalIssue> = {}) =>
+  issue(n, { labels: ['factory', 'factory:project:p1', 'Factory:Start'], ...fields });
+
+test('factory:start applies the pending content update first, starts the task as system and removes the label', async () => {
+  const f = setup();
+  const id = await imported(f, issue(1));
+  f.provider.issues = [startable(1, { body: 'Final body' })];
+  await f.sync.sync();
+  const task = f.tasks.get(id);
+  assert.deepEqual([task.status, task.specification], ['queued', 'Final body']);
+  const updates = f.events.filter((event) => event.type === 'task.updated');
+  assert.deepEqual(
+    updates.map((event) => [event.actor, event.changes.map((change) => change.field)]),
+    [['system', ['specification']], ['system', ['status']]],
+  );
+  assert.deepEqual(f.provider.labelChanges, [{ url: issue(1).url, add: [], remove: ['Factory:Start'] }]);
+  assert.deepEqual(f.logged, []);
+});
+
+test('factory:start settles a clarification request as an engineer start does', async () => {
+  const f = setup();
+  const id = await imported(f, issue(1));
+  f.tasks.update(id, 'reviewer', (task) => requestClarification(task, 'What?'));
+  f.provider.issues = [startable(1)];
+  await f.sync.sync();
+  const task = f.tasks.get(id);
+  assert.equal(task.status, 'queued');
+  assert.equal(task.clarification, undefined);
+});
+
+test('a failed label removal is retried on the next pass, which only removes the label', async () => {
+  const f = setup();
+  const id = await imported(f, issue(1));
+  f.provider.issues = [startable(1)];
+  f.provider.labelFailure = 'bad gateway ghp_secret';
+  await f.sync.sync();
+  assert.equal(f.tasks.get(id).status, 'queued');
+  assert.deepEqual(f.logged, [`issue sync: ${issue(1).url}: bad gateway [redacted]`]);
+  const before = f.tasks.get(id);
+  f.provider.labelFailure = undefined;
+  await f.sync.sync();
+  assert.deepEqual(f.tasks.get(id), before);
+  assert.deepEqual(f.provider.labelChanges, [{ url: issue(1).url, add: [], remove: ['Factory:Start'] }]);
+  assert.equal(f.logged.length, 1);
+});
+
+test('factory:start on a started task only removes the label', async () => {
+  const f = setup();
+  const id = await imported(f, issue(1));
+  f.tasks.update(id, 'system', startTask);
+  f.tasks.update(id, 'system', (task) => ({ ...task, status: 'in_progress' }));
+  const before = f.tasks.get(id);
+  f.provider.issues = [startable(1, { body: 'Late body' })];
+  await f.sync.sync();
+  assert.deepEqual(f.tasks.get(id), before);
+  assert.deepEqual(f.provider.labelChanges, [{ url: issue(1).url, add: [], remove: ['Factory:Start'] }]);
+});
+
+test('factory:start waits while the issue has no description', async () => {
+  const f = setup();
+  const id = await imported(f, issue(1));
+  f.provider.issues = [startable(1, { body: '' })];
+  await f.sync.sync();
+  assert.equal(f.tasks.get(id).status, 'draft');
+  assert.deepEqual(f.provider.labelChanges, []);
+});
+
+test('an unstarted task is deleted once its issue loses the factory label', async () => {
+  const f = setup();
+  await imported(f, issue(1));
+  const id = await imported(f, issue(2));
+  f.tasks.update(id, 'reviewer', (task) => requestClarification(task, 'What?'));
+  f.provider.issues = [];
+  await f.sync.sync();
+  assert.deepEqual(f.tasks.list(), []);
+  assert.deepEqual(f.logged, []);
+});
+
+test('an unstarted task is deleted once its issue is closed, even with factory:start', async () => {
+  const f = setup();
+  const id = await imported(f, issue(1));
+  f.provider.issues = [startable(1, { isOpen: false })];
+  await f.sync.sync();
+  assert.equal(f.tasks.findByExternalUrl(issue(1).url), undefined);
+  assert.throws(() => f.tasks.get(id));
+  assert.deepEqual(f.provider.labelChanges, []);
+});
+
+test('nothing is deleted when the list call failed or does not cover the repository of the issue', async () => {
+  const f = setup();
+  const id = await imported(f, issue(1));
+  f.provider.issues = [];
+  f.provider.listFailure = 'timeout';
+  await assert.rejects(f.sync.sync(), /timeout/);
+  assert.equal(f.tasks.get(id).status, 'draft');
+  f.provider.listFailure = undefined;
+  f.provider.repoUrls = ['https://github.com/o/other'];
+  await f.sync.sync();
+  assert.equal(f.tasks.get(id).status, 'draft');
+});
+
+test('a task an unstarted task depends on is kept, logged and deleted on a later pass', async () => {
+  const f = setup();
+  const id = await imported(f, issue(1));
+  f.tasks.insert(
+    createTask({ projectId: 'p1', title: 'Other', specification: 'S', dependsOn: [id] }, { id: 'x1', now: f.tasks.now(), rank: 5 }),
+    'system',
+  );
+  f.provider.issues = [issue(1, { isOpen: false })];
+  await f.sync.sync();
+  assert.equal(f.tasks.get(id).status, 'draft');
+  assert.equal(f.logged.length, 1);
+  assert.match(f.logged[0]!, /cannot be deleted: x1 depend on it/);
+  f.provider.issues = [];
+  await f.sync.sync();
+  assert.equal(f.tasks.get(id).status, 'draft');
+  assert.equal(f.logged.length, 2);
+  f.tasks.update('x1', 'system', startTask);
+  f.tasks.update('x1', 'system', (task) => ({ ...task, status: 'in_progress' }));
+  await f.sync.sync();
+  assert.equal(f.tasks.findByExternalUrl(issue(1).url), undefined);
+});
+
+test('after start, a closed issue or a removed factory label has no effect', async () => {
+  const f = setup();
+  const id = await imported(f, issue(1));
+  f.provider.issues = [startable(1)];
+  await f.sync.sync();
+  const before = f.tasks.get(id);
+  assert.equal(before.status, 'queued');
+  f.provider.issues = [issue(1, { isOpen: false })];
+  await f.sync.sync();
+  f.provider.issues = [];
+  await f.sync.sync();
+  assert.deepEqual(f.tasks.get(id), before);
 });
