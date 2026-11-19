@@ -216,6 +216,29 @@ test('triggersSpecReview: created drafts and engineer edits of title, specificat
   );
 });
 
+test('triggersSpecReview: the issue sync changing title, specification or status of a managed draft', () => {
+  const synced = (field: 'title' | 'specification' | 'labels', actor: 'system' | 'reviewer' = 'system'): TaskEvent => ({
+    type: 'task.updated',
+    task: draft,
+    actor,
+    changes: field === 'labels' ? [{ ...meta, actor, field, from: [], to: ['x'] }] : [{ ...meta, actor, field, from: 'a', to: 'b' }],
+  });
+  assert.equal(triggersSpecReview(synced('title')), true);
+  assert.equal(triggersSpecReview(synced('specification')), true);
+  assert.equal(triggersSpecReview(synced('labels')), false);
+  assert.equal(triggersSpecReview({ ...synced('specification'), task: { ...draft, status: 'clarification_required' } }), false);
+  assert.equal(
+    triggersSpecReview({
+      type: 'task.updated',
+      task: draft,
+      actor: 'system',
+      changes: [{ ...meta, actor: 'system', field: 'status', from: 'clarification_required', to: 'draft' }],
+    }),
+    true,
+  );
+  assert.equal(triggersSpecReview(synced('title', 'reviewer')), false);
+});
+
 test('a task shows under spec review through all its runs, reruns included, and no longer once they are over', async () => {
   const { reviewer, createTask, settled, service, reviews } = setup();
   const task = createTask();

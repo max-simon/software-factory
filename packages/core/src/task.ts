@@ -249,7 +249,10 @@ export interface ExternalIssue extends ExternalLink {
 export interface Task {
   id: string;
   createdAt: string;
-  /** The id of the user who created it; unset for tasks stored before users existed. */
+  /**
+   * The id of the user who created it; unset for tasks stored before users
+   * existed and for managed tasks the control plane imported (those have `external`).
+   */
   createdBy?: string;
   updatedAt: string;
   projectId: string;

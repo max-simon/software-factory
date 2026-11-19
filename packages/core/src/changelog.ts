@@ -5,7 +5,8 @@ import type { Principal } from './user.ts';
 /**
  * Who made a change: `user` the engineer through the engineer API, `agent` the
  * coding agent or its runner through the agent API, `reviewer` the reviewer
- * acting on the engineer's behalf, `system` the control plane itself (the dispatcher).
+ * acting on the engineer's behalf, `system` the control plane itself (the
+ * dispatcher and the issue sync).
  */
 export type ChangeActor = 'user' | 'agent' | 'reviewer' | 'system';
 

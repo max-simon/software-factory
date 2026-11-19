@@ -5,7 +5,6 @@ import {
   taskChanges,
   type ChangeAuthor,
   type Heartbeat,
-  type Principal,
   type Task,
   type TaskChange,
   type TaskEvent,
@@ -80,8 +79,8 @@ export class TaskStore {
     return this.#repository.findByExternalUrl(url);
   }
 
-  /** `by` is the user who created the task. */
-  insert(task: Task, by: Principal): void {
+  /** `by` is the user who created the task, or `system` for a managed task the control plane imported. */
+  insert(task: Task, by: ChangeAuthor): void {
     this.#repository.insert(task, [{ ...changeMeta(task.createdAt, by), field: 'created' }]);
     this.#onEvent({ type: 'task.created', task });
   }

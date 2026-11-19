@@ -124,6 +124,13 @@ test('the agent, reviewer and system keep their labels, and the reviewer’s inp
   expect(html).not.toContain('user-name');
 });
 
+test('a managed task the control plane imported shows as created by system, not as an engineer', () => {
+  const external = { provider: 'github', url: 'https://github.com/o/r/issues/1', key: 'o/r#1' };
+  const html = withUsers([ada('Ada')], <Header task={task({ createdBy: undefined, external })} onChange={() => {}} />);
+  expect(html).toContain('created by system');
+  expect(html).not.toContain('engineer (unattributed)');
+});
+
 test('a follow-up the system sent shows as by the system, not as an engineer', () => {
   const html = withUsers(
     [ada('Ada')],
