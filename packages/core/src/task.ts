@@ -1,3 +1,5 @@
+import type { RiskLevel } from './review.ts';
+
 export type TaskStatus =
   | 'draft'
   | 'clarification_required'
@@ -110,6 +112,26 @@ export interface PullRequest {
   hasConflicts?: boolean;
   /** The branch it merges into, as the control plane last read it; unset until the first read. */
   baseBranch?: string;
+  /** The factory's own PR review as last recorded; unset until reviewed. */
+  prReview?: PrReviewOutcome;
+}
+
+/**
+ * How the factory's PR review ended. `merged`: it merged the pull request.
+ * The rest leave it open for a human: `risky` (medium or high risk),
+ * `auto_merge_off` (low risk, but the project merges nothing itself),
+ * `review_failed` (the review, or posting its decision to merge, failed),
+ * `merge_refused` (the host refused the merge) and
+ * `merge_dropped` (the task changed while the decision was posted).
+ */
+export type PrReviewResult = 'merged' | 'risky' | 'auto_merge_off' | 'review_failed' | 'merge_refused' | 'merge_dropped';
+
+export interface PrReviewOutcome {
+  result: PrReviewResult;
+  /** The reviewer's judgement; unset when the reviewer gave none. */
+  risk?: RiskLevel;
+  /** When it was recorded; stamped by the control plane. */
+  reviewedAt: string;
 }
 
 /** Submitted states only: pending drafts are invisible to others, dismissed reviews no longer count. */

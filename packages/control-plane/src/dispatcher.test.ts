@@ -503,6 +503,32 @@ test('marks a ready task done and removes its execution server once none of its 
   assert.deepEqual(f.runtime.removed, [`c-${task.id}`]);
 });
 
+test('marks a task waiting for the engineer on its pull requests done once none of them is open', async () => {
+  const f = setup();
+  const task = readyWith(f, [pullRequest(1)]);
+  f.lifecycle.recordPrReview(task.id, pullRequest(1).url, { result: 'risky', risk: 'high' });
+  f.lifecycle.requireInputForPullRequests(task.id);
+  await f.dispatcher.reconcile();
+  assert.equal(f.tasks.get(task.id).status, 'input_required');
+
+  f.lifecycle.updatePullRequests(task.id, [pullRequest(1, 'merged')]);
+  await f.dispatcher.reconcile();
+  assert.equal(f.tasks.get(task.id).status, 'done');
+});
+
+test('never marks a task awaiting an answer done, even once none of its pull requests is open', async () => {
+  const f = setup();
+  const { id } = f.service.create(newTask({ autonomyMode: 'supervised' }), ada);
+  f.service.start(id, ada);
+  f.lifecycle.markInProgress(id, { tokenHash: `hash-${id}`, executionId: `c-${id}` });
+  f.agent.addPullRequest(id, { url: pullRequest(1).url, title: 'PR 1' });
+  f.agent.askQuestion(id, { problem: 'p?', type: 'text', options: [] });
+  f.lifecycle.releaseWorker(id, 'unused');
+  f.lifecycle.updatePullRequests(id, [pullRequest(1, 'merged')]);
+  await f.dispatcher.reconcile();
+  assert.equal(f.tasks.get(id).status, 'input_required');
+});
+
 test('marks a ready task without pull requests done at once', async () => {
   const f = setup();
   const task = readyWith(f, []);

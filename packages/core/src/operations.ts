@@ -9,6 +9,7 @@ import type {
   ExternalLink,
   FollowUp,
   PlanStep,
+  PrReviewOutcome,
   PullRequest,
   Question,
   Annotation,
@@ -309,9 +310,39 @@ export function updatePullRequests(task: Task, updates: readonly PullRequest[]):
     const update = updates.find((candidate) => candidate.url === pr.url);
     if (update === undefined) return pr;
     // The host computes mergeability in the background: not having computed it yet is no news.
-    return update.hasConflicts === undefined && pr.hasConflicts !== undefined ? { ...update, hasConflicts: pr.hasConflicts } : update;
+    const read = update.hasConflicts === undefined && pr.hasConflicts !== undefined ? { ...update, hasConflicts: pr.hasConflicts } : update;
+    // The host knows nothing of the factory's own review.
+    return pr.prReview === undefined ? read : { ...read, prReview: pr.prReview };
   });
   return { ...task, pullRequests };
+}
+
+/** Records how the factory's PR review of pull request `url` ended; a later review replaces it. */
+export function recordPrReview(task: Task, url: string, outcome: PrReviewOutcome): Task {
+  if (!followUpStatuses.includes(task.status)) {
+    throw new DomainError('not_active', `task is ${task.status}, pull request reviews are recorded only while it runs`);
+  }
+  if (!task.pullRequests.some((pr) => pr.url === url)) {
+    throw new DomainError('unknown_pull_request', `task ${task.id} has no pull request ${url}`);
+  }
+  const pullRequests = task.pullRequests.map((pr) => (pr.url === url ? { ...pr, prReview: { ...outcome } } : pr));
+  return { ...task, pullRequests };
+}
+
+/**
+ * Open and reviewed, but not merged by the review: it waits for the engineer.
+ * A pull request the review merged stays `open` until the control plane reads it again.
+ */
+export const isLeftOpenByReview = (pr: PullRequest): boolean =>
+  pr.status === 'open' && pr.prReview !== undefined && pr.prReview.result !== 'merged';
+
+/**
+ * Once the PR review is over, a ready task with a pull request it left open
+ * needs the engineer; any other task stays as it is, since it moved on meanwhile.
+ */
+export function requireInputForPullRequests(task: Task): Task {
+  if (task.status !== 'ready' || !task.pullRequests.some(isLeftOpenByReview)) return task;
+  return transition(task, 'input_required');
 }
 
 export function askQuestion(task: Task, question: NewQuestion): Task {
@@ -443,8 +474,9 @@ function addTokens(a: TokenUsage, b: TokenUsage): TokenUsage {
 }
 
 /**
- * Queues a message for the agent. A ready or failed task goes back to
- * `in_progress`; a task awaiting input stays there and gets the message with the answers.
+ * Queues a message for the agent. A ready or failed task, or one awaiting the
+ * engineer on its pull requests only, goes back to `in_progress`; a task
+ * awaiting answers or approvals stays there and gets the message with them.
  * The agent session lives on the execution server, so the task needs one.
  */
 export function addFollowUp(task: Task, input: NewFollowUp): Task {
@@ -465,7 +497,9 @@ export function addFollowUp(task: Task, input: NewFollowUp): Task {
 }
 
 function resumeForFollowUp(task: Task): Task {
-  if (task.status !== 'ready' && task.status !== 'failed') return task;
+  // Input required without open input means only pull requests wait for the engineer, so the agent may work on.
+  const isWaitingOnPullRequests = task.status === 'input_required' && !hasOpenInput(task);
+  if (task.status !== 'ready' && task.status !== 'failed' && !isWaitingOnPullRequests) return task;
   const { failureReason: _cleared, failedAt: _clearedAt, ...rest } = task;
   return transition(rest, 'in_progress');
 }

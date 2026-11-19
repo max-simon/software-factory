@@ -3,6 +3,7 @@ import type {
   Decision,
   FollowUp,
   HeartbeatPhase,
+  PrReviewResult,
   ProjectChange,
   PullRequest,
   PullRequestStatus,
@@ -15,6 +16,7 @@ import type {
   TaskView,
   TokenUsage,
 } from '@factory/core';
+import { isLeftOpenByReview } from '@factory/core';
 
 export type { TaskView };
 
@@ -90,9 +92,13 @@ export type ReviewItem = { kind: 'decision'; item: Decision } | { kind: 'artifac
 export interface OpenInput {
   questions: Question[];
   approvals: ReviewItem[];
+  /** Pull requests the PR review left open for the engineer. */
+  pullRequests: PullRequest[];
 }
 
-export function openInput(task: Pick<Task, 'questions' | 'decisions' | 'artifacts'>): OpenInput {
+type InputSource = Pick<Task, 'status' | 'questions' | 'decisions' | 'artifacts' | 'pullRequests'>;
+
+export function openInput(task: InputSource): OpenInput {
   const isPending = (item: Decision | Artifact) => item.approval?.status === 'pending';
   return {
     questions: task.questions.filter((q) => q.answer === undefined),
@@ -100,8 +106,20 @@ export function openInput(task: Pick<Task, 'questions' | 'decisions' | 'artifact
       ...task.decisions.filter(isPending).map((item) => ({ kind: 'decision' as const, item })),
       ...task.artifacts.filter(isPending).map((item) => ({ kind: 'artifact' as const, item })),
     ],
+    // Outside input_required a recorded outcome is stale: the task has moved on, or the review runs again.
+    pullRequests: task.status === 'input_required' ? task.pullRequests.filter(isLeftOpenByReview) : [],
   };
 }
+
+/** Why the PR review left a pull request open, as the engineer reads it. */
+export const prReviewReasons: Record<PrReviewResult, string> = {
+  merged: 'Merged by the PR review',
+  risky: 'Too risky to merge without a human review',
+  auto_merge_off: 'Auto-merge is off for this project',
+  review_failed: 'The PR review failed',
+  merge_refused: 'The merge was refused',
+  merge_dropped: 'Not merged: the task changed while the decision was posted',
+};
 
 export type TimelineEntry = ReviewItem | { kind: 'question'; item: Question } | { kind: 'follow-up'; item: FollowUp };
 
@@ -122,12 +140,13 @@ export function timeline(task: Pick<Task, 'questions' | 'decisions' | 'artifacts
 
 const plural = (count: number, word: string): string => `${count} ${word}${count === 1 ? '' : 's'}`;
 
-/** "2 questions · 1 approval", or an empty string when nothing is open. */
-export function inputSummary(task: Pick<Task, 'questions' | 'decisions' | 'artifacts'>): string {
-  const { questions, approvals } = openInput(task);
+/** "2 questions · 1 approval · 1 pull request", or an empty string when nothing is open. */
+export function inputSummary(task: InputSource): string {
+  const { questions, approvals, pullRequests } = openInput(task);
   return [
     questions.length > 0 ? plural(questions.length, 'question') : '',
     approvals.length > 0 ? plural(approvals.length, 'approval') : '',
+    pullRequests.length > 0 ? plural(pullRequests.length, 'pull request') : '',
   ]
     .filter(Boolean)
     .join(' · ');
