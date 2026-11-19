@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { resumePrompt } from './prompts.ts';
+import { resumePrompt, taskPrompt } from './prompts.ts';
 import { sampleTask } from './test-support.ts';
+
+const project = { id: 'p1', title: 'P', description: '', createdAt: 't', updatedAt: 't', autoMerge: false };
+
+test('taskPrompt names the issue of a managed task', () => {
+  const external = { provider: 'github', url: 'https://github.com/o/r/issues/12', key: 'o/r#12' };
+  assert.match(taskPrompt(sampleTask({ external }), project), /\nIssue: https:\/\/github\.com\/o\/r\/issues\/12 \(o\/r#12\)\n/);
+  assert.doesNotMatch(taskPrompt(sampleTask(), project), /Issue:/);
+});
 
 test('resumePrompt tells the agent which option the engineer picked over its own', () => {
   const decision = {

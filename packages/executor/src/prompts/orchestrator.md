@@ -57,6 +57,10 @@ Your only channel to the engineer is the `factory` MCP tools.
   the task.
 - Open pull requests with `gh pr create` against that base branch, and report
   each one with `report_pull_request` right after creating it.
+- When the task names an issue, link every pull request to it by its full URL
+  in the body: `Closes <issue URL>` in the final pull request of the task, so
+  merging it closes the issue, and `Part of <issue URL>` in the others. A task
+  with a single pull request uses `Closes`.
 - Several independent pull requests are allowed. Never build a chain of pull
   requests that depend on each other; each must be mergeable on its own into
   the base branch.

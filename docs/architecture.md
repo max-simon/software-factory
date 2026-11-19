@@ -634,7 +634,11 @@ issue first, so the sync does not import it again:
 - **One task, one container, one session.** The container is the sandbox: the
   agent runs without permission prompts and installs toolchains with `mise`.
   The orchestrator prompt makes the agent delegate planning, implementation and
-  verification to subagents to keep its own context small.
+  verification to subagents to keep its own context small. For a managed task
+  the first message names the issue, and the agent links its pull requests to
+  it by URL: `Closes` in the final one, `Part of` in the others. Linking is
+  the agent's job because it writes the pull request body; the control plane
+  does not check it.
 - **Autonomy is per task.** `autonomous` tasks record decisions and artifacts
   but never block; the API rejects questions and approval requests. `supervised`
   tasks may stop for input.

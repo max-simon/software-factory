@@ -5,6 +5,7 @@ export function taskPrompt(task: AgentTaskView, project: Project): string {
     `# Task: ${task.title}`,
     '',
     ...repositoryLines(task),
+    ...(task.external ? [`Issue: ${task.external.url} (${task.external.key})`] : []),
     `Autonomy mode: ${task.autonomyMode}`,
     `Labels: ${task.labels.length > 0 ? task.labels.join(', ') : 'none'}`,
     '',
