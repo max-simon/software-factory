@@ -209,7 +209,9 @@ export function registerTools(server: McpServer, client: ApiClient): void {
   server.registerTool(
     'delete_task',
     {
-      description: 'Delete a task in any status for good, stopping its execution server first.',
+      description:
+        'Delete a task in any status for good, stopping its execution server first. ' +
+        'A task linked to an issue first has its factory labels removed from the issue; if that fails, the task is kept.',
       inputSchema: { id: z.string().min(1) },
       annotations: { destructiveHint: true },
     },

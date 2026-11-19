@@ -8,6 +8,10 @@ import {
   cancelTask,
   checkAssignees,
   createTask,
+  deletedCommentBody,
+  deletedCommentKey,
+  deletionLabelChanges,
+  DomainError,
   editTask,
   moveTask,
   nextRank,
@@ -20,6 +24,7 @@ import {
   type ActivityEntry,
   type ChangeAuthor,
   type ExecutionRuntime,
+  type IssueProvider,
   type NewTask,
   type Principal,
   type Responder,
@@ -31,6 +36,8 @@ import {
   type UserRepository,
 } from '@factory/core';
 import type { ActivityFeed } from './activity-feed.ts';
+import { describe } from './hooks/hooks.ts';
+import { redact } from './redact.ts';
 import type { TaskStore } from './task-store.ts';
 
 export interface TaskServiceDeps {
@@ -39,6 +46,11 @@ export interface TaskServiceDeps {
   runtime: ExecutionRuntime;
   users: UserRepository;
   newId?: () => string;
+  /** Where managed tasks' issues live; absent when no issue repositories are configured. */
+  issues?: IssueProvider;
+  /** Secret values to strip from logged errors. */
+  secrets?: readonly string[];
+  log?: (message: string) => void;
 }
 
 /** The input reviewer answering or reviewing on the engineer's behalf, with why. */
@@ -56,6 +68,9 @@ export class TaskService {
   readonly #runtime: ExecutionRuntime;
   readonly #users: UserRepository;
   readonly #newId: () => string;
+  readonly #issues: IssueProvider | undefined;
+  readonly #secrets: readonly string[];
+  readonly #log: (message: string) => void;
 
   constructor(deps: TaskServiceDeps) {
     this.#tasks = deps.tasks;
@@ -63,6 +78,9 @@ export class TaskService {
     this.#runtime = deps.runtime;
     this.#users = deps.users;
     this.#newId = deps.newId ?? (() => randomBytes(5).toString('hex'));
+    this.#issues = deps.issues;
+    this.#secrets = deps.secrets ?? [];
+    this.#log = deps.log ?? ((message) => console.error(message));
   }
 
   create(input: NewTask, by: Principal): Task {
@@ -117,12 +135,39 @@ export class TaskService {
   /**
    * Removes a task in any status, stopping its execution server first. Refused
    * while a task that has not started depends on it, which would wait forever.
+   * A managed task first has its factory labels removed from its issue, so the
+   * issue sync does not import it again; if that fails, the task is kept.
    */
   async delete(id: string): Promise<void> {
-    const { execution } = this.#tasks.get(id);
+    const task = this.#tasks.get(id);
     assertDeletable(id, this.#tasks.list());
-    if (execution !== undefined) await this.#runtime.remove(execution.id);
+    await this.#releaseIssue(task);
+    if (task.execution !== undefined) await this.#runtime.remove(task.execution.id);
     this.#tasks.delete(id);
+  }
+
+  /** Removes the factory labels from a managed task's issue and says so there; no-op for other tasks. */
+  async #releaseIssue({ id, external }: Task): Promise<void> {
+    if (external === undefined) return;
+    if (this.#issues === undefined) {
+      this.#log(`delete ${id}: no issue provider configured; the labels of ${external.key} were left untouched`);
+      return;
+    }
+    try {
+      await this.#issues.changeLabels(external.url, deletionLabelChanges());
+    } catch (error) {
+      this.#log(`delete ${id}: removing the factory labels from ${external.key} failed: ${redact(describe(error), this.#secrets)}`);
+      throw new DomainError(
+        'issue_provider_failed',
+        `could not remove the factory labels from issue ${external.key}; the task was not deleted`,
+      );
+    }
+    // The labels are gone, so the sync will not re-import the issue; keeping the task for a comment would gain nothing.
+    try {
+      await this.#issues.comment(external.url, deletedCommentKey, deletedCommentBody);
+    } catch (error) {
+      this.#log(`delete ${id}: commenting on ${external.key} failed: ${redact(describe(error), this.#secrets)}`);
+    }
   }
 
   /**

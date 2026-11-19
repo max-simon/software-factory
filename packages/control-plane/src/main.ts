@@ -66,7 +66,19 @@ function main(): void {
   const users = new SqliteUserRepository(config.dbPath);
   // Hooks need the services, which publish to the hooks, so they are registered once the services exist.
   const hooks = new Hooks();
-  const { tasks, service, agent, lifecycle } = createServices({ repository, runtime, users, onEvent: (event) => void hooks.emit(event) });
+  const secrets = [...config.credentials.map((name) => process.env[name]!), process.env.GITHUB_TOKEN!];
+  const issues =
+    config.githubIssueRepos.length > 0
+      ? new GitHubIssues({ token: process.env.GITHUB_TOKEN!, repos: config.githubIssueRepos, dbPath: config.dbPath })
+      : undefined;
+  const { tasks, service, agent, lifecycle } = createServices({
+    repository,
+    runtime,
+    users,
+    issues,
+    secrets,
+    onEvent: (event) => void hooks.emit(event),
+  });
   const projectRepository = new SqliteProjectRepository(config.dbPath);
   const projects = new ProjectService({ repository: projectRepository });
   // One image, three roles: it reviews task specifications, the input agents ask for, and pull requests.
@@ -77,10 +89,6 @@ function main(): void {
     anthropicCredential: config.agentCredentials.claude!,
   });
   const pullRequests = new GitHubPullRequests(process.env.GITHUB_TOKEN!);
-  const issues =
-    config.githubIssueRepos.length > 0
-      ? new GitHubIssues({ token: process.env.GITHUB_TOKEN!, repos: config.githubIssueRepos, dbPath: config.dbPath })
-      : undefined;
   // The hooks record the reviews they run; the engineer API shows them.
   const reviews = new ReviewTracker();
   hooks.register(new SpecReviewHook({ tasks, service, projects, reviewer, reviews }));
@@ -121,7 +129,6 @@ function main(): void {
   // Checked on a timer of its own: a host may sleep in the middle of a dispatcher pass.
   const pauseWatch = new PauseWatch();
   setInterval(() => pauseWatch.check(), pauseCheckIntervalMs).unref();
-  const secrets = [...config.credentials.map((name) => process.env[name]!), process.env.GITHUB_TOKEN!];
   const dispatcher = new Dispatcher({
     tasks,
     lifecycle,

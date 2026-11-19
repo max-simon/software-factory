@@ -408,8 +408,8 @@ factory owns everything else.
   works while the task is `draft` or `clarification_required` and throws
   `not_editable` afterwards, like an edit: the agent works on what it was
   given. It goes through `TaskStore.update`, so the changelog records it.
-  Answers, approvals, follow-ups, cancel, restart, assignees, rank and delete
-  work as for any task.
+  Answers, approvals, follow-ups, cancel, restart, assignees and rank work as
+  for any task; delete does too, but first releases the issue (see Deletion).
 
 ### Labels
 
@@ -525,6 +525,31 @@ start with `factory`, and each class has one owner:
   the notes, so the same conflicts are noted once and a new one again.
 - **Errors.** One failing issue does not stop the others; its error is logged
   with the issue's URL and secrets redacted.
+
+### Deletion
+
+Deleting a managed task (`DELETE /tasks/:id`, MCP `delete_task`) releases its
+issue first, so the sync does not import it again:
+
+- **Order.** The usual check runs first: a delete refused because a task
+  that has not started depends on it touches nothing. Then `TaskService`
+  removes the labels from the issue (`deletionLabelChanges`), posts one
+  comment, stops the execution server and deletes the task.
+- **Labels.** `factory`, `factory:start` and every `factory:status:*` label
+  are removed. Project and config labels stay, so adding `factory` again
+  imports the issue as a new task with the same setup.
+- **Comment.** One comment, key `task-deleted`, says the task was deleted in
+  the factory, its labels were removed and re-adding `factory` imports the
+  issue again.
+- **Failures.** If removing the labels fails, the task is kept and the call
+  answers HTTP 502 with `issue_provider_failed`; the cause is logged with
+  secrets redacted. If only the comment fails, it is logged and the task is
+  deleted anyway: the labels are already gone.
+- **Feature off.** Without `FACTORY_GITHUB_ISSUE_REPOS` there is no provider:
+  the task is deleted, its issue left untouched, and one line is logged.
+- **Only the user's delete.** A deletion the sync performs itself (for an
+  issue that was closed or lost its label) does not go through
+  `TaskService.delete` and removes no labels.
 
 ## Design decisions and reasoning
 
