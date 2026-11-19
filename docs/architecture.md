@@ -523,8 +523,9 @@ issue first, so the sync does not import it again:
   deleted anyway: the labels are already gone.
 - **Feature off.** Without `FACTORY_GITHUB_ISSUE_REPOS` there is no provider:
   the task is deleted, its issue left untouched, and one line is logged.
-- **The sync's own deletion** calls the task store directly and removes no
-  labels.
+- **Only the user's delete.** A deletion the sync performs itself (for an
+  issue that was closed or lost its label) does not go through
+  `TaskService.delete` and removes no labels.
 
 ## Design decisions and reasoning
 
