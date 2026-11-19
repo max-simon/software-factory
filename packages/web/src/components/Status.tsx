@@ -9,12 +9,13 @@ export function StatusDot({ status }: { status: TaskStatus }) {
 /** What the execution server is doing; details on hover. Renders nothing without an execution server. */
 export function HeartbeatNote({ task, isCompact = false }: { task: Pick<TaskView, 'execution'>; isCompact?: boolean }) {
   const info = heartbeatInfo(task);
-  // Cards stay quiet while the runner is alive; only a silent one is worth the space.
-  if (!info || (isCompact && !info.isStale)) return null;
+  // Cards stay quiet while the runner is alive; only a silent or paused one is worth the space.
+  if (!info || (isCompact && !info.isStale && !info.isPaused)) return null;
+  const compactText = info.isPaused ? 'usage limit' : 'no heartbeat';
   return (
-    <span className={info.isStale ? 'heartbeat heartbeat-stale' : 'heartbeat'} title={info.tooltip}>
+    <span className={info.isStale || info.isPaused ? 'heartbeat heartbeat-stale' : 'heartbeat'} title={info.tooltip}>
       <span className="heartbeat-pulse" aria-hidden />
-      <span className="heartbeat-text">{isCompact ? 'no heartbeat' : info.text}</span>
+      <span className="heartbeat-text">{isCompact ? compactText : info.text}</span>
     </span>
   );
 }
