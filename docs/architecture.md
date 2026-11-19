@@ -385,6 +385,43 @@ Users are a core domain concept (`packages/core/src/user.ts`); their storage, th
   username. There are no roles
   yet: every active user can do everything an engineer can.
 
+## Managed tasks
+
+A managed task is created from an issue on an external provider (GitHub
+Issues first).
+
+### Labels
+
+Labels on the issue are the control channel between the provider and the
+factory. The convention is pure code in `packages/core/src/managed-labels.ts`;
+adapters use its constants instead of repeating the names. All factory labels
+start with `factory`, and each class has one owner:
+
+| Class | Labels | Written by |
+|---|---|---|
+| Marker | `factory` | human: only issues carrying it are considered |
+| Project | `factory:project:<project id>` | human: which factory project the task belongs to |
+| Command | `factory:start` | human: start the task; the factory removes it once handled |
+| Config | `factory:supervised`, `factory:autonomous`, `factory:model:opus`, `factory:model:sonnet` | human |
+| Status | `factory:status:<status>` with hyphens, e.g. `factory:status:input-required` | factory only |
+| Content | every label that does not start with `factory` | human: synced into `Task.labels` |
+
+- **Matching.** GitHub label names are case-insensitive, so every label that
+  starts with `factory` is matched case-insensitively (`Factory:Start` starts
+  the task). The project id keeps the case it is written in; content labels
+  are kept exactly as written, in order, each once.
+- **Defaults and conflicts.** Without config labels a task is `autonomous`
+  and runs on `opus`. Both autonomy labels, both model labels or several
+  project labels naming different projects are a conflict: the default
+  applies (no project, for the project label) and `parseManagedLabels`
+  returns a human-readable note for each.
+- **Unknown labels.** A `factory*` label outside the table (e.g.
+  `factory:typo`, `factory-bug`) is ignored and is not a content label.
+- **Status.** `statusLabelChanges` computes which labels to add and remove so
+  that exactly one `factory:status:*` label, the current one, remains. Any
+  other status label is removed, including one a human set; no other label is
+  touched.
+
 ## Design decisions and reasoning
 
 - **The control plane is the source of truth.** Agents never talk to each other
