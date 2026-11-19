@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createProject, createTask, requestClarification, startTask, type ExternalIssue, type IssueProvider, type TaskEvent } from '@factory/core';
+import { createProject, createTask, requestClarification, startTask, statusLabel, statusLabelPrefix, transitions, type ExternalIssue, type IssueProvider, type TaskEvent, type TaskStatus } from '@factory/core';
 import { SqliteProjectRepository } from './adapters/sqlite-project-repository.ts';
 import { SqliteTaskRepository } from './adapters/sqlite-task-repository.ts';
 import { IssueSync } from './issue-sync-service.ts';
@@ -20,6 +20,8 @@ class FakeIssues implements IssueProvider {
   labelChanges: { url: string; add: string[]; remove: string[] }[] = [];
   /** Changing labels fails with this message while set. */
   labelFailure: string | undefined;
+  /** Changing labels on these URLs fails with the error message. */
+  labelFailures = new Map<string, string>();
 
   async listIssues(label: string): Promise<ExternalIssue[]> {
     this.labelled.push(label);
@@ -32,7 +34,8 @@ class FakeIssues implements IssueProvider {
   }
 
   async changeLabels(url: string, change: { add: string[]; remove: string[] }): Promise<void> {
-    if (this.labelFailure !== undefined) throw new Error(this.labelFailure);
+    const failure = this.labelFailure ?? this.labelFailures.get(url);
+    if (failure !== undefined) throw new Error(failure);
     this.labelChanges.push({ url, ...change });
     const issue = this.issues.find((candidate) => candidate.url === url);
     if (issue) issue.labels = [...issue.labels.filter((label) => !change.remove.includes(label)), ...change.add];
@@ -43,6 +46,17 @@ class FakeIssues implements IssueProvider {
     if (failure !== undefined) throw new Error(failure);
     if (this.comments.some((c) => c.url === url && c.key === key)) return;
     this.comments.push({ url, key, body });
+  }
+
+  /** Label changes other than status reports, which any pass may make. */
+  commandChanges(): { url: string; add: string[]; remove: string[] }[] {
+    const isStatus = (label: string) => label.toLowerCase().startsWith(statusLabelPrefix);
+    return this.labelChanges.filter((change) => ![...change.add, ...change.remove].every(isStatus));
+  }
+
+  statusLabels(url: string): string[] {
+    const issue = this.issues.find((candidate) => candidate.url === url);
+    return (issue?.labels ?? []).filter((label) => label.toLowerCase().startsWith(statusLabelPrefix));
   }
 
   keys(url: string): string[] {
@@ -298,7 +312,7 @@ test('factory:start applies the pending content update first, starts the task as
     updates.map((event) => [event.actor, event.changes.map((change) => change.field)]),
     [['system', ['specification']], ['system', ['status']]],
   );
-  assert.deepEqual(f.provider.labelChanges, [{ url: issue(1).url, add: [], remove: ['Factory:Start'] }]);
+  assert.deepEqual(f.provider.commandChanges(), [{ url: issue(1).url, add: [], remove: ['Factory:Start'] }]);
   assert.deepEqual(f.logged, []);
 });
 
@@ -320,13 +334,15 @@ test('a failed label removal is retried on the next pass, which only removes the
   f.provider.labelFailure = 'bad gateway ghp_secret';
   await f.sync.sync();
   assert.equal(f.tasks.get(id).status, 'queued');
-  assert.deepEqual(f.logged, [`issue sync: ${issue(1).url}: bad gateway [redacted]`]);
+  // The start label's removal and the status report fail alike.
+  const failure = `issue sync: ${issue(1).url}: bad gateway [redacted]`;
+  assert.deepEqual(f.logged, [failure, failure]);
   const before = f.tasks.get(id);
   f.provider.labelFailure = undefined;
   await f.sync.sync();
   assert.deepEqual(f.tasks.get(id), before);
-  assert.deepEqual(f.provider.labelChanges, [{ url: issue(1).url, add: [], remove: ['Factory:Start'] }]);
-  assert.equal(f.logged.length, 1);
+  assert.deepEqual(f.provider.commandChanges(), [{ url: issue(1).url, add: [], remove: ['Factory:Start'] }]);
+  assert.equal(f.logged.length, 2);
 });
 
 test('factory:start on a started task only removes the label', async () => {
@@ -338,7 +354,7 @@ test('factory:start on a started task only removes the label', async () => {
   f.provider.issues = [startable(1, { body: 'Late body' })];
   await f.sync.sync();
   assert.deepEqual(f.tasks.get(id), before);
-  assert.deepEqual(f.provider.labelChanges, [{ url: issue(1).url, add: [], remove: ['Factory:Start'] }]);
+  assert.deepEqual(f.provider.commandChanges(), [{ url: issue(1).url, add: [], remove: ['Factory:Start'] }]);
 });
 
 test('factory:start waits while the issue has no description', async () => {
@@ -347,7 +363,7 @@ test('factory:start waits while the issue has no description', async () => {
   f.provider.issues = [startable(1, { body: '' })];
   await f.sync.sync();
   assert.equal(f.tasks.get(id).status, 'draft');
-  assert.deepEqual(f.provider.labelChanges, []);
+  assert.deepEqual(f.provider.commandChanges(), []);
 });
 
 test('an unstarted task is deleted once its issue loses the factory label', async () => {
@@ -368,7 +384,7 @@ test('an unstarted task is deleted once its issue is closed, even with factory:s
   await f.sync.sync();
   assert.equal(f.tasks.findByExternalUrl(issue(1).url), undefined);
   assert.throws(() => f.tasks.get(id));
-  assert.deepEqual(f.provider.labelChanges, []);
+  assert.deepEqual(f.provider.commandChanges(), []);
 });
 
 test('nothing is deleted when the list call failed or does not cover the repository of the issue', async () => {
@@ -418,4 +434,157 @@ test('after start, a closed issue or a removed factory label has no effect', asy
   f.provider.issues = [];
   await f.sync.sync();
   assert.deepEqual(f.tasks.get(id), before);
+});
+
+test('the status label is written only when it differs from the issue', async () => {
+  const f = setup();
+  await imported(f, issue(1));
+  assert.deepEqual(f.provider.labelChanges, [{ url: issue(1).url, add: ['factory:status:draft'], remove: [] }]);
+  await f.sync.sync();
+  await f.sync.sync();
+  assert.equal(f.provider.labelChanges.length, 1);
+  assert.deepEqual(f.provider.statusLabels(issue(1).url), ['factory:status:draft']);
+});
+
+test('a task started by label reports its new status in the same pass', async () => {
+  const f = setup();
+  await imported(f, issue(1));
+  f.provider.issues = [startable(1, { labels: ['factory', 'factory:project:p1', 'factory:start', 'factory:status:draft'] })];
+  await f.sync.sync();
+  assert.deepEqual(f.provider.labelChanges.slice(1), [
+    { url: issue(1).url, add: [], remove: ['factory:start'] },
+    { url: issue(1).url, add: ['factory:status:queued'], remove: ['factory:status:draft'] },
+  ]);
+});
+
+test('a status label a human set or removed is corrected on the next pass', async () => {
+  const f = setup();
+  await imported(f, issue(1));
+  const [listed] = f.provider.issues;
+  listed!.labels = ['factory', 'factory:project:p1', 'Factory:Status:Done', 'factory:status:bogus'];
+  await f.sync.sync();
+  assert.deepEqual(f.provider.labelChanges.at(-1), {
+    url: issue(1).url,
+    add: ['factory:status:draft'],
+    remove: ['Factory:Status:Done', 'factory:status:bogus'],
+  });
+  listed!.labels = ['factory', 'factory:project:p1'];
+  await f.sync.sync();
+  assert.deepEqual(f.provider.statusLabels(issue(1).url), ['factory:status:draft']);
+});
+
+for (const status of Object.keys(transitions) as TaskStatus[]) {
+  test(`a ${status} task is reported as ${statusLabel(status)}`, async () => {
+    const f = setup();
+    const id = await imported(f, issue(1));
+    f.tasks.update(id, 'system', (task) => ({ ...task, status }));
+    await f.sync.sync();
+    assert.deepEqual(f.provider.statusLabels(issue(1).url), [statusLabel(status)]);
+    assert.deepEqual(f.logged, []);
+  });
+}
+
+test('a started task whose issue left the list is no longer reported', async () => {
+  const f = setup();
+  const id = await imported(f, issue(1));
+  f.tasks.update(id, 'system', startTask);
+  f.provider.issues = [issue(1, { isOpen: false })];
+  await f.sync.sync();
+  assert.deepEqual(f.provider.statusLabels(issue(1).url), ['factory:status:queued']);
+  const changes = f.provider.labelChanges.length;
+  f.provider.issues = [];
+  f.tasks.update(id, 'system', (task) => ({ ...task, status: 'in_progress' }));
+  await f.sync.sync();
+  assert.equal(f.provider.labelChanges.length, changes);
+  assert.deepEqual(f.logged, []);
+});
+
+const lateEdits = (f: Fixture, url: string) => f.provider.comments.filter((c) => c.url === url && c.key === 'late-edit');
+
+test('edits after start get one late-edit comment across passes and edits, and change nothing', async () => {
+  const f = setup();
+  const id = await imported(f, issue(1));
+  f.tasks.update(id, 'system', startTask);
+  const before = f.tasks.get(id);
+  const edits: Partial<ExternalIssue>[] = [
+    { title: 'New title' },
+    { body: 'New body' },
+    { labels: ['factory', 'factory:project:p1', 'ui'] },
+    { labels: ['factory', 'factory:project:p1', 'factory:supervised'] },
+    { labels: ['factory', 'factory:project:p1', 'factory:model:sonnet'] },
+  ];
+  for (const edit of edits) {
+    f.provider.issues = [issue(1, edit)];
+    await f.sync.sync();
+    await f.sync.sync();
+  }
+  const comments = lateEdits(f, issue(1).url);
+  assert.equal(comments.length, 1);
+  assert.match(comments[0]!.body, /already started/);
+  assert.match(comments[0]!.body, /not incorporated/);
+  assert.match(comments[0]!.body, /new issue/);
+  assert.deepEqual(f.tasks.get(id), before);
+});
+
+test('each edited config option is a late edit on its own', async () => {
+  for (const labels of [['factory', 'factory:project:p1', 'ui'], ['factory', 'factory:project:p1', 'factory:supervised'], ['factory', 'factory:project:p1', 'factory:model:sonnet']]) {
+    const f = setup();
+    const id = await imported(f, issue(1));
+    f.tasks.update(id, 'system', startTask);
+    f.provider.issues = [issue(1, { labels })];
+    await f.sync.sync();
+    assert.equal(lateEdits(f, issue(1).url).length, 1, labels.join(','));
+  }
+});
+
+test('an unchanged issue gets no late-edit comment, whatever factory labels it carries', async () => {
+  const f = setup();
+  const id = await imported(f, issue(1, { labels: ['factory', 'factory:project:p1', 'ui', 'factory:model:sonnet'] }));
+  f.provider.issues = [startable(1, { labels: ['factory', 'factory:project:p1', 'factory:start', 'ui', 'factory:model:sonnet'] })];
+  await f.sync.sync();
+  assert.equal(f.tasks.get(id).status, 'queued');
+  // Same content, with factory labels in another case and order, a closed issue and a project label changed.
+  f.provider.issues = [
+    issue(1, { isOpen: false, labels: ['Factory:Model:Sonnet', 'FACTORY', 'factory:project:other', 'ui', 'ui', 'factory:status:done', 'factory:start'] }),
+  ];
+  for (let pass = 0; pass < 3; pass++) await f.sync.sync();
+  assert.deepEqual(lateEdits(f, issue(1).url), []);
+});
+
+test('edits before start get no late-edit comment', async () => {
+  const f = setup();
+  const id = await imported(f, issue(1));
+  f.provider.issues = [issue(1, { title: 'Edited in draft' })];
+  await f.sync.sync();
+  f.tasks.update(id, 'reviewer', (task) => requestClarification(task, 'What?'));
+  f.provider.issues = [issue(1, { title: 'Edited in draft', labels: ['factory', 'factory:project:p1', 'ui'] })];
+  await f.sync.sync();
+  assert.deepEqual(lateEdits(f, issue(1).url), []);
+  assert.deepEqual(f.tasks.get(id).labels, ['ui']);
+});
+
+test('a provider error on one issue changes neither its task nor the other issues, and is retried', async () => {
+  const f = setup();
+  f.provider.issues = [issue(1), issue(2)];
+  await f.sync.sync();
+  for (const task of f.tasks.list()) f.tasks.update(task.id, 'system', startTask);
+  const before = f.tasks.get('t1');
+  f.provider.issues = [issue(1, { body: 'Late 1' }), issue(2, { body: 'Late 2' })];
+  f.provider.failures.set(issue(1).url, 'comment failed ghp_secret');
+  f.provider.labelFailures.set(issue(1).url, 'labels failed ghp_secret');
+  await f.sync.sync();
+  assert.deepEqual(f.tasks.get('t1'), before);
+  assert.deepEqual(f.provider.statusLabels(issue(1).url), []);
+  assert.deepEqual(f.provider.statusLabels(issue(2).url), ['factory:status:queued']);
+  assert.equal(lateEdits(f, issue(2).url).length, 1);
+  assert.deepEqual(f.logged, [
+    `issue sync: ${issue(1).url}: comment failed [redacted]`,
+    `issue sync: ${issue(1).url}: labels failed [redacted]`,
+  ]);
+  f.provider.failures.clear();
+  f.provider.labelFailures.clear();
+  await f.sync.sync();
+  assert.deepEqual(f.provider.statusLabels(issue(1).url), ['factory:status:queued']);
+  assert.equal(lateEdits(f, issue(1).url).length, 1);
+  assert.deepEqual(f.tasks.get('t1'), before);
 });
