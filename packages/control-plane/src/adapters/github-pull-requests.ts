@@ -5,6 +5,7 @@ import type {
   PullRequestReviewState,
   PullRequestWriter,
 } from '@factory/core';
+import { apiBase, nextPage, requestGitHub, type GitHubRequest } from './github-api.ts';
 
 const reviewStates: Record<string, PullRequestReviewState> = {
   APPROVED: 'approved',
@@ -106,22 +107,8 @@ export class GitHubPullRequests implements PullRequestReader, PullRequestWriter 
     return { body: await response.json(), next: nextPage(response.headers.get('link')) };
   }
 
-  async #request(apiRequestUrl: string, url: string, options: { method?: 'GET' | 'POST' | 'PUT'; body?: object } = {}): Promise<Response> {
-    const { method = 'GET', body } = options;
-    const response = await this.#fetch(apiRequestUrl, {
-      method,
-      headers: {
-        authorization: `Bearer ${this.#token}`,
-        accept: 'application/vnd.github+json',
-        'x-github-api-version': '2022-11-28',
-        // GitHub rejects requests without one.
-        'user-agent': 'agentic-software-factory',
-        ...(body && { 'content-type': 'application/json' }),
-      },
-      ...(body && { body: JSON.stringify(body) }),
-    });
-    if (!response.ok) throw new Error(`GitHub answered ${response.status} for ${url}: ${(await response.text()).slice(0, 200)}`);
-    return response;
+  #request(apiRequestUrl: string, url: string, options: GitHubRequest = {}): Promise<Response> {
+    return requestGitHub(this.#fetch, this.#token, apiRequestUrl, url, options);
   }
 }
 
@@ -141,18 +128,9 @@ function toReview(review: GitHubReview): PullRequestReview | undefined {
   return { id, state, author, body: typeof review.body === 'string' ? review.body : '', url, submittedAt };
 }
 
-/** The `rel="next"` target of GitHub's Link header. */
-function nextPage(link: string | null): string | undefined {
-  return link
-    ?.split(',')
-    .map((part) => /<([^>]+)>;\s*rel="next"/.exec(part)?.[1])
-    .find((target) => target !== undefined);
-}
-
 /** The core accepts only https://host/owner/repo/pull/number URLs for pull requests. */
 function apiUrl(pullRequestUrl: string): string {
   const { host, pathname } = new URL(pullRequestUrl);
   const [owner, repo, , number] = pathname.split('/').filter(Boolean);
-  const base = host === 'github.com' ? 'https://api.github.com' : `https://${host}/api/v3`;
-  return `${base}/repos/${owner}/${repo}/pulls/${number}`;
+  return `${apiBase(host)}/repos/${owner}/${repo}/pulls/${number}`;
 }

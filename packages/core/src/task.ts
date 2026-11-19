@@ -232,6 +232,20 @@ export interface ExternalLink {
   key: string;
 }
 
+/** An issue as its provider reports it; the source a managed task is created from. */
+export interface ExternalIssue extends ExternalLink {
+  /**
+   * `https://<host>/<owner>/<repo>` of the repository the provider names for
+   * the issue, which may differ from the one it was found through after a transfer.
+   */
+  repoUrl: string;
+  title: string;
+  /** Markdown; empty when the issue has none. */
+  body: string;
+  labels: string[];
+  isOpen: boolean;
+}
+
 export interface Task {
   id: string;
   createdAt: string;
