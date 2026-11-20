@@ -249,6 +249,11 @@ pre {
   max-width: 1440px;
 }
 
+/* The task view adds a column beside its usual one. */
+.with-aside {
+  max-width: 1240px;
+}
+
 section {
   margin-top: 32px;
 }
@@ -811,6 +816,29 @@ a.issue-link:hover {
 .task-header .meta {
   margin-top: 10px;
   font-size: 13px;
+}
+
+.task-header .task-labels {
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.task-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  align-items: start;
+  gap: 20px;
+  margin-top: 24px;
+}
+
+/* With nothing to show beside it, the main column takes the full width. */
+.task-columns:has(> .task-aside:empty) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.task-main > .box:first-child,
+.task-aside > .box:first-child {
+  margin-top: 0;
 }
 
 .box.failure {
@@ -1619,7 +1647,8 @@ input[type='radio'] {
 }
 
 @media (max-width: 1180px) {
-  .board {
+  .board,
+  .task-columns {
     grid-template-columns: minmax(0, 1fr);
   }
 }
