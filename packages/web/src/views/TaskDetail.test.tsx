@@ -112,3 +112,9 @@ test('the header offers a shell only while the task allows one and has a live ex
   // While a shell is open, TaskDetail passes no `onOpenShell`.
   expect(render(task({}))).not.toContain('Open shell');
 });
+
+test('the header shows the labels on a line of their own, and no such line without labels', () => {
+  const html = render(task({ labels: ['ui', 'api'] }));
+  expect(html).toMatch(/<p class="meta task-labels"><span class="label">ui<\/span><span class="label">api<\/span><\/p>/);
+  expect(render(task({}))).not.toContain('task-labels');
+});

@@ -69,76 +69,81 @@ export function TaskDetail({ id, projects }: { id: string; projects: Project[] |
       <Header task={task} onChange={set} onOpenShell={isShellOpen ? undefined : () => setShellTaskId(id)} />
       {isShellOpen && <Shell task={task} onClose={() => setShellTaskId(undefined)} />}
 
-      {task.failureReason && (
-        <Section title="Failure" className="failure">
-          <pre>{task.failureReason}</pre>
-        </Section>
-      )}
-
-      {task.status === 'clarification_required' && <ClarificationNote task={task} onChange={set} />}
-
-      {(task.dependsOn.length > 0 || !hasStarted(task.status)) && <DependenciesSection task={task} onChange={set} />}
-
-      {task.pullRequests.length > 0 && (
-        <Section title="Pull requests">
-          <PullRequestList pullRequests={task.pullRequests} />
-        </Section>
-      )}
-
-      {questions.length + approvals.length + pullRequests.length > 0 && (
-        <Section
-          title={
-            <>
-              Needs your input
-              <Spinner isBusy={task.isInputUnderReview} label={inputReviewLabel} />
-            </>
-          }
-          className="needs-input"
-        >
-          {questions.map((question) => (
-            <QuestionForm key={question.id} taskId={task.id} question={question} onDone={set} />
-          ))}
-          {approvals.map((review) =>
-            review.kind === 'decision' ? (
-              <DecisionApprovalForm key={review.item.id} taskId={task.id} decision={review.item} onDone={set} />
-            ) : (
-              <ArtifactApprovalRequest key={review.item.id} artifact={review.item} onOpen={() => setOpenArtifactId(review.item.id)} />
-            ),
+      <div className="task-columns">
+        <div className="task-main">
+          {task.failureReason && (
+            <Section title="Failure" className="failure">
+              <pre>{task.failureReason}</pre>
+            </Section>
           )}
-          {pullRequests.map((pullRequest) => (
-            <PullRequestReviewRequest key={pullRequest.url} pullRequest={pullRequest} />
-          ))}
-        </Section>
-      )}
 
-      {task.plan.length > 0 && (
-        <Section title="Plan">
-          <PlanPipeline plan={task.plan} />
-        </Section>
-      )}
+          {task.status === 'clarification_required' && <ClarificationNote task={task} onChange={set} />}
 
-      <LiveActivity taskId={task.id} isLive={task.execution !== undefined} />
+          {task.pullRequests.length > 0 && (
+            <Section title="Pull requests">
+              <PullRequestList pullRequests={task.pullRequests} />
+            </Section>
+          )}
 
-      <details className="box spec" open={isEditable(task.status)}>
-        <summary className="section-title">Specification</summary>
-        <Markdown>{task.specification}</Markdown>
-      </details>
+          {questions.length + approvals.length + pullRequests.length > 0 && (
+            <Section
+              title={
+                <>
+                  Needs your input
+                  <Spinner isBusy={task.isInputUnderReview} label={inputReviewLabel} />
+                </>
+              }
+              className="needs-input"
+            >
+              {questions.map((question) => (
+                <QuestionForm key={question.id} taskId={task.id} question={question} onDone={set} />
+              ))}
+              {approvals.map((review) =>
+                review.kind === 'decision' ? (
+                  <DecisionApprovalForm key={review.item.id} taskId={task.id} decision={review.item} onDone={set} />
+                ) : (
+                  <ArtifactApprovalRequest key={review.item.id} artifact={review.item} onOpen={() => setOpenArtifactId(review.item.id)} />
+                ),
+              )}
+              {pullRequests.map((pullRequest) => (
+                <PullRequestReviewRequest key={pullRequest.url} pullRequest={pullRequest} />
+              ))}
+            </Section>
+          )}
 
-      {entries.length > 0 && (
-        <Section title="Timeline">
-          <Timeline entries={entries} onOpenArtifact={setOpenArtifactId} />
-        </Section>
-      )}
+          {task.plan.length > 0 && (
+            <Section title="Plan">
+              <PlanPipeline plan={task.plan} />
+            </Section>
+          )}
 
-      {canSendFollowUp(task) && <FollowUpForm task={task} onSent={set} />}
+          <details className="box spec" open={isEditable(task.status)}>
+            <summary className="section-title">Specification</summary>
+            <Markdown>{task.specification}</Markdown>
+          </details>
 
-      {changes.length > 0 && (
-        <Section title="Changelog" className="changelog-box">
-          <Changelog changes={changes} describe={describeChange} />
-        </Section>
-      )}
+          {entries.length > 0 && (
+            <Section title="Timeline">
+              <Timeline entries={entries} onOpenArtifact={setOpenArtifactId} />
+            </Section>
+          )}
 
-      {task.metrics && <Consumption metrics={task.metrics} />}
+          {canSendFollowUp(task) && <FollowUpForm task={task} onSent={set} />}
+
+          {changes.length > 0 && (
+            <Section title="Changelog" className="changelog-box">
+              <Changelog changes={changes} describe={describeChange} />
+            </Section>
+          )}
+        </div>
+
+        {/* Status at a glance, beside the content that needs reading. Empty, it collapses (see styles). */}
+        <aside className="task-aside">
+          {task.metrics && <Consumption metrics={task.metrics} />}
+          {(task.dependsOn.length > 0 || !hasStarted(task.status)) && <DependenciesSection task={task} onChange={set} />}
+          <LiveActivity taskId={task.id} isLive={task.execution !== undefined} />
+        </aside>
+      </div>
 
       {openArtifact && (
         <ArtifactModal
@@ -249,11 +254,6 @@ export function Header({
         )}
         <span>{task.autonomyMode}</span>
         <span>{task.model}</span>
-        {task.labels.map((label) => (
-          <span key={label} className="label">
-            {label}
-          </span>
-        ))}
         <span className="created-by">
           {/* Managed tasks the control plane imported have no creator; like the changelog, show the actor. */}
           created by {task.createdBy === undefined && task.external ? 'system' : <UserName id={task.createdBy} />}
@@ -261,6 +261,15 @@ export function Header({
         <span title={task.updatedAt}>updated {relativeTime(task.updatedAt)}</span>
         <span className="mono">{task.id}</span>
       </p>
+      {task.labels.length > 0 && (
+        <p className="meta task-labels">
+          {task.labels.map((label) => (
+            <span key={label} className="label">
+              {label}
+            </span>
+          ))}
+        </p>
+      )}
       {task.external && <p className="hint">Title, specification and labels come from the issue; change them there.</p>}
       <ErrorText message={error} />
       {isRequestingClarification && task.status === 'draft' && (

@@ -36,7 +36,7 @@ function Shell({ route }: { route: Exclude<Route, { name: 'login' }> }) {
   // Shows a saved project in the sidebar right away instead of on the next poll.
   const upsert = (saved: Project) =>
     set(projects?.some((p) => p.id === saved.id) ? projects.map((p) => (p.id === saved.id ? saved : p)) : [...(projects ?? []), saved]);
-  const width = route.name === 'project' ? ' wide' : '';
+  const width = route.name === 'project' ? ' wide' : route.name === 'task' ? ' with-aside' : '';
 
   return (
     <UsersProvider users={userMap} reload={reloadUsers}>
