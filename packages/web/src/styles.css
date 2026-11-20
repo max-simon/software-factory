@@ -941,6 +941,57 @@ details[open] > summary {
   margin-bottom: 10px;
 }
 
+/* Shell */
+
+.shell-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.shell-header .section-title {
+  margin: 0;
+}
+
+.shell-header .actions {
+  margin: 0 0 0 auto;
+}
+
+.shell-state {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.shell-state.connected {
+  color: var(--green);
+}
+
+.shell-state.closed {
+  color: var(--red);
+}
+
+.shell-panel .banner {
+  margin: 12px 0 0;
+}
+
+.shell-reason {
+  margin-top: 12px;
+  color: var(--red-soft);
+}
+
+/* xterm fits its rows and columns to this box, so it needs a fixed height. */
+.shell-terminal {
+  height: 420px;
+  margin-top: 12px;
+  padding: 8px;
+  background: var(--raised);
+  border-radius: 6px;
+}
+
+.shell-panel .hint {
+  margin-top: 10px;
+}
+
 /* Timeline */
 
 .timeline {

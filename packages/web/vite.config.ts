@@ -14,7 +14,8 @@ export default defineConfig({
     proxy: {
       '/auth': toControlPlane,
       '/projects': toControlPlane,
-      '/tasks': toControlPlane,
+      // The browser shell is a WebSocket under /tasks/:id/shell.
+      '/tasks': { ...toControlPlane, ws: true },
       '/users': toControlPlane,
       // So the `claude mcp add` command the account page shows works against the dev server too.
       '/mcp': toControlPlane,

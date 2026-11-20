@@ -16,6 +16,7 @@ export function NewTask({ projectId, project }: { projectId: string; project: Pr
   const [baseBranch, setBaseBranch] = useState('');
   const [isSupervised, setSupervised] = useState(false);
   const [model, setModel] = useState<TaskModel>('opus');
+  const [isShellEnabled, setShellEnabled] = useState(true);
   const [dependsOn, setDependsOn] = useState<string[]>([]);
   const { data: projectTasks } = usePolling(() => api.listProjectTasks(projectId), `new-task-${projectId}`);
   const { isBusy, error, run } = useAction();
@@ -29,6 +30,7 @@ export function NewTask({ projectId, project }: { projectId: string; project: Pr
       ...common,
       autonomyMode: isSupervised ? 'supervised' : 'autonomous',
       model,
+      shellEnabled: isShellEnabled,
       ...(repoUrl.trim() && { repoUrl: repoUrl.trim() }),
       ...(repoUrl.trim() && baseBranch.trim() && { baseBranch: baseBranch.trim() }),
       ...(dependsOn.length > 0 && { dependsOn }),
@@ -80,6 +82,13 @@ export function NewTask({ projectId, project }: { projectId: string; project: Pr
         <span>
           Supervised
           <span className="hint">The agent may ask questions and request approval of decisions and artifacts.</span>
+        </span>
+      </label>
+      <label className="check">
+        <input type="checkbox" checked={isShellEnabled} onChange={(e) => setShellEnabled(e.target.checked)} />
+        <span>
+          Allow a browser shell into the execution server
+          <span className="hint">Engineers can open a terminal in the task's container until the task is done.</span>
         </span>
       </label>
       <ErrorText message={error} />

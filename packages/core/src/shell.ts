@@ -1,4 +1,4 @@
-import type { Task } from './task.ts';
+import type { TaskView } from './views.ts';
 
 /** Terminal size in character cells. */
 export interface ShellSize {
@@ -52,6 +52,6 @@ export function parseShellControl(text: string): ShellControl | undefined {
   return size && { type: 'resize', ...size };
 }
 
-/** Whether an engineer may open a shell: the task allows it and has an execution server that is not going away. */
-export const canOpenShell = (task: Pick<Task, 'shellEnabled' | 'execution' | 'status'>): boolean =>
+/** Whether an engineer may open a shell: the task allows it and has an execution server that is not going away. Takes the browser's view too. */
+export const canOpenShell = (task: Pick<TaskView, 'shellEnabled' | 'execution' | 'status'>): boolean =>
   task.shellEnabled && task.execution !== undefined && task.status !== 'done';

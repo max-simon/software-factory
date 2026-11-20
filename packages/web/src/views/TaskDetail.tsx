@@ -1,4 +1,5 @@
 import {
+  canOpenShell,
   formatCost,
   formatDuration,
   formatTokens,
@@ -24,6 +25,7 @@ import { ArtifactApprovalRequest, DecisionApprovalForm, PullRequestReviewRequest
 import { Markdown } from '../components/Markdown.tsx';
 import { PlanPipeline } from '../components/PlanPipeline.tsx';
 import { PullRequestIndicator } from '../components/PullRequestIndicator.tsx';
+import { Shell } from '../components/Shell.tsx';
 import { HeartbeatNote, inputReviewLabel, prReviewLabel, Spinner, StatusLabel } from '../components/Status.tsx';
 import { Timeline } from '../components/Timeline.tsx';
 import { useAction, usePolling } from '../hooks.ts';
@@ -44,6 +46,9 @@ import {
 export function TaskDetail({ id, projects }: { id: string; projects: Project[] | undefined }) {
   const { data: task, error, set } = usePolling(() => api.getTask(id), id);
   const [openArtifactId, setOpenArtifactId] = useState<string>();
+  // By task id, so moving to another task does not open a shell into it.
+  const [shellTaskId, setShellTaskId] = useState<string>();
+  const isShellOpen = shellTaskId === id;
   const changes = useChanges(id, task?.updatedAt);
 
   useEffect(() => {
@@ -61,7 +66,8 @@ export function TaskDetail({ id, projects }: { id: string; projects: Project[] |
         ← {projects?.find((p) => p.id === task.projectId)?.title ?? 'Project'}
       </a>
       {error && <p className="banner">{error.message} Retrying…</p>}
-      <Header task={task} onChange={set} />
+      <Header task={task} onChange={set} onOpenShell={isShellOpen ? undefined : () => setShellTaskId(id)} />
+      {isShellOpen && <Shell task={task} onClose={() => setShellTaskId(undefined)} />}
 
       {task.failureReason && (
         <Section title="Failure" className="failure">
@@ -147,7 +153,16 @@ export function TaskDetail({ id, projects }: { id: string; projects: Project[] |
   );
 }
 
-export function Header({ task, onChange }: { task: TaskView; onChange: (task: TaskView) => void }) {
+/** Without `onOpenShell`, e.g. while the shell is open, the header offers no shell. */
+export function Header({
+  task,
+  onChange,
+  onOpenShell,
+}: {
+  task: TaskView;
+  onChange: (task: TaskView) => void;
+  onOpenShell?: () => void;
+}) {
   const { isBusy, error, run } = useAction();
   const [isRequestingClarification, setIsRequestingClarification] = useState(false);
   // Each confirmation names what is lost, since none of these can be undone.
@@ -163,6 +178,11 @@ export function Header({ task, onChange }: { task: TaskView; onChange: (task: Ta
             <a className="button" href={href.edit(task.id)}>
               Edit
             </a>
+          )}
+          {onOpenShell && canOpenShell(task) && (
+            <button className="button" onClick={onOpenShell}>
+              Open shell
+            </button>
           )}
           {task.status === 'draft' && (
             <button className="button" onClick={() => setIsRequestingClarification(true)}>
