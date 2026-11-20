@@ -18,7 +18,6 @@ const task = (overrides: Partial<TaskView> = {}): TaskView => ({
   labels: ['bug'],
   autonomyMode: 'autonomous',
   model: 'opus',
-  agent: 'claude',
   status: 'draft',
   rank: 0,
   dependsOn: [],

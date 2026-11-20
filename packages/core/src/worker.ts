@@ -1,6 +1,6 @@
 import { DomainError } from './errors.ts';
 import { markFailed } from './operations.ts';
-import type { AgentConsole, Execution, FollowUp, Heartbeat, Task, TaskStatus, UsageLimit, Work } from './task.ts';
+import type { Execution, FollowUp, Heartbeat, Task, TaskStatus, UsageLimit, Work } from './task.ts';
 
 // The worker lifecycle: the control plane starts an execution server; its
 // runner asks for work with a heartbeat, accepts it, beats while it works, and
@@ -145,19 +145,3 @@ export const needsNotify = (task: Task, now: string): boolean =>
 
 /** Whether the task's execution server works on it or was notified of work. */
 export const isWorking = (task: Task): boolean => task.execution !== undefined && task.execution.worker.state !== 'idle';
-
-/** A new agent console address of the task's execution server, which a restart may have moved. */
-export function moveAgentConsole(task: Task, url: string): Task {
-  const console = task.execution?.console;
-  if (console === undefined) throw new DomainError('no_execution', `task ${task.id} has no agent console`);
-  return updateExecution(task, { console: { ...console, url } });
-}
-
-/** The agent console of the task's execution server; only opencode execution servers have one. */
-export function agentConsoleOf(task: Task): AgentConsole {
-  const console = task.execution?.console;
-  if (console === undefined) {
-    throw new DomainError('no_execution', `task ${task.id} has no agent console: it needs an opencode execution server`);
-  }
-  return console;
-}

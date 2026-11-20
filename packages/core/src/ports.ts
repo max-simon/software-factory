@@ -1,7 +1,7 @@
 import type { TaskChange } from './changelog.ts';
 import type { Project } from './project.ts';
 import type { InputReview, InputReviewRequest, PrReview, PrReviewRequest, SpecReview, SpecReviewRequest } from './review.ts';
-import type { AgentConsole, ExternalIssue, Heartbeat, PullRequest, Task, TaskAgent, TaskModel, TaskStatus } from './task.ts';
+import type { ExternalIssue, Heartbeat, PullRequest, Task, TaskModel, TaskStatus } from './task.ts';
 import type { AccessToken } from './access-token.ts';
 import type { Session } from './session.ts';
 import type { Credentials, ExternalIdentity, User } from './user.ts';
@@ -41,22 +41,16 @@ export interface ExecutionSpec {
   repoUrl?: string;
   baseBranch?: string;
   model: TaskModel;
-  agent: TaskAgent;
   controlPlaneUrl: string;
   /** Plain agent token; never stored. */
   token: string;
 }
-
-/** The port opencode serves its API and web console on inside the execution server. */
-export const agentConsolePort = 4096;
 
 /** The port the runner listens on for nudges inside the execution server. */
 export const doorbellPort = 4097;
 
 export interface StartedExecution {
   executionId: string;
-  /** Only for agents that have a web console (opencode). */
-  agentConsole?: AgentConsole;
 }
 
 /**
@@ -70,12 +64,10 @@ export interface ExecutionRuntime {
   /**
    * Tells the execution server that work waits, resuming it if the runtime
    * suspended it; its runner then asks for the work. Harmless to repeat.
-   * Returns the agent console's address when it may have changed; `agent` is
-   * the one the execution server was started with.
    */
-  notify(executionId: string, agent: TaskAgent): Promise<{ agentConsoleUrl?: string }>;
+  notify(executionId: string): Promise<void>;
   /** Restarts a hung or silent execution server, keeping its disk; its runner then asks for work. */
-  restart(executionId: string, agent: TaskAgent): Promise<{ agentConsoleUrl?: string }>;
+  restart(executionId: string): Promise<void>;
   remove(executionId: string): Promise<void>;
   /** Ids of every execution server this runtime started that still exists, running or stopped. */
   listExecutions(): Promise<string[]>;

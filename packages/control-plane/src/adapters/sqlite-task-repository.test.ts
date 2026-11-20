@@ -120,8 +120,6 @@ test('reads execution fields stored on the task before executions had their own 
       executionId: 'c1',
       worker,
       workAcceptedAt: '2026-11-12T10:30:00.000Z',
-      agentConsoleUrl: 'http://127.0.0.1:1',
-      agentConsolePassword: 'pw',
     }),
   );
   repo.insert(flat('unstated', { tokenHash: 'h2', executionId: 'c2' }));
@@ -131,7 +129,6 @@ test('reads execution fields stored on the task before executions had their own 
     tokenHash: 'h1',
     worker,
     workAcceptedAt: '2026-11-12T10:30:00.000Z',
-    console: { url: 'http://127.0.0.1:1', password: 'pw' },
   });
   assert.deepEqual(repo.get('unstated')!.execution, {
     id: 'c2',
@@ -139,7 +136,7 @@ test('reads execution fields stored on the task before executions had their own 
     worker: { state: 'working', since: '2026-11-12T10:00:00.000Z' },
   });
   assert.equal(repo.get('detached')!.execution, undefined);
-  for (const key of ['tokenHash', 'executionId', 'worker', 'workAcceptedAt', 'agentConsoleUrl', 'agentConsolePassword']) {
+  for (const key of ['tokenHash', 'executionId', 'worker', 'workAcceptedAt']) {
     assert.equal(key in repo.get('full')!, false, key);
   }
 });
@@ -152,22 +149,6 @@ test('reads tasks stored before models existed as opus', () => {
   assert.equal(repo.get('old')?.model, 'opus');
   assert.equal(repo.get('new')?.model, 'sonnet');
   assert.deepEqual(repo.list().map((task) => `${task.id}=${task.model}`), ['new=sonnet', 'old=opus']);
-});
-
-test('reads tasks stored before agents were chosen per task as claude', (t) => {
-  const dir = mkdtempSync(join(tmpdir(), 'repo-'));
-  t.after(() => rmSync(dir, { recursive: true }));
-  const path = join(dir, 'tasks.db');
-  const repo = new SqliteTaskRepository(path);
-  const { agent: _dropped, ...legacy } = draft('old');
-  repo.insert(legacy as Task);
-  repo.insert({ ...draft('new'), agent: 'opencode' });
-  repo.close();
-  const reopened = new SqliteTaskRepository(path);
-  assert.equal(reopened.get('old')?.agent, 'claude');
-  assert.equal(reopened.get('new')?.agent, 'opencode');
-  assert.deepEqual(reopened.list().map((task) => `${task.id}=${task.agent}`), ['new=opencode', 'old=claude']);
-  reopened.close();
 });
 
 test('reads tasks stored before follow-ups existed with none', () => {
@@ -312,6 +293,21 @@ test('drops the assignees and their changelog entries of tasks stored while task
   const repo = new SqliteTaskRepository(path);
   assert.equal('assignees' in repo.get('a')!, false);
   assert.deepEqual(repo.listChanges('a'), [{ at, actor: 'user', userId: 'u1', field: 'created' }]);
+});
+
+test('drops the agent and the agent console of tasks stored while an agent was chosen per task', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'repo-'));
+  t.after(() => rmSync(dir, { recursive: true }));
+  const path = join(dir, 'tasks.db');
+  new SqliteTaskRepository(path).insert(draft('a'));
+  new SqliteTaskRepository(path).insert(running('b'));
+  const raw = new DatabaseSync(path);
+  raw.prepare(`UPDATE tasks SET data = json_set(data, '$.agent', 'opencode', '$.agentConsoleUrl', 'u', '$.agentConsolePassword', 'p') WHERE id = 'a'`).run();
+  raw.prepare(`UPDATE tasks SET data = json_set(data, '$.execution.console', json('{"url":"u","password":"p"}')) WHERE id = 'b'`).run();
+  raw.close();
+  const repo = new SqliteTaskRepository(path);
+  assert.deepEqual(repo.get('a'), draft('a'));
+  assert.deepEqual(repo.get('b'), running('b'));
 });
 
 test('refuses to save a task that was never inserted', () => {

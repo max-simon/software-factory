@@ -133,7 +133,6 @@ test('imports an open issue as a draft managed task, created by system, with a t
   assert.deepEqual(task.labels, ['bug', 'ui']);
   assert.equal(task.autonomyMode, 'supervised');
   assert.equal(task.model, 'sonnet');
-  assert.equal(task.agent, 'claude');
   assert.deepEqual(task.external, { provider: 'github', url: issue(1).url, key: 'o/r#1' });
   assert.equal('createdBy' in task, false);
   assert.deepEqual(f.tasks.changes('t1'), [{ at: task.createdAt, actor: 'system', field: 'created' }]);

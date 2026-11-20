@@ -36,7 +36,6 @@ const task = (id: string, status: TaskView['status'], updatedAt: string, overrid
   labels: [],
   autonomyMode: 'supervised',
   model: 'opus',
-  agent: 'claude',
   status,
   rank: 0,
   plan: [],

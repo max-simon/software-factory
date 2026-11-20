@@ -20,7 +20,6 @@ import type {
   ReviewVerdict,
   SessionMetrics,
   TaskEdit,
-  TaskAgent,
   TaskModel,
   TokenUsage,
 } from '@factory/core';
@@ -101,7 +100,6 @@ export function parseNewTask(body: unknown): NewTask {
       ? undefined
       : oneOf<AutonomyMode>(fields, 'autonomyMode', ['autonomous', 'supervised']);
   const model = fields.model === undefined ? undefined : oneOf<TaskModel>(fields, 'model', ['opus', 'sonnet']);
-  const agent = fields.agent === undefined ? undefined : oneOf<TaskAgent>(fields, 'agent', ['claude', 'opencode']);
   const labels = optionalStringArray(fields, 'labels');
   const baseBranch = optionalString(fields, 'baseBranch');
   const repoUrl = fields.repoUrl === undefined ? undefined : repositoryUrl(fields, 'repoUrl');
@@ -116,7 +114,6 @@ export function parseNewTask(body: unknown): NewTask {
     ...(autonomyMode && { autonomyMode }),
     ...(baseBranch && { baseBranch }),
     ...(model && { model }),
-    ...(agent && { agent }),
     ...(dependsOn && { dependsOn }),
   };
 }

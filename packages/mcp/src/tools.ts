@@ -27,7 +27,6 @@ function summarize(task: TaskView) {
     title: task.title,
     status: task.status,
     model: task.model,
-    agent: task.agent,
     ...(task.repoUrl !== undefined && { repoUrl: task.repoUrl }),
     ...(task.dependsOn.length > 0 && { dependsOn: task.dependsOn }),
     updatedAt: task.updatedAt,
@@ -84,7 +83,7 @@ export function registerTools(server: McpServer, client: ApiClient): void {
     'set_task',
     {
       description:
-        'Create a factory task, or change one by passing its id. A new task is a draft; start: true queues it for an agent. A queued task starts only once every task in dependsOn is done, so a whole chain can be queued at once. Title, specification and labels can change until the task is queued, dependsOn until it starts; projectId, repoUrl, baseBranch, autonomyMode, model and agent are set on creation only.',
+        'Create a factory task, or change one by passing its id. A new task is a draft; start: true queues it for an agent. A queued task starts only once every task in dependsOn is done, so a whole chain can be queued at once. Title, specification and labels can change until the task is queued, dependsOn until it starts; projectId, repoUrl, baseBranch, autonomyMode and model are set on creation only.',
       inputSchema: {
         id: z.string().min(1).optional().describe('The task to change; omit to create one'),
         projectId: z.string().min(1).optional().describe('Required to create: the project the task belongs to; see list_projects'),
@@ -95,10 +94,6 @@ export function registerTools(server: McpServer, client: ApiClient): void {
         labels: z.array(z.string().min(1)).optional(),
         autonomyMode: z.enum(['autonomous', 'supervised']).optional().describe('Defaults to autonomous'),
         model: z.enum(['opus', 'sonnet']).optional().describe('Defaults to opus'),
-        agent: z
-          .enum(['claude', 'opencode'])
-          .optional()
-          .describe('The coding agent that works on the task. Defaults to claude; opencode needs ANTHROPIC_API_KEY on the control plane'),
         dependsOn: z
           .array(z.string().min(1))
           .optional()
@@ -117,7 +112,7 @@ export function registerTools(server: McpServer, client: ApiClient): void {
   server.registerTool(
     'list_tasks',
     {
-      description: 'List factory tasks with id, project id, title, status, model, agent, repo and pull request URLs.',
+      description: 'List factory tasks with id, project id, title, status, model, repo and pull request URLs.',
       inputSchema: {
         projectId: z.string().min(1).optional().describe('Only tasks of this project'),
         status: z

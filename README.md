@@ -6,7 +6,7 @@ when they need a decision, and leave a record a human can trust without
 reading a transcript.
 
 The factory is that workplace. Engineers describe work as tasks. Each task gets
-its own container and its own coding agent (`claude` or `opencode`), which
+its own container and its own coding agent (the `claude` CLI), which
 plans, implements and opens pull requests. A reviewer agent checks
 specifications, answers routine questions and rates every pull request. A
 local control plane holds the state and orchestrates both.
@@ -106,14 +106,6 @@ Full autonomy rests on a model's judgment. Turn on auto-merge only where that
 risk is acceptable, and read the [known gaps](docs/architecture.md#known-gaps)
 first.
 
-## Step into the session with OpenCode
-
-Sometimes the record is not enough and you want to look over the agent's
-shoulder. For tasks run with `opencode`, **Open in OpenCode** connects you to
-the agent's own console inside its container: the live session, which you can
-read and steer, and a terminal in the agent's workspace. It is served on
-loopback only, with a password that changes with every container.
-
 ## Task lifecycle
 
 ```mermaid
@@ -163,7 +155,7 @@ Put these in `.env` in the repository root (git-ignored, loaded by `yarn start`)
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | at least one of the two | Used by `opencode` (required for it) and by `claude` when no OAuth token is set |
+| `ANTHROPIC_API_KEY` | at least one of the two | Used by `claude` and the reviewer when no OAuth token is set |
 | `CLAUDE_CODE_OAUTH_TOKEN` | at least one of the two | Preferred by `claude` and the reviewer; uses your subscription |
 | `GITHUB_TOKEN` | required | Used by agents, reviewer and control plane |
 | `FACTORY_GIT_USER_NAME`, `FACTORY_GIT_USER_EMAIL` | required | Commit author |

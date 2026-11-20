@@ -1,4 +1,4 @@
-// Activity lines the engineer sees while an agent works, shared by the adapters.
+// Activity lines the engineer sees while an agent works.
 
 const maxActivityLength = 120;
 

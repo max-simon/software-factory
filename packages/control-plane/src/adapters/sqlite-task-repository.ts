@@ -1,7 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { DomainError } from '@factory/core';
 import type {
-  AgentConsole,
   ChangeActor,
   Decision,
   Execution,
@@ -78,6 +77,7 @@ export class SqliteTaskRepository implements TaskRepository {
     this.#addExternalUrls();
     this.#rankUnrankedTasks();
     this.#dropAssignees();
+    this.#dropAgents();
   }
 
   insert(task: Task, changes: readonly TaskChange[] = []): void {
@@ -208,6 +208,15 @@ export class SqliteTaskRepository implements TaskRepository {
     });
   }
 
+  /** Tasks stored while an agent was chosen per task name it, and opencode tasks kept the address and password of its console. */
+  #dropAgents(): void {
+    this.#db.exec(
+      "UPDATE tasks SET data = json_remove(data, '$.agent', '$.agentConsoleUrl', '$.agentConsolePassword', '$.execution.console') " +
+        "WHERE json_type(data, '$.agent') IS NOT NULL OR json_type(data, '$.agentConsoleUrl') IS NOT NULL " +
+        "OR json_type(data, '$.agentConsolePassword') IS NOT NULL OR json_type(data, '$.execution.console') IS NOT NULL",
+    );
+  }
+
   #appendChanges(id: string, changes: readonly TaskChange[]): void {
     const append = this.#db.prepare(
       'INSERT INTO task_changes (task_id, at, actor, user_id, field, from_value, to_value) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -274,14 +283,12 @@ type StoredDecision = Omit<Decision, 'chosen'> & { chosen?: number | string };
 interface LegacyExecutionFields {
   tokenHash?: string;
   executionId?: string;
-  agentConsoleUrl?: string;
-  agentConsolePassword?: string;
   worker?: Worker;
   workAcceptedAt?: string;
   lastHeartbeat?: Heartbeat;
 }
-type StoredTask = Omit<Task, 'model' | 'agent' | 'followUps' | 'dependsOn' | 'pullRequests' | 'decisions'> &
-  Partial<Pick<Task, 'model' | 'agent' | 'followUps' | 'dependsOn'>> & { pullRequests: StoredPullRequest[]; decisions: StoredDecision[] } & LegacyExecutionFields;
+type StoredTask = Omit<Task, 'model' | 'followUps' | 'dependsOn' | 'pullRequests' | 'decisions'> &
+  Partial<Pick<Task, 'model' | 'followUps' | 'dependsOn'>> & { pullRequests: StoredPullRequest[]; decisions: StoredDecision[] } & LegacyExecutionFields;
 
 // Decisions stored before `chosen` became an index hold the chosen text, which
 // agents often worded differently from every option; such text becomes the last option.
@@ -318,37 +325,25 @@ const toHeartbeat = ({ at, phase, activity }: Row): Heartbeat | undefined =>
  * states existed count as working since their last update.
  */
 function legacyExecution(fields: LegacyExecutionFields, updatedAt: string): Execution | undefined {
-  const { executionId, tokenHash, worker, workAcceptedAt, agentConsoleUrl, agentConsolePassword } = fields;
+  const { executionId, tokenHash, worker, workAcceptedAt } = fields;
   if (executionId === undefined || tokenHash === undefined) return undefined;
-  const console: AgentConsole | undefined =
-    agentConsoleUrl && agentConsolePassword ? { url: agentConsoleUrl, password: agentConsolePassword } : undefined;
   return {
     id: executionId,
     tokenHash,
     worker: worker ?? { state: 'working', since: updatedAt },
     ...(workAcceptedAt !== undefined && { workAcceptedAt }),
-    ...(console && { console }),
   };
 }
 
-// Tasks stored before models, agents per task, follow-ups, dependencies or pull request statuses existed lack
+// Tasks stored before models, follow-ups, dependencies or pull request statuses existed lack
 // them; they keep the old behaviour. A done task only got there once all its
 // pull requests were merged or closed, and merged is by far the common case.
 // Tasks stored before heartbeats had their own table carry one in `data`; it
 // is dropped, since a running task beats again within seconds.
 const toTask = (row: Row): Task => {
-  const {
-    lastHeartbeat: _legacy,
-    tokenHash,
-    executionId,
-    agentConsoleUrl,
-    agentConsolePassword,
-    worker,
-    workAcceptedAt,
-    ...stored
-  } = JSON.parse(row.data) as StoredTask;
+  const { lastHeartbeat: _legacy, tokenHash, executionId, worker, workAcceptedAt, ...stored } = JSON.parse(row.data) as StoredTask;
   const legacyStatus: PullRequestStatus = stored.status === 'done' ? 'merged' : 'open';
-  const legacy = { tokenHash, executionId, agentConsoleUrl, agentConsolePassword, worker, workAcceptedAt };
+  const legacy = { tokenHash, executionId, worker, workAcceptedAt };
   const execution = stored.execution ?? legacyExecution(legacy, stored.updatedAt);
   const heartbeat = toHeartbeat(row);
   const { execution: _stored, ...task } = stored;
@@ -356,7 +351,6 @@ const toTask = (row: Row): Task => {
     ...task,
     ...(execution && { execution: { ...execution, ...(heartbeat && { lastHeartbeat: heartbeat }) } }),
     model: stored.model ?? 'opus',
-    agent: stored.agent ?? 'claude',
     followUps: stored.followUps ?? [],
     dependsOn: stored.dependsOn ?? [],
     pullRequests: stored.pullRequests.map((pr) => ({ ...pr, status: pr.status ?? legacyStatus })),

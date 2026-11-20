@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { createApiClient, createMcpHandler } from '@factory/mcp';
-import { ConfigError, loadConfig, unavailableAgent } from './config.ts';
+import { ConfigError, loadConfig } from './config.ts';
 import { GitHubIssues } from './adapters/github-issues.ts';
 import { GitHubPullRequests } from './adapters/github-pull-requests.ts';
 import { PodmanRuntime } from './adapters/podman-runtime.ts';
@@ -61,7 +61,7 @@ function main(): void {
     image: config.image,
     gitUserName: config.gitUserName,
     gitUserEmail: config.gitUserEmail,
-    agentCredentials: config.agentCredentials,
+    anthropicCredential: config.agentCredential,
   });
   const users = new SqliteUserRepository(config.dbPath);
   // Hooks need the services, which publish to the hooks, so they are registered once the services exist.
@@ -82,8 +82,8 @@ function main(): void {
   const reviewer = new PodmanReviewer({
     image: config.reviewerImage,
     model: config.reviewerModel,
-    // It runs the claude CLI, so it gets what a claude task gets; claude takes either credential, so it always has one.
-    anthropicCredential: config.agentCredentials.claude!,
+    // It runs the claude CLI, so it gets what a task gets.
+    anthropicCredential: config.agentCredential,
   });
   const pullRequests = new GitHubPullRequests(process.env.GITHUB_TOKEN!);
   // The hooks record the reviews they run; the engineer API shows them.
@@ -113,7 +113,7 @@ function main(): void {
       clientThrottle: new LoginThrottle({ lockoutAfter: clientLockoutAfter }),
     }),
     ...tokenRoutes(accessTokens),
-    ...engineerRoutes(tasks, service, projects, (agent) => unavailableAgent(config.agentCredentials, agent), reviews),
+    ...engineerRoutes(tasks, service, projects, reviews),
     ...agentRoutes(tasks, agent, projects),
   ];
   const server = createServer(routes, {

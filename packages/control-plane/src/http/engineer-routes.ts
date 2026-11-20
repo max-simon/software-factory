@@ -1,4 +1,4 @@
-import { toTaskView, type Principal, type ReviewState, type Task, type TaskAgent } from '@factory/core';
+import { toTaskView, type Principal, type ReviewState, type Task } from '@factory/core';
 import type { ProjectService } from '../project-service.ts';
 import type { TaskService } from '../task-service.ts';
 import type { TaskStore } from '../task-store.ts';
@@ -25,18 +25,8 @@ function principalOf(principal: Principal | undefined): Principal {
   return principal;
 }
 
-/**
- * `unavailableAgent` says why tasks of an agent cannot run, e.g. a missing
- * credential, or undefined when they can; tasks for it are refused.
- * `reviews` tells which spec and pull request reviews run right now.
- */
-export function engineerRoutes(
-  tasks: TaskStore,
-  service: TaskService,
-  projects: ProjectService,
-  unavailableAgent: (agent: TaskAgent) => string | undefined = () => undefined,
-  reviews?: ReviewState,
-): Route[] {
+/** `reviews` tells which spec and pull request reviews run right now. */
+export function engineerRoutes(tasks: TaskStore, service: TaskService, projects: ProjectService, reviews?: ReviewState): Route[] {
   const view = (task: Task) => toTaskView(task, reviews);
   return [
     {
@@ -66,9 +56,6 @@ export function engineerRoutes(
         const input = parseNewTask(body);
         // Projects are never deleted, so a project that exists now still exists once the task is saved.
         projects.get(input.projectId);
-        // Checked on creation only, since the agent never changes; claude is createTask's default.
-        const unavailable = unavailableAgent(input.agent ?? 'claude');
-        if (unavailable !== undefined) throw new ValidationError(unavailable);
         return { status: 201, body: view(service.create(input, principalOf(principal))) };
       },
     },
@@ -149,6 +136,5 @@ export function engineerRoutes(
         body: view(service.addFollowUp(params.id!, parseFollowUp(body), principalOf(principal))),
       }),
     },
-    { method: 'GET', path: '/tasks/:id/agent-console', handle: ({ params }) => ({ status: 200, body: service.agentConsole(params.id!) }) },
   ];
 }

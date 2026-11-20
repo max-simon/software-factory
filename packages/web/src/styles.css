@@ -1325,45 +1325,6 @@ ul.plain li + li {
   font-size: 15px;
 }
 
-.modal.compact {
-  width: min(560px, 100vw - 32px);
-  height: fit-content;
-}
-
-.console-access {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 18px 20px 20px;
-}
-
-.console-access dl {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 10px 16px;
-  margin: 0;
-}
-
-.console-access dt {
-  color: var(--muted);
-}
-
-.console-access dd {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  min-width: 0;
-  margin: 0;
-}
-
-.console-access dd > :first-child {
-  overflow-wrap: anywhere;
-}
-
-.console-access dd a {
-  color: var(--accent);
-}
-
 .modal-body {
   display: grid;
   flex: 1;

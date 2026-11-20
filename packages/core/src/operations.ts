@@ -19,7 +19,6 @@ import type {
   ReviewVerdict,
   SessionMetrics,
   Task,
-  TaskAgent,
   TaskModel,
   TaskStatus,
   TokenUsage,
@@ -38,8 +37,6 @@ export interface NewTask {
   baseBranch?: string;
   /** Defaults to `opus`. */
   model?: TaskModel;
-  /** Defaults to `claude`. */
-  agent?: TaskAgent;
   /** Defaults to none; the caller validates them against the other tasks. */
   dependsOn?: string[];
 }
@@ -124,7 +121,6 @@ export function createTask(
     labels: input.labels ?? [],
     autonomyMode: input.autonomyMode ?? 'autonomous',
     model: input.model ?? 'opus',
-    agent: input.agent ?? 'claude',
     status: 'draft',
     rank: meta.rank,
     dependsOn: input.dependsOn ?? [],
@@ -247,7 +243,7 @@ export function returnToDraft(task: Task): Task {
 
 /** The execution server was just started; it is working until it asks for work and gets none. */
 export function markInProgress(task: Task, started: { tokenHash: string } & StartedExecution, now: string): Task {
-  const { tokenHash, executionId, agentConsole } = started;
+  const { tokenHash, executionId } = started;
   // Only the dispatcher calls this; a task cancelled while its execution server started must stay failed.
   return {
     ...transitionFrom(task, 'queued', 'in_progress'),
@@ -255,7 +251,6 @@ export function markInProgress(task: Task, started: { tokenHash: string } & Star
       id: executionId,
       tokenHash,
       worker: { state: 'working', since: now },
-      ...(agentConsole && { console: agentConsole }),
     },
   };
 }
@@ -534,7 +529,7 @@ export function restartTask(task: Task): Task {
   return { ...kept, plan: [], decisions: [], artifacts: [], questions: [], pullRequests: [], followUps: [] };
 }
 
-/** Token, worker state, heartbeat and console go with their execution server. */
+/** Token, worker state and heartbeat go with their execution server. */
 export function detachExecution(task: Task): Task {
   const { execution: _removed, ...rest } = task;
   return rest;

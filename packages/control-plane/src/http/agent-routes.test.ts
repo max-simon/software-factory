@@ -28,8 +28,8 @@ class FakeRuntime implements ExecutionRuntime {
   start = async () => ({ executionId: 'unused' });
   listExecutions = async (): Promise<string[]> => [];
   remove = async (): Promise<void> => {};
-  notify = async () => ({});
-  restart = async () => ({});
+  notify = async () => {};
+  restart = async () => {};
 }
 
 type Call = (
@@ -55,11 +55,7 @@ async function startApi(t: TestContext, input: NewTask = supervisedTask, now = (
     now,
   });
   const created = service.create(input, ada);
-  repository.save(markInProgress(startTask(created), {
-    tokenHash: hashAgentToken(token),
-    executionId: 'c-1',
-    agentConsole: { url: 'http://127.0.0.1:43021', password: 'console-secret' },
-  }, fixedNow));
+  repository.save(markInProgress(startTask(created), { tokenHash: hashAgentToken(token), executionId: 'c-1' }, fixedNow));
 
   let projectCounter = 0;
   const projects = new ProjectService({ repository: new SqliteProjectRepository(':memory:'), newId: () => `p${++projectCounter}` });
@@ -87,7 +83,6 @@ async function startApi(t: TestContext, input: NewTask = supervisedTask, now = (
 function assertAgentView(json: any): void {
   assert.equal('execution' in json.task, false);
   assert.equal(JSON.stringify(json).includes(hashAgentToken(token)), false);
-  assert.equal(JSON.stringify(json).includes('console-secret'), false);
 }
 
 const plan = [

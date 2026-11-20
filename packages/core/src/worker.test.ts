@@ -5,11 +5,9 @@ import { createTask } from './operations.ts';
 import type { Execution, Task, TaskStatus } from './task.ts';
 import {
   acceptWork,
-  agentConsoleOf,
   isPausedForUsageLimit,
   isWorking,
   markWorking,
-  moveAgentConsole,
   needsNotify,
   pendingFollowUps,
   pendingWork,
@@ -224,27 +222,5 @@ describe('usage limit', () => {
     const task = acceptWork(paused('2026-01-01T15:00:00.000Z'), [], '2026-01-01T15:01:05.000Z');
     assert.equal(task.execution?.usageLimit, undefined);
     assert.equal(task.execution?.workAcceptedAt, '2026-01-01T15:01:05.000Z');
-  });
-});
-
-describe('moveAgentConsole', () => {
-  it('replaces the console address and keeps its password', () => {
-    const task = taskIn('in_progress', {}, { console: { url: 'http://127.0.0.1:1', password: 'pw' } });
-    assert.deepEqual(moveAgentConsole(task, 'http://127.0.0.1:2').execution?.console, { url: 'http://127.0.0.1:2', password: 'pw' });
-  });
-
-  it('rejects a task without a console', () => {
-    assert.throws(() => moveAgentConsole(taskIn('in_progress'), 'http://127.0.0.1:2'), rejectsWith('no_execution'));
-  });
-});
-
-describe('agentConsoleOf', () => {
-  it('returns the console with its password', () => {
-    const task = taskIn('in_progress', {}, { console: { url: 'http://127.0.0.1:1', password: 'pw' } });
-    assert.deepEqual(agentConsoleOf(task), { url: 'http://127.0.0.1:1', password: 'pw' });
-  });
-
-  it('rejects a task without a console', () => {
-    assert.throws(() => agentConsoleOf(taskIn('in_progress')), rejectsWith('no_execution'));
   });
 });

@@ -14,7 +14,6 @@ import {
 } from '@factory/core';
 import { useEffect, useState, type ReactNode } from 'react';
 import { api } from '../api.ts';
-import { AgentConsoleModal } from '../components/AgentConsoleModal.tsx';
 import { Changelog } from '../components/Changelog.tsx';
 import { LiveActivity } from '../components/LiveActivity.tsx';
 import { DependenciesSection } from '../components/Dependencies.tsx';
@@ -30,7 +29,6 @@ import { Timeline } from '../components/Timeline.tsx';
 import { useAction, usePolling } from '../hooks.ts';
 import { UserName } from '../components/UserName.tsx';
 import {
-  agentLabels,
   canSendFollowUp,
   describeChange,
   href,
@@ -151,7 +149,6 @@ export function TaskDetail({ id, projects }: { id: string; projects: Project[] |
 
 export function Header({ task, onChange }: { task: TaskView; onChange: (task: TaskView) => void }) {
   const { isBusy, error, run } = useAction();
-  const [isConsoleOpen, setIsConsoleOpen] = useState(false);
   const [isRequestingClarification, setIsRequestingClarification] = useState(false);
   // Each confirmation names what is lost, since none of these can be undone.
   const runConfirmed = (question: string, action: () => Promise<void>) => {
@@ -162,11 +159,6 @@ export function Header({ task, onChange }: { task: TaskView; onChange: (task: Ta
       <div className="task-heading">
         <h1>{task.title}</h1>
         <div className="actions">
-          {task.agent === 'opencode' && task.execution?.consoleUrl && (
-            <button className="button" onClick={() => setIsConsoleOpen(true)}>
-              Open in OpenCode
-            </button>
-          )}
           {isEditable(task.status) && task.external === undefined && (
             <a className="button" href={href.edit(task.id)}>
               Edit
@@ -237,7 +229,6 @@ export function Header({ task, onChange }: { task: TaskView; onChange: (task: Ta
         )}
         <span>{task.autonomyMode}</span>
         <span>{task.model}</span>
-        <span>{agentLabels[task.agent]}</span>
         {task.labels.map((label) => (
           <span key={label} className="label">
             {label}
@@ -262,7 +253,6 @@ export function Header({ task, onChange }: { task: TaskView; onChange: (task: Ta
           onCancel={() => setIsRequestingClarification(false)}
         />
       )}
-      {isConsoleOpen && <AgentConsoleModal taskId={task.id} onClose={() => setIsConsoleOpen(false)} />}
     </header>
   );
 }

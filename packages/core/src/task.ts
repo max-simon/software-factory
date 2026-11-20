@@ -15,9 +15,6 @@ export type AutonomyMode = 'autonomous' | 'supervised';
 /** Claude model alias the execution server runs the agent with. */
 export type TaskModel = 'opus' | 'sonnet';
 
-/** The coding agent the execution server runs. */
-export type TaskAgent = 'claude' | 'opencode';
-
 export type PlanStepStatus = 'pending' | 'in_progress' | 'done';
 
 export interface PlanStep {
@@ -189,12 +186,6 @@ export interface SessionMetrics {
   tokens?: TokenUsage;
 }
 
-/** Where an engineer reaches the agent's own web console, and its password. */
-export interface AgentConsole {
-  url: string;
-  password: string;
-}
-
 /**
  * The execution server of a started task, as the control plane tracks it:
  * how its runner authenticates, whether it works, what it last said. None of
@@ -210,8 +201,6 @@ export interface Execution {
   workAcceptedAt?: string;
   /** Latest sign of life from the runner; each heartbeat replaces it. */
   lastHeartbeat?: Heartbeat;
-  /** Only for agents that have a web console (opencode). */
-  console?: AgentConsole;
   /** Set while the agent waits for its account's usage limit to reset; cleared when the runner accepts work again. */
   usageLimit?: UsageLimit;
 }
@@ -296,8 +285,6 @@ export interface Task {
   autonomyMode: AutonomyMode;
   /** Model the agent runs with; tasks stored before models existed read as `opus`. */
   model: TaskModel;
-  /** Agent the execution server runs; tasks stored before agents were chosen per task read as `claude`. */
-  agent: TaskAgent;
   /** Set exactly for managed tasks; unset for ordinary tasks, including all stored before managed tasks existed. */
   external?: ExternalLink;
   /** Unset for tasks that only produce plan, decisions and artifacts. */

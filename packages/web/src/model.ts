@@ -9,7 +9,6 @@ import type {
   PullRequestView,
   Question,
   Task,
-  TaskAgent,
   TaskChange,
   TaskStatus,
   TaskView,
@@ -83,8 +82,6 @@ const statusLabels: Record<TaskStatus, string> = {
 };
 
 export const statusLabel = (status: TaskStatus): string => statusLabels[status];
-
-export const agentLabels: Record<TaskAgent, string> = { claude: 'Claude CLI', opencode: 'OpenCode' };
 
 export type ReviewItem = { kind: 'decision'; item: Decision } | { kind: 'artifact'; item: Artifact };
 

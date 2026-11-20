@@ -16,7 +16,6 @@ const task = (overrides: Partial<TaskView>): TaskView => ({
   labels: [],
   autonomyMode: 'autonomous',
   model: 'opus',
-  agent: 'claude',
   status: 'in_progress',
   rank: 0,
   dependsOn: [],
@@ -28,23 +27,11 @@ const task = (overrides: Partial<TaskView>): TaskView => ({
   followUps: [],
   isSpecUnderReview: false,
   isInputUnderReview: false,
-  execution: { id: 'e1', worker: { state: 'working', since: '2026-01-01T00:00:00.000Z' }, consoleUrl: 'https://console' },
+  execution: { id: 'e1', worker: { state: 'working', since: '2026-01-01T00:00:00.000Z' } },
   ...overrides,
 });
 
 const render = (t: TaskView) => renderToStaticMarkup(<Header task={t} onChange={() => {}} />);
-
-test('an opencode task with a console offers to open it in OpenCode', () => {
-  const html = render(task({ agent: 'opencode' }));
-  expect(html).toContain('Open in OpenCode');
-  expect(html).toContain('<span>OpenCode</span>');
-});
-
-test('a claude task has no OpenCode button even with a console url', () => {
-  const html = render(task({ agent: 'claude' }));
-  expect(html).not.toContain('Open in OpenCode');
-  expect(html).toContain('<span>Claude CLI</span>');
-});
 
 const pr = (isUnderReview: boolean) => ({ url: 'https://github.com/o/r/pull/1', title: 'PR', status: 'open' as const, isUnderReview });
 const specSpinner = 'aria-label="Reviewer is checking the specification"';
