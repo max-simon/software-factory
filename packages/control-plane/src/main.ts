@@ -35,6 +35,7 @@ import { ProjectService } from './project-service.ts';
 import { PullRequestObserver, pullRequestPollIntervalMs } from './pull-request-observer.ts';
 import { ReviewTracker } from './review-tracker.ts';
 import { createServices } from './services.ts';
+import { ShellService } from './shell-service.ts';
 import { UserAccountService } from './user-account-service.ts';
 
 // Engineers sign in, but the API is not hardened for other machines yet (plain HTTP, no TLS), so it stays on loopback.
@@ -43,6 +44,8 @@ const reconcileIntervalMs = 2000;
 // Far above the 5 failures that lock a username: on loopback every client shares one address.
 const clientLockoutAfter = 50;
 const pauseCheckIntervalMs = 1000;
+// Idle limits are counted in minutes, so a shell may outlive its limit by up to one more.
+const shellSweepIntervalMs = 60_000;
 // Built by `yarn web:build`; without it the control plane serves the API only.
 const webDist = fileURLToPath(new URL('../../web/dist', import.meta.url));
 
@@ -126,6 +129,12 @@ function main(): void {
   // Checked on a timer of its own: a host may sleep in the middle of a dispatcher pass.
   const pauseWatch = new PauseWatch();
   setInterval(() => pauseWatch.check(), pauseCheckIntervalMs).unref();
+  const shells = new ShellService({
+    tasks,
+    runtime,
+    idleTimeoutMs: config.shellIdleMinutes * 60_000,
+    secrets,
+  });
   const dispatcher = new Dispatcher({
     tasks,
     lifecycle,
@@ -136,6 +145,7 @@ function main(): void {
     maxRunning: config.maxRunning,
     followUpWindowMs: config.followUpWindowHours * 3_600_000,
     secrets,
+    hasOpenShell: (taskId) => shells.hasOpenShell(taskId),
     awakeSince: () => pauseWatch.check(),
   });
   // Polls GitHub for pull request changes; replaceable by a webhook that records the same changes.
@@ -146,6 +156,7 @@ function main(): void {
     runLoop('dispatcher', () => dispatcher.reconcile(), reconcileIntervalMs);
     runLoop('pull request observer', () => pullRequestObserver.observe(), pullRequestPollIntervalMs);
     runLoop('issue sync', () => issueSync.sync(), issueSyncIntervalMs);
+    runLoop('shell sweep', async () => shells.sweep(), shellSweepIntervalMs);
   });
 }
 

@@ -26,6 +26,8 @@ export interface DispatcherDeps {
   followUpWindowMs: number;
   /** Secret values to strip from log tails before they are stored as failure reasons. */
   secrets: readonly string[];
+  /** Whether an engineer has a shell into the task's execution server, open or being opened. */
+  hasOpenShell: (taskId: string) => boolean;
   log?: (message: string) => void;
   /** Epoch milliseconds. */
   now?: () => number;
@@ -83,7 +85,8 @@ export class Dispatcher {
    * limit are working and no task waits for a usage limit,
    * mark ready tasks, and those waiting for the engineer on their pull
    * requests only, done once none of their pull requests is open, and remove
-   * execution servers no task needs.
+   * execution servers no task needs. A task with an open shell is neither
+   * marked done nor loses its execution server until a pass after the shell closed.
    */
   async reconcile(): Promise<void> {
     const { tasks, lifecycle, maxRunning } = this.#deps;
@@ -98,13 +101,14 @@ export class Dispatcher {
     const isUsageLimited = inProgress.some((task) => isPausedForUsageLimit(task, now));
     const startable = isUsageLimited ? [] : tasks.list(['queued']).filter((task) => !isBlocked(task, all));
     await this.#forEach(startable.slice(0, freeSlots), (task) => this.#dispatch(task));
-    await this.#forEach(tasks.list(['ready', 'input_required']).filter(isSettleable), async (task) => {
+    const hasNoShell = (task: Task) => !this.#deps.hasOpenShell(task.id);
+    const settleable = tasks.list(['ready', 'input_required']).filter((task) => isSettleable(task) && hasNoShell(task));
+    await this.#forEach(settleable, async (task) => {
       lifecycle.markDone(task.id);
     });
-    await this.#forEach(tasks.list(['done']), (task) => this.#removeExecution(task));
-    await this.#forEach(tasks.list(['failed']).filter((task) => this.#isFollowUpWindowOver(task)), (task) =>
-      this.#removeExecution(task),
-    );
+    await this.#forEach(tasks.list(['done']).filter(hasNoShell), (task) => this.#removeExecution(task));
+    const expired = tasks.list(['failed']).filter((task) => this.#isFollowUpWindowOver(task) && hasNoShell(task));
+    await this.#forEach(expired, (task) => this.#removeExecution(task));
   }
 
   /** Due on the first pass, when orphans of a crash show up, then once per interval. */

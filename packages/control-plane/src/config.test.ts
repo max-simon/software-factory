@@ -23,6 +23,7 @@ test('applies defaults and keeps secrets out of the config', () => {
     followUpWindowHours: 24,
     sessionIdleHours: 12,
     sessionMaxDays: 7,
+    shellIdleMinutes: 30,
     credentials: ['ANTHROPIC_API_KEY'],
     agentCredential: 'ANTHROPIC_API_KEY',
   });
@@ -85,6 +86,15 @@ test('reads the session idle hours and maximum days, 12 and 7 by default, and re
   for (const value of ['0', '-1', 'soon', 'Infinity']) {
     assert.throws(() => loadConfig({ ...complete, FACTORY_SESSION_IDLE_HOURS: value }), ConfigError);
     assert.throws(() => loadConfig({ ...complete, FACTORY_SESSION_MAX_DAYS: value }), ConfigError);
+  }
+});
+
+test('reads the shell idle minutes, 30 by default, and rejects anything but a positive number', () => {
+  assert.equal(loadConfig(complete).shellIdleMinutes, 30);
+  assert.equal(loadConfig({ ...complete, FACTORY_SHELL_IDLE_MINUTES: ' 5 ' }).shellIdleMinutes, 5);
+  assert.equal(loadConfig({ ...complete, FACTORY_SHELL_IDLE_MINUTES: '0.5' }).shellIdleMinutes, 0.5);
+  for (const value of ['0', '-1', 'soon', 'Infinity']) {
+    assert.throws(() => loadConfig({ ...complete, FACTORY_SHELL_IDLE_MINUTES: value }), ConfigError);
   }
 });
 
