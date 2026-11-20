@@ -27,6 +27,7 @@ import { authRoutes } from './http/auth-routes.ts';
 import { authenticateRequest } from './http/authenticate.ts';
 import { engineerRoutes } from './http/engineer-routes.ts';
 import { createServer, mcpPath } from './http/server.ts';
+import { shellRoutes, shellUpgrade } from './http/shell-routes.ts';
 import { staticFiles } from './http/static-files.ts';
 import { tokenRoutes } from './http/token-routes.ts';
 import { IssueSync, issueSyncIntervalMs } from './issue-sync-service.ts';
@@ -106,6 +107,13 @@ function main(): void {
   const tokenStore = new SqliteAccessTokenRepository(config.dbPath);
   const accessTokens = new AccessTokenService({ tokens: tokenStore, users });
   const hasher = new ScryptPasswordHasher();
+  const shells = new ShellService({
+    tasks,
+    runtime,
+    idleTimeoutMs: config.shellIdleMinutes * 60_000,
+    secrets,
+  });
+  const authenticate = authenticateRequest(sessions, accessTokens);
   const routes = [
     ...authRoutes({
       authenticator: new LocalPasswordAuthenticator({ users, passwords: users, hasher }),
@@ -118,23 +126,19 @@ function main(): void {
     ...tokenRoutes(accessTokens),
     ...engineerRoutes(tasks, service, projects, reviews),
     ...agentRoutes(tasks, agent, projects),
+    ...shellRoutes(shells, agent),
   ];
   const server = createServer(routes, {
-    authenticate: authenticateRequest(sessions, accessTokens),
+    authenticate,
     staticFiles: staticFiles(webDist),
     // The MCP tools go through the engineer API over loopback, so they get its validation and error mapping;
     // each request's client passes on the caller's session cookie or bearer token, so the API sees the same user.
     mcp: createMcpHandler((headers) => createApiClient(`http://${host}:${config.port}`, headers)),
+    upgrade: shellUpgrade(shells, agent, authenticate),
   });
   // Checked on a timer of its own: a host may sleep in the middle of a dispatcher pass.
   const pauseWatch = new PauseWatch();
   setInterval(() => pauseWatch.check(), pauseCheckIntervalMs).unref();
-  const shells = new ShellService({
-    tasks,
-    runtime,
-    idleTimeoutMs: config.shellIdleMinutes * 60_000,
-    secrets,
-  });
   const dispatcher = new Dispatcher({
     tasks,
     lifecycle,

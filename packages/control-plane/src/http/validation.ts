@@ -23,7 +23,7 @@ import type {
   TaskModel,
   TokenUsage,
 } from '@factory/core';
-import { parseTaskProviders, usernameMaxLength } from '@factory/core';
+import { parseShellSize, parseTaskProviders, usernameMaxLength, type ShellSize } from '@factory/core';
 import { passwordMaxLength } from '../auth/passwords.ts';
 
 export class ValidationError extends Error {
@@ -453,4 +453,20 @@ export function parsePasswordChange(body: unknown): { currentPassword: string; n
     throw new ValidationError('currentPassword and newPassword must be strings');
   }
   return { currentPassword, newPassword };
+}
+
+// Four digits are more than any valid size has; the limit keeps `Number` away from exotic input.
+const shellSizeValue = /^[0-9]{1,4}$/;
+
+/** The `cols` and `rows` of a shell's URL query, each given once as a plain decimal number. */
+export function parseShellQuery(query: URLSearchParams): ShellSize {
+  const unknown = [...new Set(query.keys())].filter((key) => key !== 'cols' && key !== 'rows');
+  if (unknown.length > 0) throw new ValidationError(`query has unknown parameters: ${unknown.join(', ')}`);
+  const value = (key: string): number | undefined => {
+    const values = query.getAll(key);
+    return values.length === 1 && shellSizeValue.test(values[0]!) ? Number(values[0]) : undefined;
+  };
+  const size = parseShellSize(value('cols'), value('rows'));
+  if (!size) throw new ValidationError('cols and rows must be whole numbers, cols 1 to 500 and rows 1 to 200');
+  return size;
 }

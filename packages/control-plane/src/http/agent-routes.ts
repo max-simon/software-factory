@@ -3,7 +3,8 @@ import { toAgentTaskView, toProjectTaskSummary, type Task } from '@factory/core'
 import type { AgentService } from '../agent-service.ts';
 import type { ProjectService } from '../project-service.ts';
 import { NotFoundError, type TaskStore } from '../task-store.ts';
-import { UnauthorizedError, type Request, type Response, type Route } from './server.ts';
+import { authenticateAgent } from './authenticate.ts';
+import type { Request, Response, Route } from './server.ts';
 import {
   parseArtifact,
   parseDecision,
@@ -18,18 +19,11 @@ import {
   parseUsageLimit,
 } from './validation.ts';
 
-const bearerToken = /^Bearer ([0-9a-f]{64})$/;
-
 const respond = (task: Task): Response => ({ status: 200, body: { task: toAgentTaskView(task) } });
 
 export function agentRoutes(tasks: TaskStore, agent: AgentService, projects: ProjectService): Route[] {
-  // The token is the only credential and identifies the task, so every route resolves it first.
-  const authenticate = (headers: IncomingHttpHeaders): Task => {
-    const token = bearerToken.exec(headers.authorization ?? '')?.[1];
-    const task = token === undefined ? undefined : agent.findByAgentToken(token);
-    if (!task) throw new UnauthorizedError('missing or invalid agent token');
-    return task;
-  };
+  // The token identifies the task, so every route resolves it first.
+  const authenticate = (headers: IncomingHttpHeaders): Task => authenticateAgent(agent, headers);
 
   const route = (method: Route['method'], path: string, run: (task: Task, body: unknown) => Task): Route => ({
     method,

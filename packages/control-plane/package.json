@@ -5,6 +5,10 @@
   "type": "module",
   "dependencies": {
     "@factory/core": "workspace:*",
-    "@factory/mcp": "workspace:*"
+    "@factory/mcp": "workspace:*",
+    "ws": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/ws": "8.18.2"
   }
 }
