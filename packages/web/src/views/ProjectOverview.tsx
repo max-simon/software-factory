@@ -1,14 +1,12 @@
-import { formatCost, formatDuration, formatTokens, type Project, type ProjectChange } from '@factory/core';
-import { useEffect, useState } from 'react';
+import { formatCost, formatDuration, formatTokens, type Project } from '@factory/core';
+import { useEffect } from 'react';
 import { api } from '../api.ts';
-import { Changelog } from '../components/Changelog.tsx';
 import { Markdown } from '../components/Markdown.tsx';
 import { PullRequestIndicator } from '../components/PullRequestIndicator.tsx';
 import { prReviewLabel, Spinner } from '../components/Status.tsx';
 import { UserName } from '../components/UserName.tsx';
 import { usePolling } from '../hooks.ts';
 import {
-  describeProjectChange,
   href,
   labelsByUsage,
   openPullRequests,
@@ -28,7 +26,6 @@ export function ProjectOverview({ id, labels }: { id: string; labels: string[] }
   const { data: project, error: projectError } = usePolling(() => api.getProject(id), `project-${id}`);
   const { data: tasks, error: tasksError, set: setTasks } = usePolling(() => api.listProjectTasks(id), `project-tasks-${id}`);
   const metrics = projectMetrics(tasks ?? []);
-  const changes = useProjectChanges(id, project?.updatedAt);
 
   useEffect(() => {
     if (!project) return;
@@ -59,13 +56,6 @@ export function ProjectOverview({ id, labels }: { id: string; labels: string[] }
           <Board tasks={tasks} labels={labels} onMoved={setTasks} />
         </>
       )}
-
-      {changes.length > 0 && (
-        <details className="box changelog-box">
-          <summary className="section-title">Project changelog</summary>
-          <Changelog changes={changes} describe={describeProjectChange} />
-        </details>
-      )}
     </article>
   );
 }
@@ -92,26 +82,6 @@ function LabelFilter({ id, tasks, active }: { id: string; tasks: readonly TaskVi
       ))}
     </div>
   );
-}
-
-/** The project's changelog, reloaded whenever the project changes: every change stamps `updatedAt`. */
-function useProjectChanges(id: string, updatedAt: string | undefined): ProjectChange[] {
-  const [loaded, setLoaded] = useState<{ id: string; changes: ProjectChange[] }>();
-  useEffect(() => {
-    if (updatedAt === undefined) return;
-    let isCancelled = false;
-    // A failed load keeps the last changelog; the project poll already reports an unreachable control plane.
-    api.listProjectChanges(id).then(
-      (changes) => {
-        if (!isCancelled) setLoaded({ id, changes });
-      },
-      () => {},
-    );
-    return () => {
-      isCancelled = true;
-    };
-  }, [id, updatedAt]);
-  return loaded?.id === id ? loaded.changes : [];
 }
 
 /** Title, actions, who created the project and its description. */

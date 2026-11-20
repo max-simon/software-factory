@@ -281,11 +281,6 @@ export interface Task {
   title: string;
   specification: string;
   labels: string[];
-  /**
-   * Ids of the users assigned to it, without repeats; unset means no one is
-   * assigned, including tasks stored before assignees existed.
-   */
-  assignees?: string[];
   autonomyMode: AutonomyMode;
   /** Model the agent runs with; tasks stored before models existed read as `opus`. */
   model: TaskModel;

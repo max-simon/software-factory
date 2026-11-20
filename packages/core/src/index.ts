@@ -11,12 +11,10 @@ export { DomainError, type DomainErrorCode } from './errors.ts';
 export { assertTransition, transitions } from './status.ts';
 export {
   changeMeta,
-  projectChanges,
   taskChanges,
   type ChangeActor,
   type ChangeAuthor,
   type ChangeMeta,
-  type ProjectChange,
   type TaskChange,
 } from './changelog.ts';
 export {
@@ -34,7 +32,6 @@ export {
   type SpecReviewRequest,
   type SpecVerdict,
 } from './review.ts';
-export { checkAssignees, setAssignees } from './assignees.ts';
 export { formatCost, formatDuration, formatTokens } from './format.ts';
 export {
   assertDeletable,

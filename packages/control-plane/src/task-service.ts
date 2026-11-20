@@ -6,7 +6,6 @@ import {
   assertDeletable,
   assertValidDependencies,
   cancelTask,
-  checkAssignees,
   createTask,
   deletedCommentBody,
   deletedCommentKey,
@@ -19,7 +18,6 @@ import {
   restartTask,
   returnToDraft,
   reviewItem,
-  setAssignees,
   startTask,
   type ActivityEntry,
   type ChangeAuthor,
@@ -32,8 +30,6 @@ import {
   type ReviewerNote,
   type Task,
   type TaskEdit,
-  type User,
-  type UserRepository,
 } from '@factory/core';
 import type { ActivityFeed } from './activity-feed.ts';
 import { describe } from './hooks/hooks.ts';
@@ -44,7 +40,6 @@ export interface TaskServiceDeps {
   tasks: TaskStore;
   activity: ActivityFeed;
   runtime: ExecutionRuntime;
-  users: UserRepository;
   newId?: () => string;
   /** Where managed tasks' issues live; absent when no issue repositories are configured. */
   issues?: IssueProvider;
@@ -66,7 +61,6 @@ export class TaskService {
   readonly #tasks: TaskStore;
   readonly #activity: ActivityFeed;
   readonly #runtime: ExecutionRuntime;
-  readonly #users: UserRepository;
   readonly #newId: () => string;
   readonly #issues: IssueProvider | undefined;
   readonly #secrets: readonly string[];
@@ -76,7 +70,6 @@ export class TaskService {
     this.#tasks = deps.tasks;
     this.#activity = deps.activity;
     this.#runtime = deps.runtime;
-    this.#users = deps.users;
     this.#newId = deps.newId ?? (() => randomBytes(5).toString('hex'));
     this.#issues = deps.issues;
     this.#secrets = deps.secrets ?? [];
@@ -193,18 +186,6 @@ export class TaskService {
   addFollowUp(id: string, message: string, by: Principal): Task {
     return this.#tasks.update(id, by, (task) =>
       addFollowUp(task, { id: this.#tasks.newItemId('f'), createdAt: this.#tasks.now(), message, authorId: by.userId }),
-    );
-  }
-
-  /** Replaces who is assigned to the task, in any status; an empty list unassigns everyone. */
-  setAssignees(id: string, assignees: readonly string[], by: Principal): Task {
-    const users = new Map<string, User>();
-    for (const userId of assignees) {
-      const user = this.#users.get(userId);
-      if (user !== undefined) users.set(userId, user);
-    }
-    return this.#tasks.update(id, by, (task) =>
-      setAssignees(task, checkAssignees(task.assignees ?? [], assignees, users)),
     );
   }
 

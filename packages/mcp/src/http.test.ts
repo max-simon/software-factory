@@ -23,7 +23,6 @@ before(async () => {
     createTask: (task) => fake.createTask(task),
     startTask: (id) => fake.startTask(id),
     editTask: (id, edit) => fake.editTask(id, edit),
-    setAssignees: (id, assignees) => fake.setAssignees(id, assignees),
     listUsers: () => fake.listUsers(),
     requestClarification: (id, note) => fake.requestClarification(id, note),
     listTasks: () => fake.listTasks(),
@@ -175,73 +174,6 @@ test('set_task without id needs project id, title and specification', async () =
   assert.deepEqual(fake.created, []);
 });
 
-test('set_task without id assigns users to the new task', async () => {
-  fake = fakeTaskClient();
-  const result = await call('set_task', { projectId: 'p1', title: 'Greet', specification: 'Say hi.', assignees: ['u1'] });
-  assert.equal(result.isError, false);
-  assert.deepEqual(fake.created, [{ projectId: 'p1', title: 'Greet', specification: 'Say hi.' }]);
-  assert.deepEqual(fake.assigned, [{ id: 't1', assignees: ['u1'] }]);
-  assert.deepEqual(JSON.parse(result.text).assignees, ['u1']);
-});
-
-test('set_task without id assigns users before starting the task', async () => {
-  fake = fakeTaskClient();
-  const result = await call('set_task', { projectId: 'p1', title: 'Greet', specification: 'Say hi.', assignees: ['u1'], start: true });
-  const task = JSON.parse(result.text);
-  assert.deepEqual([task.status, task.assignees], ['queued', ['u1']]);
-});
-
-test('set_task without id names the draft when assigning fails', async () => {
-  fake = fakeTaskClient();
-  fake.failAssign = new ApiError(400, 'user_disabled', 'user u1 is disabled');
-  const result = await call('set_task', { projectId: 'p1', title: 'Greet', specification: 'Say hi.', assignees: ['u1'], start: true });
-  assert.deepEqual(result, {
-    isError: true,
-    text: 'user_disabled: task t1 was created as a draft but its assignees were not set: user u1 is disabled',
-  });
-  assert.equal(fake.tasks[0]!.status, 'draft');
-});
-
-test('set_task with id and only assignees replaces them without editing', async () => {
-  fake = fakeTaskClient([sampleTask({ id: 't1', status: 'in_progress', assignees: ['u1'] })]);
-  const result = await call('set_task', { id: 't1', assignees: ['u2'] });
-  assert.equal(result.isError, false);
-  assert.deepEqual(fake.edited, []);
-  assert.deepEqual(fake.assigned, [{ id: 't1', assignees: ['u2'] }]);
-  assert.deepEqual(JSON.parse(result.text).assignees, ['u2']);
-});
-
-test('set_task with id edits the task and then sets its assignees', async () => {
-  fake = fakeTaskClient([sampleTask({ id: 't1' })]);
-  const result = await call('set_task', { id: 't1', title: 'Next', assignees: [] });
-  assert.deepEqual(fake.edited, [{ id: 't1', edit: { title: 'Next' } }]);
-  assert.deepEqual(fake.assigned, [{ id: 't1', assignees: [] }]);
-  const task = JSON.parse(result.text);
-  assert.deepEqual([task.title, task.assignees], ['Next', []]);
-});
-
-test('set_task names the change when assigning after an edit fails', async () => {
-  fake = fakeTaskClient([sampleTask({ id: 't1' })]);
-  fake.failAssign = new ApiError(400, 'unknown_user', 'user nope does not exist');
-  const result = await call('set_task', { id: 't1', title: 'Next', assignees: ['nope'] });
-  assert.deepEqual(result, { isError: true, text: 'unknown_user: task t1 was changed but its assignees were not set: user nope does not exist' });
-});
-
-test('set_task relays an assignment refused without other changes as is', async () => {
-  fake = fakeTaskClient([sampleTask({ id: 't1' })]);
-  fake.failAssign = new ApiError(400, 'unknown_user', 'user nope does not exist');
-  const result = await call('set_task', { id: 't1', assignees: ['nope'], start: true });
-  assert.deepEqual(result, { isError: true, text: 'unknown_user: user nope does not exist' });
-  assert.equal(fake.tasks[0]!.status, 'draft');
-});
-
-test('set_task names the assignment when starting afterwards fails', async () => {
-  fake = fakeTaskClient([sampleTask({ id: 't1' })]);
-  fake.failStart = new ApiError(409, 'invalid_transition', 'cannot queue');
-  const result = await call('set_task', { id: 't1', assignees: ['u1'], start: true });
-  assert.deepEqual(result, { isError: true, text: 'invalid_transition: task t1 was changed but not started: cannot queue' });
-});
-
 test('list_users returns the users as the API lists them', async () => {
   fake = fakeTaskClient();
   fake.users = [
@@ -260,8 +192,8 @@ test('create_project and list_projects', async () => {
 
 test('list_tasks returns a compact summary and filters by status and project', async () => {
   fake = fakeTaskClient([
-    sampleTask({ id: 't1', status: 'done', repoUrl: 'https://github.com/o/r', pullRequests: [{ url: 'https://github.com/o/r/pull/1', title: 'Hi', status: 'merged', isUnderReview: false }], assignees: ['u1'] }),
-    sampleTask({ id: 't2', status: 'draft', assignees: [] }),
+    sampleTask({ id: 't1', status: 'done', repoUrl: 'https://github.com/o/r', pullRequests: [{ url: 'https://github.com/o/r/pull/1', title: 'Hi', status: 'merged', isUnderReview: false }] }),
+    sampleTask({ id: 't2', status: 'draft' }),
   ]);
   assert.deepEqual(JSON.parse((await call('list_tasks')).text), [
     {
@@ -272,7 +204,6 @@ test('list_tasks returns a compact summary and filters by status and project', a
       model: 'opus',
       agent: 'claude',
       repoUrl: 'https://github.com/o/r',
-      assignees: ['u1'],
       updatedAt: '2026-11-12T00:00:00.000Z',
       pullRequests: ['https://github.com/o/r/pull/1'],
     },
@@ -290,7 +221,6 @@ test('get_task returns the full task', async () => {
     plan: [{ title: 'Write code', status: 'done' }],
     // Who did what goes by user id, never by name.
     createdBy: 'u1',
-    assignees: ['u2'],
     followUps: [{ id: 'f1', createdAt: '2026-11-12T00:00:00.000Z', message: 'Say hi', authorId: 'u2' }],
     // With the recorded outcome of the factory's own PR review.
     pullRequests: [

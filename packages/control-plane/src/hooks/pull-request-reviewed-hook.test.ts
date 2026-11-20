@@ -3,7 +3,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { PullRequest, PullRequestReview, Task, TaskEvent } from '@factory/core';
 import { SqliteTaskRepository } from '../adapters/sqlite-task-repository.ts';
-import { SqliteUserRepository } from '../adapters/sqlite-user-repository.ts';
 import { createServices } from '../services.ts';
 import { ada, sequentialItemIds } from '../test-support.ts';
 import { addressReviewSkill, PullRequestReviewedHook, reviewFollowUp } from './pull-request-reviewed-hook.ts';
@@ -23,7 +22,6 @@ const review = (fields: Partial<PullRequestReview> = {}): PullRequestReview => (
 function setup() {
   const services = createServices({
     repository: new SqliteTaskRepository(':memory:'),
-    users: new SqliteUserRepository(':memory:'),
     runtime: { start: async () => ({ executionId: 'x' }), notify: async () => ({}), restart: async () => ({}), remove: async () => {}, listExecutions: async () => [] },
     newId: () => 't1',
     newItemId: sequentialItemIds(),

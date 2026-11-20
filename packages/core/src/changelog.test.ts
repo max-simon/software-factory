@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { changeMeta, projectChanges, taskChanges } from './changelog.ts';
+import { changeMeta, taskChanges } from './changelog.ts';
 import { createTask } from './operations.ts';
-import { createProject } from './project.ts';
 import type { Task } from './task.ts';
 
 const before: Task = createTask(
@@ -38,23 +37,5 @@ describe('changeMeta', () => {
   it('records the id of a user, and no user for the other actors', () => {
     assert.deepEqual(changeMeta(meta.at, { userId: 'u1', via: 'session' }), { at: meta.at, actor: 'user', userId: 'u1' });
     assert.deepEqual(changeMeta(meta.at, 'reviewer'), { at: meta.at, actor: 'reviewer' });
-  });
-});
-
-describe('projectChanges', () => {
-  const project = createProject({ title: 'Billing' }, { id: 'p1', now: '2026-11-13T09:00:00.000Z', createdBy: 'u1' });
-  const by = { ...meta, userId: 'u2' };
-
-  it('lists every changed tracked field with old and new value', () => {
-    const after = { ...project, title: 'Invoices', description: 'All of them', autoMerge: true, updatedAt: by.at };
-    assert.deepEqual(projectChanges(project, after, by), [
-      { ...by, field: 'title', from: 'Billing', to: 'Invoices' },
-      { ...by, field: 'description', from: '', to: 'All of them' },
-      { ...by, field: 'autoMerge', from: false, to: true },
-    ]);
-  });
-
-  it('records nothing when no tracked field changed', () => {
-    assert.deepEqual(projectChanges(project, { ...project, updatedAt: by.at }, by), []);
   });
 });

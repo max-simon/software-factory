@@ -1,4 +1,3 @@
-import type { Project } from './project.ts';
 import type { Task, TaskStatus } from './task.ts';
 import type { Principal } from './user.ts';
 
@@ -32,7 +31,7 @@ export type TaskChange = ChangeMeta &
   (
     | { field: 'created' }
     | { field: 'title' | 'specification'; from: string; to: string }
-    | { field: 'labels' | 'dependsOn' | 'assignees'; from: string[]; to: string[] }
+    | { field: 'labels' | 'dependsOn'; from: string[]; to: string[] }
     | { field: 'status'; from: TaskStatus; to: TaskStatus }
   );
 
@@ -52,30 +51,6 @@ export function taskChanges(before: Task, after: Task, meta: ChangeMeta): TaskCh
   if (!sameList(before.dependsOn, after.dependsOn)) {
     changes.push({ ...meta, field: 'dependsOn', from: [...before.dependsOn], to: [...after.dependsOn] });
   }
-  const [assigneesBefore, assigneesAfter] = [before.assignees ?? [], after.assignees ?? []];
-  if (!sameList(assigneesBefore, assigneesAfter)) {
-    changes.push({ ...meta, field: 'assignees', from: [...assigneesBefore], to: [...assigneesAfter] });
-  }
   if (before.status !== after.status) changes.push({ ...meta, field: 'status', from: before.status, to: after.status });
-  return changes;
-}
-
-export type ProjectChange = ChangeMeta &
-  (
-    | { field: 'created' }
-    | { field: 'title' | 'description'; from: string; to: string }
-    | { field: 'autoMerge'; from: boolean; to: boolean }
-  );
-
-/** The tracked fields `after` changed relative to `before`, in a fixed field order. */
-export function projectChanges(before: Project, after: Project, meta: ChangeMeta): ProjectChange[] {
-  const changes: ProjectChange[] = [];
-  if (before.title !== after.title) changes.push({ ...meta, field: 'title', from: before.title, to: after.title });
-  if (before.description !== after.description) {
-    changes.push({ ...meta, field: 'description', from: before.description, to: after.description });
-  }
-  if (before.autoMerge !== after.autoMerge) {
-    changes.push({ ...meta, field: 'autoMerge', from: before.autoMerge, to: after.autoMerge });
-  }
   return changes;
 }

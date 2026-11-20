@@ -74,7 +74,6 @@ function main(): void {
   const { tasks, service, agent, lifecycle } = createServices({
     repository,
     runtime,
-    users,
     issues,
     secrets,
     onEvent: (event) => void hooks.emit(event),

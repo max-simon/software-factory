@@ -189,21 +189,6 @@ test('reads tasks stored before dependencies existed with none', () => {
   assert.deepEqual(repo.get('new')?.dependsOn, ['old']);
 });
 
-test('round-trips assignees, and reads tasks stored without them as unassigned', () => {
-  const repo = repository();
-  repo.insert(draft('old'));
-  repo.insert({ ...draft('new'), assignees: ['u2', 'u1'] });
-  assert.equal('assignees' in repo.get('old')!, false);
-  assert.deepEqual(repo.get('new')?.assignees, ['u2', 'u1']);
-  repo.save({ ...draft('new'), assignees: ['u1'] }, [
-    { at: '2026-11-13T10:00:00.000Z', actor: 'user', userId: 'u1', field: 'assignees', from: ['u2', 'u1'], to: ['u1'] },
-  ]);
-  assert.deepEqual(repo.get('new')?.assignees, ['u1']);
-  assert.deepEqual(repo.listChanges('new'), [
-    { at: '2026-11-13T10:00:00.000Z', actor: 'user', userId: 'u1', field: 'assignees', from: ['u2', 'u1'], to: ['u1'] },
-  ]);
-});
-
 test('reads pull requests stored before statuses existed as merged on done tasks, open otherwise', () => {
   const repo = repository();
   const legacy = { url: 'https://github.com/o/r/pull/1', title: 'pr' };
@@ -312,6 +297,21 @@ test('drops heartbeats stored in the task data before they had their own table',
   raw.prepare(`UPDATE tasks SET data = json_set(data, '$.lastHeartbeat', json('{"at":"x","phase":"working"}'))`).run();
   raw.close();
   assert.equal('lastHeartbeat' in new SqliteTaskRepository(path).get('a')!, false);
+});
+
+test('drops the assignees and their changelog entries of tasks stored while tasks had assignees', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'repo-'));
+  t.after(() => rmSync(dir, { recursive: true }));
+  const path = join(dir, 'tasks.db');
+  const at = '2026-11-13T10:00:00.000Z';
+  new SqliteTaskRepository(path).insert(draft('a'), [{ at, actor: 'user', userId: 'u1', field: 'created' }]);
+  const raw = new DatabaseSync(path);
+  raw.prepare(`UPDATE tasks SET data = json_set(data, '$.assignees', json('["u1"]'))`).run();
+  raw.prepare(`INSERT INTO task_changes (task_id, at, actor, user_id, field, from_value, to_value) VALUES ('a', ?, 'user', 'u1', 'assignees', '[]', '["u1"]')`).run(at);
+  raw.close();
+  const repo = new SqliteTaskRepository(path);
+  assert.equal('assignees' in repo.get('a')!, false);
+  assert.deepEqual(repo.listChanges('a'), [{ at, actor: 'user', userId: 'u1', field: 'created' }]);
 });
 
 test('refuses to save a task that was never inserted', () => {

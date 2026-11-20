@@ -4,7 +4,6 @@ import type {
   FollowUp,
   HeartbeatPhase,
   PrReviewResult,
-  ProjectChange,
   PullRequest,
   PullRequestStatus,
   PullRequestView,
@@ -422,8 +421,6 @@ export function describeChange(change: TaskChange): string {
     }
     case 'dependsOn':
       return 'Changed the dependencies';
-    case 'assignees':
-      return 'Changed the assignees';
     case 'status':
       return `${statusLabel(change.from)} → ${statusLabel(change.to)}`;
   }
@@ -472,17 +469,3 @@ export function describeUser(userId: string | undefined, users: UserMap): Person
 /** The command that adds the factory's MCP server to Claude Code with a personal access token. */
 export const mcpAddCommand = (origin: string, token: string): string =>
   `claude mcp add --transport http factory ${origin}/mcp --header "Authorization: Bearer ${token}"`;
-
-/** One line on what a project changelog entry changed; the description is too long to show inline. */
-export function describeProjectChange(change: ProjectChange): string {
-  switch (change.field) {
-    case 'created':
-      return 'Created the project';
-    case 'title':
-      return `Renamed ${quoted(change.from)} → ${quoted(change.to)}`;
-    case 'description':
-      return 'Edited the description';
-    case 'autoMerge':
-      return change.to ? 'Turned auto-merge on' : 'Turned auto-merge off';
-  }
-}

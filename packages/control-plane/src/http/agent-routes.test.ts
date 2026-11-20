@@ -4,7 +4,6 @@ import type { AddressInfo } from 'node:net';
 import { markInProgress, startTask, type ExecutionRuntime, type NewTask } from '@factory/core';
 import { SqliteProjectRepository } from '../adapters/sqlite-project-repository.ts';
 import { SqliteTaskRepository } from '../adapters/sqlite-task-repository.ts';
-import { SqliteUserRepository } from '../adapters/sqlite-user-repository.ts';
 import { hashAgentToken } from '../agent-token.ts';
 import { ProjectService } from '../project-service.ts';
 import { createServices } from '../services.ts';
@@ -49,7 +48,6 @@ async function startApi(t: TestContext, input: NewTask = supervisedTask, now = (
   let counter = 0;
   const { tasks, service, agent } = createServices({
     repository,
-    users: new SqliteUserRepository(':memory:'),
     runtime: new FakeRuntime(),
     newId: () => `task-${++counter}`,
     newItemId: sequentialItemIds(),
