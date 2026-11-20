@@ -101,3 +101,14 @@ test('the consumption report of a task measured before tokens were tracked shows
 test('the task header leaves the consumption to its own section', () => {
   expect(render(task({ metrics: { durationMs: 723_000, costUsd: 1.2345 } }))).not.toContain('$1.23');
 });
+
+test('the header offers a shell only while the task allows one and has a live execution server', () => {
+  const header = (t: TaskView) => renderToStaticMarkup(<Header task={t} onChange={() => {}} onOpenShell={() => {}} />);
+  expect(header(task({}))).toContain('Open shell');
+  expect(header(task({ status: 'failed' }))).toContain('Open shell');
+  expect(header(task({ shellEnabled: false }))).not.toContain('Open shell');
+  expect(header(task({ execution: undefined }))).not.toContain('Open shell');
+  expect(header(task({ status: 'done' }))).not.toContain('Open shell');
+  // While a shell is open, TaskDetail passes no `onOpenShell`.
+  expect(render(task({}))).not.toContain('Open shell');
+});
