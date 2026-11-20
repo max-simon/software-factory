@@ -80,6 +80,8 @@ function setup(maxRunning = 10) {
     now: () => new Date(now).toISOString(),
   });
   const logged: string[] = [];
+  /** Tasks with an open shell. */
+  const shells = new Set<string>();
   const deps: DispatcherDeps = {
     tasks,
     lifecycle,
@@ -88,6 +90,7 @@ function setup(maxRunning = 10) {
     maxRunning,
     followUpWindowMs,
     secrets,
+    hasOpenShell: (taskId) => shells.has(taskId),
     log: (message) => logged.push(message),
     now: () => now,
   };
@@ -97,7 +100,21 @@ function setup(maxRunning = 10) {
     now += ms;
   };
   const beat = (id: string) => agent.recordHeartbeat(tasks.get(id), { phase: 'working' });
-  return { runtime, tasks, service, agent, lifecycle, deps, dispatcher: newDispatcher(), newDispatcher, logged, advance, beat, now: () => now };
+  return {
+    runtime,
+    tasks,
+    service,
+    agent,
+    lifecycle,
+    deps,
+    dispatcher: newDispatcher(),
+    newDispatcher,
+    logged,
+    advance,
+    beat,
+    shells,
+    now: () => now,
+  };
 }
 
 type Fixture = ReturnType<typeof setup>;
@@ -556,6 +573,55 @@ test('does not remove the execution server of a failed task while its worker is 
   f.beat(task.id);
   await f.dispatcher.reconcile();
   assert.deepEqual(f.runtime.removed, []);
+});
+
+test('keeps a ready task ready while a shell is open and marks it done on the pass after it closes', async () => {
+  const f = setup();
+  const task = readyWith(f, []);
+  f.shells.add(task.id);
+  await f.dispatcher.reconcile();
+  assert.equal(f.tasks.get(task.id).status, 'ready');
+  assert.deepEqual(f.runtime.removed, []);
+
+  f.shells.delete(task.id);
+  await f.dispatcher.reconcile();
+  assert.equal(f.tasks.get(task.id).status, 'done');
+  assert.deepEqual(f.runtime.removed, [`c-${task.id}`]);
+});
+
+test('keeps the execution server of a done task while a shell is open', async () => {
+  const f = setup();
+  const task = inStatus(f, 'done', 'c1');
+  f.shells.add(task.id);
+  await f.dispatcher.reconcile();
+  assert.deepEqual(f.runtime.removed, []);
+
+  f.shells.delete(task.id);
+  await f.dispatcher.reconcile();
+  assert.deepEqual(f.runtime.removed, ['c1']);
+});
+
+test('keeps the execution server of a failed task past its follow-up window while a shell is open', async () => {
+  const f = setup();
+  const task = inStatus(f, 'failed', 'c1', true);
+  f.advance(followUpWindowMs + 1);
+  f.shells.add(task.id);
+  await f.dispatcher.reconcile();
+  assert.equal(f.tasks.get(task.id).execution?.id, 'c1');
+
+  f.shells.delete(task.id);
+  await f.dispatcher.reconcile();
+  assert.deepEqual(f.runtime.removed, ['c1']);
+  assert.equal(f.tasks.get(task.id).execution?.id, undefined);
+});
+
+test('an open shell takes no running slot', async () => {
+  const f = setup(1);
+  const ready = readyWith(f, [pullRequest(1)]);
+  f.shells.add(ready.id);
+  const task = queued(f);
+  await f.dispatcher.reconcile();
+  assert.equal(f.tasks.get(task.id).status, 'in_progress');
 });
 
 test('logs a failing task and continues with the others', async () => {

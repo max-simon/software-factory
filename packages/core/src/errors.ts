@@ -21,6 +21,8 @@ export type DomainErrorCode =
   | 'invalid_dependencies'
   | 'has_waiting_dependents'
   | 'no_execution'
+  | 'shell_unavailable'
+  | 'shell_limit'
   | 'unknown_user'
   | 'user_disabled'
   | 'duplicate_username'

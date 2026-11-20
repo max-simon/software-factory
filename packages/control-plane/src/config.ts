@@ -17,6 +17,8 @@ export interface Config {
   sessionIdleHours: number;
   /** Days a browser session lasts at most, however active. */
   sessionMaxDays: number;
+  /** Minutes a browser shell may go without input before it is closed. */
+  shellIdleMinutes: number;
   /** Names of the Anthropic credentials that are set. */
   credentials: AnthropicCredential[];
   /** The one credential forwarded to the claude CLI of execution servers and reviewers. */
@@ -60,6 +62,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   }
   const sessionIdleHours = positiveNumber(env, 'FACTORY_SESSION_IDLE_HOURS', 12);
   const sessionMaxDays = positiveNumber(env, 'FACTORY_SESSION_MAX_DAYS', 7);
+  const shellIdleMinutes = positiveNumber(env, 'FACTORY_SHELL_IDLE_MINUTES', 30);
   const reviewerModel = env.FACTORY_REVIEWER_MODEL?.trim() || 'sonnet';
   if (reviewerModel !== 'opus' && reviewerModel !== 'sonnet') {
     throw new ConfigError(`FACTORY_REVIEWER_MODEL must be opus or sonnet, got "${env.FACTORY_REVIEWER_MODEL}"`);
@@ -76,6 +79,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     followUpWindowHours,
     sessionIdleHours,
     sessionMaxDays,
+    shellIdleMinutes,
     credentials,
     agentCredential,
   };
