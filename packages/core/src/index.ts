@@ -7,6 +7,22 @@ export { managedComments, type ManagedComment } from './managed-comments.ts';
 export { toAgentTaskView, toProjectTaskSummary, toTaskView } from './views.ts';
 export { createProject, editProject, type NewProject, type Project, type ProjectEdit } from './project.ts';
 export { agentConsolePort, doorbellPort } from './ports.ts';
+export {
+  describeTaskProvider,
+  gitHubIssueRepos,
+  hasTaskProvider,
+  isGitHubRepo,
+  parseTaskProviderAttachment,
+  parseTaskProviders,
+  taskProviderKinds,
+  taskProviderTypes,
+  taskProvidersMax,
+  type GitHubIssuesAttachment,
+  type TaskProviderAttachment,
+  type TaskProviderField,
+  type TaskProviderKind,
+  type TaskProviderType,
+} from './task-provider.ts';
 export { DomainError, type DomainErrorCode } from './errors.ts';
 export { assertTransition, transitions } from './status.ts';
 export {

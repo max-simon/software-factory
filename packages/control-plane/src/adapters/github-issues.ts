@@ -26,8 +26,6 @@ interface IssueRef {
 
 export interface GitHubIssuesOptions {
   token: string;
-  /** `owner/repo` of each repository to look for issues in. */
-  repos: readonly string[];
   /** The SQLite file the other repositories use. */
   dbPath: string;
   /** Issue URLs on any other host are refused. */
@@ -41,14 +39,12 @@ export interface GitHubIssuesOptions {
  */
 export class GitHubIssues implements IssueProvider {
   readonly #token: string;
-  readonly #repos: readonly string[];
   readonly #host: string;
   readonly #fetch: typeof fetch;
   readonly #db: DatabaseSync;
 
-  constructor({ token, repos, dbPath, host = 'github.com', fetchImpl = fetch }: GitHubIssuesOptions) {
+  constructor({ token, dbPath, host = 'github.com', fetchImpl = fetch }: GitHubIssuesOptions) {
     this.#token = token;
-    this.#repos = repos;
     this.#host = host;
     this.#fetch = fetchImpl;
     this.#db = new DatabaseSync(dbPath);
@@ -56,11 +52,11 @@ export class GitHubIssues implements IssueProvider {
     this.#db.exec(schema);
   }
 
-  async listIssues(label: string): Promise<ExternalIssue[]> {
+  async listIssues(repos: readonly string[], label: string): Promise<ExternalIssue[]> {
     // GitHub reads `labels` as a comma-separated list of labels an issue must all carry.
     if (label.includes(',')) throw new Error(`cannot list issues by a label containing a comma: ${label}`);
     const issues: ExternalIssue[] = [];
-    for (const repo of this.#repos) {
+    for (const repo of repos) {
       let next: string | undefined =
         `${apiBase(this.#host)}/repos/${repo}/issues?labels=${encodeURIComponent(label)}&state=all&per_page=100`;
       while (next !== undefined) {
@@ -78,12 +74,12 @@ export class GitHubIssues implements IssueProvider {
     return issues;
   }
 
-  covers(url: string): boolean {
+  covers(url: string, repos: readonly string[]): boolean {
     const ref = this.#parseIssueUrl(url);
     if (ref === undefined) return false;
     // GitHub matches owner and repository names case-insensitively.
     const name = `${ref.owner}/${ref.repo}`.toLowerCase();
-    return this.#repos.some((repo) => repo.toLowerCase() === name);
+    return repos.some((repo) => repo.toLowerCase() === name);
   }
 
   async changeLabels(url: string, change: { add: string[]; remove: string[] }): Promise<void> {

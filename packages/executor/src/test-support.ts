@@ -49,6 +49,7 @@ export function sampleProject(overrides: Partial<Project> = {}): Project {
     title: 'Greeter',
     description: 'Friendly command-line tools.',
     autoMerge: false,
+    taskProviders: [],
     ...overrides,
   };
 }

@@ -67,10 +67,8 @@ function main(): void {
   // Hooks need the services, which publish to the hooks, so they are registered once the services exist.
   const hooks = new Hooks();
   const secrets = [...config.credentials.map((name) => process.env[name]!), process.env.GITHUB_TOKEN!];
-  const issues =
-    config.githubIssueRepos.length > 0
-      ? new GitHubIssues({ token: process.env.GITHUB_TOKEN!, repos: config.githubIssueRepos, dbPath: config.dbPath })
-      : undefined;
+  // Which repositories it looks in is up to the projects' task provider attachments, read on every sync pass.
+  const issues = new GitHubIssues({ token: process.env.GITHUB_TOKEN!, dbPath: config.dbPath });
   const { tasks, service, agent, lifecycle } = createServices({
     repository,
     runtime,
@@ -142,12 +140,12 @@ function main(): void {
   });
   // Polls GitHub for pull request changes; replaceable by a webhook that records the same changes.
   const pullRequestObserver = new PullRequestObserver({ tasks, lifecycle, pullRequests, secrets });
-  const issueSync = issues && new IssueSync({ tasks, projects: projectRepository, provider: issues, secrets });
+  const issueSync = new IssueSync({ tasks, projects: projectRepository, provider: issues, secrets });
   server.listen(config.port, host, () => {
     console.log(`control plane listening on http://${host}:${config.port} (MCP at ${mcpPath})`);
     runLoop('dispatcher', () => dispatcher.reconcile(), reconcileIntervalMs);
     runLoop('pull request observer', () => pullRequestObserver.observe(), pullRequestPollIntervalMs);
-    if (issueSync) runLoop('issue sync', () => issueSync.sync(), issueSyncIntervalMs);
+    runLoop('issue sync', () => issueSync.sync(), issueSyncIntervalMs);
   });
 }
 

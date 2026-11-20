@@ -10,7 +10,7 @@ import {
 } from '@factory/core';
 import { SqliteTaskRepository } from './adapters/sqlite-task-repository.ts';
 import { createServices } from './services.ts';
-import { ada } from './test-support.ts';
+import { ada, noIssues } from './test-support.ts';
 
 const now = '2026-11-12T10:00:00.000Z';
 
@@ -64,8 +64,8 @@ class OrderedRepository extends SqliteTaskRepository {
   }
 }
 
-/** A running managed task `m1` (execution `c-1`), with the issue provider `issues` unless it is turned off. */
-function setUpManaged(options: { issues?: 'off'; failing?: FakeIssues['failing'] } = {}) {
+/** A running managed task `m1` (execution `c-1`), with the issue provider `issues`. */
+function setUpManaged(options: { failing?: FakeIssues['failing'] } = {}) {
   const calls: string[] = [];
   const logged: string[] = [];
   const repository = new OrderedRepository(calls);
@@ -81,7 +81,7 @@ function setUpManaged(options: { issues?: 'off'; failing?: FakeIssues['failing']
     now: () => now,
     secrets: ['ghp_secret'],
     log: (message) => logged.push(message),
-    ...(options.issues !== 'off' && { issues }),
+    issues,
   });
   const external = { provider: 'github' as const, url: issueUrl, key: 'o/r#7' };
   const managed = createTask({ projectId: 'p1', title: 'Issue', specification: 'Body' }, { id: 'm1', now, rank: 1, external });
@@ -134,15 +134,6 @@ test('delete still deletes a managed task when the comment fails, and logs it re
   assert.equal(f.repository.get('m1'), undefined);
   assert.equal(f.logged.length, 1);
   assert.match(f.logged[0]!, /m1.*o\/r#7.*\[redacted\]/);
-});
-
-test('delete of a managed task without an issue provider deletes it and logs that the labels stay', async () => {
-  const f = setUpManaged({ issues: 'off' });
-  await f.service.delete('m1');
-  assert.deepEqual(f.calls, ['runtime.remove', 'delete']);
-  assert.equal(f.repository.get('m1'), undefined);
-  assert.equal(f.logged.length, 1);
-  assert.match(f.logged[0]!, /m1.*o\/r#7.*untouched/);
 });
 
 test('delete of an unmanaged task never calls the issue provider', async () => {

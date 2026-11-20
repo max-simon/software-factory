@@ -21,11 +21,6 @@ export interface Config {
   credentials: AnthropicCredential[];
   /** The one credential forwarded to each agent; an agent without one cannot run. */
   agentCredentials: Partial<Record<TaskAgent, AnthropicCredential>>;
-  /**
-   * `owner/repo` of each GitHub repository to look for issues in; empty turns
-   * managed tasks off. A managed task's repository is the one GitHub names for its issue.
-   */
-  githubIssueRepos: string[];
 }
 
 /** An API key bills usage credits; an OAuth token from `claude setup-token` uses a Claude subscription. */
@@ -88,7 +83,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (reviewerModel !== 'opus' && reviewerModel !== 'sonnet') {
     throw new ConfigError(`FACTORY_REVIEWER_MODEL must be opus or sonnet, got "${env.FACTORY_REVIEWER_MODEL}"`);
   }
-  const githubIssueRepos = repoList(env, 'FACTORY_GITHUB_ISSUE_REPOS');
   return {
     port,
     dbPath: env.FACTORY_DB ?? 'factory.db',
@@ -103,7 +97,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     sessionMaxDays,
     credentials,
     agentCredentials,
-    githubIssueRepos,
   };
 }
 
@@ -111,16 +104,4 @@ function positiveNumber(env: NodeJS.ProcessEnv, name: string, fallback: number):
   const value = Number(env[name]?.trim() || fallback);
   if (!(Number.isFinite(value) && value > 0)) throw new ConfigError(`${name} must be a positive number, got "${env[name]}"`);
   return value;
-}
-
-/** A comma-separated list of `owner/repo`; unset or blank is an empty list. */
-function repoList(env: NodeJS.ProcessEnv, name: string): string[] {
-  const value = env[name]?.trim();
-  if (!value) return [];
-  const repos = value.split(',').map((repo) => repo.trim());
-  const malformed = repos.find((repo) => !/^[A-Za-z0-9-]+\/(?!\.\.?$)[\w.-]+$/.test(repo));
-  if (malformed !== undefined) {
-    throw new ConfigError(`${name} must be a comma-separated list of owner/repo, got "${malformed}" in "${env[name]}"`);
-  }
-  return repos;
 }

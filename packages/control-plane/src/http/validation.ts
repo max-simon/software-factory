@@ -24,7 +24,7 @@ import type {
   TaskModel,
   TokenUsage,
 } from '@factory/core';
-import { usernameMaxLength } from '@factory/core';
+import { parseTaskProviders, usernameMaxLength } from '@factory/core';
 import { passwordMaxLength } from '../auth/passwords.ts';
 
 export class ValidationError extends Error {
@@ -152,25 +152,35 @@ function optionalText(fields: Fields, key: string): string | undefined {
   return value;
 }
 
+const projectFields = ['title', 'description', 'autoMerge', 'taskProviders'];
+
 export function parseNewProject(body: unknown): NewProject {
   const fields = object(body);
-  rejectUnknownFields(fields, ['title', 'description', 'autoMerge']);
+  rejectUnknownFields(fields, projectFields);
   const description = optionalText(fields, 'description');
   const autoMerge = optionalBoolean(fields, 'autoMerge');
+  const taskProviders = fields.taskProviders === undefined ? undefined : parseTaskProviders(fields.taskProviders);
   return {
     title: requiredString(fields, 'title'),
     ...(description !== undefined && { description }),
     ...(autoMerge !== undefined && { autoMerge }),
+    ...(taskProviders !== undefined && { taskProviders }),
   };
 }
 
 export function parseProjectEdit(body: unknown): ProjectEdit {
   const fields = object(body);
-  rejectUnknownFields(fields, ['title', 'description', 'autoMerge']);
+  rejectUnknownFields(fields, projectFields);
   const title = optionalString(fields, 'title');
   const description = optionalText(fields, 'description');
   const autoMerge = optionalBoolean(fields, 'autoMerge');
-  return { ...(title && { title }), ...(description !== undefined && { description }), ...(autoMerge !== undefined && { autoMerge }) };
+  const taskProviders = fields.taskProviders === undefined ? undefined : parseTaskProviders(fields.taskProviders);
+  return {
+    ...(title && { title }),
+    ...(description !== undefined && { description }),
+    ...(autoMerge !== undefined && { autoMerge }),
+    ...(taskProviders !== undefined && { taskProviders }),
+  };
 }
 
 /** `before` is the id of the task to move in front of; absent means the bottom. */

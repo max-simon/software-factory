@@ -1,5 +1,5 @@
 import type { IncomingHttpHeaders } from 'node:http';
-import { createUser, type Principal } from '@factory/core';
+import { createUser, type IssueProvider, type Principal } from '@factory/core';
 import { SqliteAccessTokenRepository } from './adapters/sqlite-access-token-repository.ts';
 import { SqliteSessionRepository } from './adapters/sqlite-session-repository.ts';
 import { SqliteUserRepository } from './adapters/sqlite-user-repository.ts';
@@ -18,6 +18,18 @@ export function sequentialItemIds(): (prefix: ItemPrefix) => string {
     return `${prefix}${count}`;
   };
 }
+
+/** For tests that create no managed tasks: lists nothing and fails any write, so an unexpected call shows. */
+export const noIssues: IssueProvider = {
+  listIssues: async () => [],
+  covers: () => false,
+  changeLabels: async () => {
+    throw new Error('this test has no issue provider');
+  },
+  comment: async () => {
+    throw new Error('this test has no issue provider');
+  },
+};
 
 /** The users `testAuth` creates, as services receive them. */
 export const ada: Principal = { userId: 'u1', via: 'session' };

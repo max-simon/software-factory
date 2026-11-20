@@ -1566,6 +1566,41 @@ input[type='radio'] {
   color: var(--muted);
 }
 
+.task-providers {
+  margin: 20px 0 16px;
+  padding: 0;
+  border: none;
+}
+
+.task-providers > legend {
+  margin-bottom: 4px;
+  padding: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.task-providers-empty {
+  margin-top: 10px;
+}
+
+.task-provider-add {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto;
+  align-items: end;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.task-provider-add .field {
+  margin-bottom: 0;
+}
+
+@media (max-width: 600px) {
+  .task-provider-add {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .error {
   margin-top: 10px;
   color: var(--red);

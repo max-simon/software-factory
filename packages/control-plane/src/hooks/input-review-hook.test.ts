@@ -8,7 +8,7 @@ import { ReviewTracker } from '../review-tracker.ts';
 import { createServices } from '../services.ts';
 import { Hooks } from './hooks.ts';
 import { InputReviewHook, openInputIds } from './input-review-hook.ts';
-import { ada, sequentialItemIds } from '../test-support.ts';
+import { ada, noIssues, sequentialItemIds } from '../test-support.ts';
 
 /** Each review waits until the test settles it. */
 class FakeReviewer implements Pick<Reviewer, 'reviewInput'> {
@@ -39,6 +39,7 @@ function setup({ randomItemIds = false } = {}) {
   const pending: Promise<void>[] = [];
   const { tasks, service, agent, lifecycle } = createServices({
     repository: new SqliteTaskRepository(':memory:'),
+    issues: noIssues,
     runtime: { remove: async () => {} } as unknown as ExecutionRuntime,
     onEvent: (event) => void pending.push(hooks.emit(event)),
     newId: () => `t${++counter}`,

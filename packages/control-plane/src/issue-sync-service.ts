@@ -3,6 +3,7 @@ import {
   assertDeletable,
   createTask,
   factoryLabel,
+  gitHubIssueRepos,
   isEditable,
   managedComments,
   nextRank,
@@ -25,7 +26,7 @@ import type { TaskStore } from './task-store.ts';
 
 export interface IssueSyncDeps {
   tasks: Pick<TaskStore, 'findByExternalUrl' | 'insert' | 'update' | 'delete' | 'list' | 'now'>;
-  projects: Pick<ProjectRepository, 'get'>;
+  projects: Pick<ProjectRepository, 'get' | 'list'>;
   provider: IssueProvider;
   /** Secret values to strip from logged errors. */
   secrets: readonly string[];
@@ -89,10 +90,14 @@ export class IssueSync {
     this.#newId = deps.newId ?? (() => randomBytes(5).toString('hex'));
   }
 
-  /** One pass over every labelled issue; one failing issue does not stop the others. */
+  /**
+   * One pass over every labelled issue of the repositories the projects
+   * attach, read anew each pass; one failing issue does not stop the others.
+   */
   async sync(): Promise<void> {
+    const repos = gitHubIssueRepos(this.#deps.projects.list());
     // A failed list throws before anything changes, so a provider that did not answer deletes nothing.
-    const issues = await this.#deps.provider.listIssues(factoryLabel);
+    const issues = await this.#deps.provider.listIssues(repos, factoryLabel);
     const withoutProject: string[] = [];
     for (const issue of issues) {
       await this.#guard(issue.url, () => this.#sync(issue, withoutProject));
@@ -100,10 +105,12 @@ export class IssueSync {
       await this.#guard(issue.url, () => this.#reportStatus(issue));
       await this.#guard(issue.url, () => this.#postComments(issue));
     }
-    await this.#deleteUnlabelled(new Set(issues.map((issue) => issue.url)));
+    await this.#deleteUnlabelled(new Set(issues.map((issue) => issue.url)), repos);
     // One line per pass, not per issue: an issue waiting for its project label is no error.
     if (withoutProject.length > 0) {
-      this.#log(`issue sync: skipped ${withoutProject.length} issues without a known project label: ${withoutProject.join(', ')}`);
+      this.#log(
+        `issue sync: skipped ${withoutProject.length} issues without the label of a project that attaches their repository: ${withoutProject.join(', ')}`,
+      );
     }
   }
 
@@ -118,12 +125,12 @@ export class IssueSync {
   /**
    * An unstarted managed task whose issue is missing from the list lost the
    * factory label, but only if the list covers the issue's repository: one
-   * no longer configured is not looked at.
+   * no project attaches any more is not looked at.
    */
-  async #deleteUnlabelled(listed: ReadonlySet<string>): Promise<void> {
+  async #deleteUnlabelled(listed: ReadonlySet<string>, repos: readonly string[]): Promise<void> {
     for (const task of this.#deps.tasks.list()) {
       const url = task.external?.url;
-      if (url === undefined || !isEditable(task.status) || listed.has(url) || !this.#deps.provider.covers(url)) continue;
+      if (url === undefined || !isEditable(task.status) || listed.has(url) || !this.#deps.provider.covers(url, repos)) continue;
       await this.#guard(url, () => this.#delete(task));
     }
   }
@@ -213,7 +220,9 @@ export class IssueSync {
   async #import(issue: ExternalIssue, parsed: ManagedLabels, withoutProject: string[]): Promise<void> {
     if (!issue.isOpen) return;
     const { projectId } = parsed;
-    if (projectId === undefined || this.#deps.projects.get(projectId) === undefined) {
+    const project = projectId === undefined ? undefined : this.#deps.projects.get(projectId);
+    // Another project's repository is listed too, but its issues must not reach a project that did not attach it.
+    if (project === undefined || !this.#deps.provider.covers(issue.url, gitHubIssueRepos([project]))) {
       withoutProject.push(issue.url);
       return;
     }
@@ -221,7 +230,7 @@ export class IssueSync {
     const { tasks } = this.#deps;
     const { provider, url, key } = issue;
     const task = createTask(
-      { ...contentOf(issue, parsed), projectId, repoUrl: issue.repoUrl },
+      { ...contentOf(issue, parsed), projectId: project.id, repoUrl: issue.repoUrl },
       { id: this.#newId(), now: tasks.now(), rank: nextRank(tasks.list()), external: { provider, url, key } },
     );
     tasks.insert(task, 'system');

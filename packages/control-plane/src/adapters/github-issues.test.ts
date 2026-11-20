@@ -19,7 +19,7 @@ interface Request {
 }
 
 /** Answers each request with the next of `answers`; once they run out, with an empty 200. */
-function setup(answers: Answer[] = [], options: { host?: string; repos?: string[]; dbPath?: string } = {}) {
+function setup(answers: Answer[] = [], options: { host?: string; dbPath?: string } = {}) {
   const requests: Request[] = [];
   const queue = [...answers];
   const fetchImpl = (async (url: URL | string, init?: RequestInit) => {
@@ -34,7 +34,6 @@ function setup(answers: Answer[] = [], options: { host?: string; repos?: string[
   }) as typeof fetch;
   const issues = new GitHubIssues({
     token: 'gh-token',
-    repos: options.repos ?? ['o/r'],
     dbPath: options.dbPath ?? ':memory:',
     ...(options.host && { host: options.host }),
     fetchImpl,
@@ -57,7 +56,7 @@ const issueUrl = 'https://github.com/o/r/issues/12';
 
 test('listIssues asks for open and closed issues with the label and maps them', async () => {
   const { issues, requests } = setup([{ body: [gitHubIssue(1), gitHubIssue(2, { state: 'closed', body: null })] }]);
-  assert.deepEqual(await issues.listIssues('factory: ready'), [
+  assert.deepEqual(await issues.listIssues(['o/r'], 'factory: ready'), [
     {
       provider: 'github',
       url: 'https://github.com/o/r/issues/1',
@@ -84,18 +83,15 @@ test('listIssues asks for open and closed issues with the label and maps them', 
   assert.equal(requests[0]!.headers.authorization, 'Bearer gh-token');
 });
 
-test('listIssues follows the pages GitHub links to, in every configured repository', async () => {
+test('listIssues follows the pages GitHub links to, in every given repository', async () => {
   const second = 'https://api.github.com/repositories/1/issues?labels=factory&state=all&per_page=100&page=2';
-  const { issues, requests } = setup(
-    [
-      { body: [gitHubIssue(1)], link: `<${second}>; rel="next", <${second}>; rel="last"` },
-      { body: [gitHubIssue(2)], link: '<https://api.github.com/x?page=1>; rel="prev"' },
-      { body: [gitHubIssue(3, { html_url: 'https://github.com/o/s/issues/3' })] },
-    ],
-    { repos: ['o/r', 'o/s'] },
-  );
+  const { issues, requests } = setup([
+    { body: [gitHubIssue(1)], link: `<${second}>; rel="next", <${second}>; rel="last"` },
+    { body: [gitHubIssue(2)], link: '<https://api.github.com/x?page=1>; rel="prev"' },
+    { body: [gitHubIssue(3, { html_url: 'https://github.com/o/s/issues/3' })] },
+  ]);
   assert.deepEqual(
-    (await issues.listIssues('factory')).map((issue) => issue.key),
+    (await issues.listIssues(['o/r', 'o/s'], 'factory')).map((issue) => issue.key),
     ['o/r#1', 'o/r#2', 'o/s#3'],
   );
   assert.deepEqual(
@@ -112,7 +108,7 @@ test('listIssues leaves out pull requests', async () => {
   const pull = { ...gitHubIssue(2, { html_url: 'https://github.com/o/r/pull/2' }), pull_request: { url: 'x' } };
   const { issues } = setup([{ body: [gitHubIssue(1), pull] }]);
   assert.deepEqual(
-    (await issues.listIssues('factory')).map((issue) => issue.key),
+    (await issues.listIssues(['o/r'], 'factory')).map((issue) => issue.key),
     ['o/r#1'],
   );
 });
@@ -124,7 +120,7 @@ test('listIssues takes repository and key from the issue GitHub returned, not fr
     title: 'Belongs to o/r',
     body: 'repo: https://github.com/o/r',
   });
-  const [issue] = await setup([{ body: [transferred] }]).issues.listIssues('factory');
+  const [issue] = await setup([{ body: [transferred] }]).issues.listIssues(['o/r'], 'factory');
   assert.equal(issue!.url, 'https://github.com/other-org/new-repo/issues/7');
   assert.equal(issue!.repoUrl, 'https://github.com/other-org/new-repo');
   assert.equal(issue!.key, 'other-org/new-repo#7');
@@ -133,9 +129,8 @@ test('listIssues takes repository and key from the issue GitHub returned, not fr
 test('listIssues uses /api/v3 and keeps the host on a GitHub Enterprise host', async () => {
   const { issues, requests } = setup([{ body: [gitHubIssue(3, { html_url: 'https://git.example.com/team/app/issues/3' })] }], {
     host: 'git.example.com',
-    repos: ['team/app'],
   });
-  const [issue] = await issues.listIssues('factory');
+  const [issue] = await issues.listIssues(['team/app'], 'factory');
   assert.equal(requests[0]!.url, 'https://git.example.com/api/v3/repos/team/app/issues?labels=factory&state=all&per_page=100');
   assert.equal(issue!.repoUrl, 'https://git.example.com/team/app');
   assert.equal(issue!.key, 'team/app#3');
@@ -151,34 +146,42 @@ test('listIssues rejects an issue whose repository cannot be derived, naming it'
     [{ html_url: 'not a url' }, /cannot derive the repository of GitHub issue not a url/],
   ];
   for (const [fields, error] of cases) {
-    await assert.rejects(setup([{ body: [gitHubIssue(5, fields)] }]).issues.listIssues('factory'), error);
+    await assert.rejects(setup([{ body: [gitHubIssue(5, fields)] }]).issues.listIssues(['o/r'], 'factory'), error);
   }
 });
 
 test('listIssues rejects malformed responses', async () => {
   const name = 'https://github.com/o/r/issues/5';
-  await assert.rejects(setup([{ body: { message: 'x' } }]).issues.listIssues('factory'), /no issue list for o\/r/);
-  await assert.rejects(setup([{ body: ['x'] }]).issues.listIssues('factory'), /issue of o\/r that is not an object/);
-  await assert.rejects(setup([{ body: [gitHubIssue(5, { title: 3 })] }]).issues.listIssues('factory'), new RegExp(`no title for ${name}`));
-  await assert.rejects(setup([{ body: [gitHubIssue(5, { body: {} })] }]).issues.listIssues('factory'), /invalid body for/);
-  await assert.rejects(setup([{ body: [gitHubIssue(5, { state: 'draft' })] }]).issues.listIssues('factory'), /unknown state for .*: draft/);
-  await assert.rejects(setup([{ body: [gitHubIssue(5, { labels: 'x' })] }]).issues.listIssues('factory'), /no label list for/);
-  await assert.rejects(setup([{ body: [gitHubIssue(5, { labels: [{ id: 1 }] })] }]).issues.listIssues('factory'), /invalid label for/);
-  await assert.rejects(setup([{ status: 500, body: 'oops' }]).issues.listIssues('factory'), /GitHub answered 500 for issues of o\/r: oops/);
-  await assert.rejects(setup().issues.listIssues('a,b'), /comma/);
+  await assert.rejects(setup([{ body: { message: 'x' } }]).issues.listIssues(['o/r'], 'factory'), /no issue list for o\/r/);
+  await assert.rejects(setup([{ body: ['x'] }]).issues.listIssues(['o/r'], 'factory'), /issue of o\/r that is not an object/);
+  await assert.rejects(setup([{ body: [gitHubIssue(5, { title: 3 })] }]).issues.listIssues(['o/r'], 'factory'), new RegExp(`no title for ${name}`));
+  await assert.rejects(setup([{ body: [gitHubIssue(5, { body: {} })] }]).issues.listIssues(['o/r'], 'factory'), /invalid body for/);
+  await assert.rejects(setup([{ body: [gitHubIssue(5, { state: 'draft' })] }]).issues.listIssues(['o/r'], 'factory'), /unknown state for .*: draft/);
+  await assert.rejects(setup([{ body: [gitHubIssue(5, { labels: 'x' })] }]).issues.listIssues(['o/r'], 'factory'), /no label list for/);
+  await assert.rejects(setup([{ body: [gitHubIssue(5, { labels: [{ id: 1 }] })] }]).issues.listIssues(['o/r'], 'factory'), /invalid label for/);
+  await assert.rejects(setup([{ status: 500, body: 'oops' }]).issues.listIssues(['o/r'], 'factory'), /GitHub answered 500 for issues of o\/r: oops/);
+  await assert.rejects(setup().issues.listIssues(['o/r'], 'a,b'), /comma/);
 });
 
-test('covers only issues of the configured repositories on the configured host, ignoring case', () => {
-  const { issues } = setup([], { repos: ['o/r', 'Team/App'] });
-  assert.equal(issues.covers('https://github.com/o/r/issues/1'), true);
-  assert.equal(issues.covers('https://github.com/team/app/issues/2'), true);
-  assert.equal(issues.covers('https://github.com/o/other/issues/1'), false);
-  assert.equal(issues.covers('https://git.example.com/o/r/issues/1'), false);
-  assert.equal(issues.covers('not a url'), false);
+test('listIssues of no repositories asks GitHub nothing', async () => {
+  const { issues, requests } = setup();
+  assert.deepEqual(await issues.listIssues([], 'factory'), []);
+  assert.deepEqual(requests, []);
+});
+
+test('covers only issues of the given repositories on the configured host, ignoring case', () => {
+  const { issues } = setup();
+  const repos = ['o/r', 'Team/App'];
+  assert.equal(issues.covers('https://github.com/o/r/issues/1', repos), true);
+  assert.equal(issues.covers('https://github.com/team/app/issues/2', repos), true);
+  assert.equal(issues.covers('https://github.com/o/other/issues/1', repos), false);
+  assert.equal(issues.covers('https://git.example.com/o/r/issues/1', repos), false);
+  assert.equal(issues.covers('not a url', repos), false);
+  assert.equal(issues.covers('https://github.com/o/r/issues/1', []), false);
 });
 
 test('listIssues accepts labels given as names', async () => {
-  const [issue] = await setup([{ body: [gitHubIssue(1, { labels: ['factory', { name: 'bug' }] })] }]).issues.listIssues('factory');
+  const [issue] = await setup([{ body: [gitHubIssue(1, { labels: ['factory', { name: 'bug' }] })] }]).issues.listIssues(['o/r'], 'factory');
   assert.deepEqual(issue!.labels, ['factory', 'bug']);
 });
 

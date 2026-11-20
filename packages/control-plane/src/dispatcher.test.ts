@@ -16,7 +16,7 @@ import { hashAgentToken } from './agent-token.ts';
 import { Dispatcher, orphanSweepIntervalMs, type DispatcherDeps, startupTimeoutMs } from './dispatcher.ts';
 import { createServices } from './services.ts';
 import type { TaskService } from './task-service.ts';
-import { ada, sequentialItemIds } from './test-support.ts';
+import { ada, noIssues, sequentialItemIds } from './test-support.ts';
 
 class FakeRuntime implements ExecutionRuntime {
   started: ExecutionSpec[] = [];
@@ -87,6 +87,7 @@ function setup(maxRunning = 10) {
   let now = Date.parse('2026-11-12T10:00:00.000Z');
   const { tasks, service, agent, lifecycle } = createServices({
     repository: new SqliteTaskRepository(':memory:'),
+    issues: noIssues,
     runtime,
     newId: () => `t${++counter}`,
     newItemId: sequentialItemIds(),

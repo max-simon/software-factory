@@ -15,7 +15,11 @@ interface Row {
   data: string;
 }
 
-const toProject = (row: Row): Project => JSON.parse(row.data) as Project;
+// Only the repository writes `data`; projects stored before attachments existed lack `taskProviders`.
+const toProject = (row: Row): Project => {
+  const stored = JSON.parse(row.data) as Omit<Project, 'taskProviders'> & Partial<Pick<Project, 'taskProviders'>>;
+  return { ...stored, taskProviders: stored.taskProviders ?? [] };
+};
 
 /** Shares the database file with the task repository through its own connection. */
 export class SqliteProjectRepository implements ProjectRepository {
