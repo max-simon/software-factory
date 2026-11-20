@@ -114,3 +114,10 @@ test('the browser guard runs before authentication', async (t) => {
   const { port } = await startServer(t);
   assert.equal((await send(port, 'GET', '/private', { origin: 'https://evil.example' })).status, 403);
 });
+
+test('answers WebSocket upgrades with 404 when nothing handles them', async (t) => {
+  const { port } = await startServer(t);
+  const reply = await send(port, 'GET', '/private', { connection: 'Upgrade', upgrade: 'websocket', cookie: session });
+  assert.equal(reply.status, 404);
+  assert.equal(JSON.parse(reply.body).error.code, 'not_found');
+});

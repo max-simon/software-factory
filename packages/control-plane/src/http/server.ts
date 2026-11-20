@@ -1,4 +1,5 @@
 import {
+  STATUS_CODES,
   createServer as createHttpServer,
   type IncomingHttpHeaders,
   type IncomingMessage,
@@ -6,6 +7,7 @@ import {
   type Server,
   type ServerResponse,
 } from 'node:http';
+import type { Duplex } from 'node:stream';
 import type { TLSSocket } from 'node:tls';
 import { DomainError, type DomainErrorCode, type Principal } from '@factory/core';
 import { NotFoundError } from '../task-store.ts';
@@ -84,6 +86,13 @@ const domainStatus: Record<DomainErrorCode, number> = {
   issue_provider_failed: 502,
 };
 
+/**
+ * Takes over a WebSocket upgrade, or returns the response that refuses it. It
+ * throws `NotFoundError` for a path it does not serve; a thrown error is
+ * answered as a route's would be.
+ */
+export type UpgradeHandler = (req: IncomingMessage, socket: Duplex, head: Buffer) => Response | undefined;
+
 export interface ServerOptions {
   /**
    * Resolves the session or personal access token a request carries. Every
@@ -94,12 +103,13 @@ export interface ServerOptions {
   staticFiles?: StaticFiles;
   /** Handles every signed-in request to `mcpPath` from this machine. */
   mcp?: RequestListener;
+  upgrade?: UpgradeHandler;
 }
 
 export const mcpPath = '/mcp';
 
 export function createServer(routes: readonly Route[], options: ServerOptions): Server {
-  return createHttpServer((req, res) => {
+  const server = createHttpServer((req, res) => {
     // The MCP transport reads the body and writes the response itself, so it
     // bypasses the JSON routes; non-local requests still get the 403 below.
     const path = URL.parse(req.url ?? '/', 'http://localhost')?.pathname;
@@ -119,6 +129,28 @@ export function createServer(routes: readonly Route[], options: ServerOptions): 
         res.destroy();
       });
   });
+  server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+    let refusal: Response | undefined;
+    try {
+      refusal = options.upgrade ? options.upgrade(req, socket, head) : failure(404, 'not_found', 'no WebSocket endpoint at this path');
+    } catch (error) {
+      refusal = toFailure(error);
+    }
+    if (refusal) refuseUpgrade(socket, refusal);
+  });
+  return server;
+}
+
+/** Answers on the raw socket, as the HTTP server no longer writes to it once it emitted `upgrade`. */
+function refuseUpgrade(socket: Duplex, { status, body }: Response): void {
+  const json = JSON.stringify(body);
+  // The caller may be gone already; there is nothing left to tell it.
+  socket.on('error', () => socket.destroy());
+  socket.once('finish', () => socket.destroy());
+  socket.end(
+    `HTTP/1.1 ${status} ${STATUS_CODES[status]}\r\nConnection: close\r\nContent-Type: application/json\r\n` +
+      `Content-Length: ${Buffer.byteLength(json)}\r\n\r\n${json}`,
+  );
 }
 
 function send(res: ServerResponse, reply: Response | StaticFile): void {
@@ -168,7 +200,7 @@ async function dispatch(routes: readonly Route[], options: ServerOptions, req: I
   }
 }
 
-function matchPath(pattern: string, path: string): Record<string, string> | undefined {
+export function matchPath(pattern: string, path: string): Record<string, string> | undefined {
   const expected = pattern.split('/').filter(Boolean);
   const actual = path.split('/').filter(Boolean);
   if (expected.length !== actual.length) return undefined;
