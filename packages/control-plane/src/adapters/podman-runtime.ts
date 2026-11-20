@@ -34,6 +34,7 @@ export class PodmanRuntime implements ExecutionRuntime {
       FACTORY_REPO_URL: spec.repoUrl,
       FACTORY_BASE_BRANCH: spec.baseBranch,
       FACTORY_MODEL: spec.model,
+      FACTORY_SHELL_ENABLED: String(spec.shellEnabled),
       FACTORY_CONTROL_PLANE_URL: spec.controlPlaneUrl,
       GIT_USER_NAME: this.#options.gitUserName,
       GIT_USER_EMAIL: this.#options.gitUserEmail,
@@ -68,19 +69,24 @@ export class PodmanRuntime implements ExecutionRuntime {
     return `http://127.0.0.1:${hostPort}`;
   }
 
-  // Idle containers keep running. One that stopped anyway (a runner that gave
-  // up, a host reboot) is started instead: a starting runner asks for work by itself.
   async notify(executionId: string): Promise<void> {
-    const { stdout } = await this.#podman(['inspect', '--format', '{{.State.Running}}', executionId]);
-    if (stdout.trim() === 'true') {
-      await this.#nudge(executionId);
-      return;
-    }
-    await this.#podman(['start', executionId]);
+    await this.#ring(executionId, '/nudge');
   }
 
-  async #nudge(containerId: string): Promise<void> {
-    const url = `${await this.#loopbackUrl(containerId, doorbellPort, 'the doorbell')}/nudge`;
+  async notifyShell(executionId: string): Promise<void> {
+    await this.#ring(executionId, '/shell');
+  }
+
+  // Idle containers keep running. One that stopped anyway (a runner that gave
+  // up, a host reboot) is started instead: a starting runner checks for what
+  // waits by itself.
+  async #ring(containerId: string, path: string): Promise<void> {
+    const { stdout } = await this.#podman(['inspect', '--format', '{{.State.Running}}', containerId]);
+    if (stdout.trim() !== 'true') {
+      await this.#podman(['start', containerId]);
+      return;
+    }
+    const url = `${await this.#loopbackUrl(containerId, doorbellPort, 'the doorbell')}${path}`;
     const response = await this.#fetch(url, { method: 'POST', signal: AbortSignal.timeout(nudgeTimeoutMs) });
     if (!response.ok) throw new Error(`the doorbell answered ${response.status}`);
   }

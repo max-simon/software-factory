@@ -285,6 +285,8 @@ export interface Task {
   autonomyMode: AutonomyMode;
   /** Model the agent runs with; tasks stored before models existed read as `opus`. */
   model: TaskModel;
+  /** Whether engineers may open a shell into its execution server; tasks stored before shells existed read as `true`. */
+  shellEnabled: boolean;
   /** Set exactly for managed tasks; unset for ordinary tasks, including all stored before managed tasks existed. */
   external?: ExternalLink;
   /** Unset for tasks that only produce plan, decisions and artifacts. */

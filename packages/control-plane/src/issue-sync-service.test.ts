@@ -146,7 +146,10 @@ test('defaults apply without config labels, and a second pass neither duplicates
   f.provider.issues = [issue(1), issue(2)];
   await f.sync.sync();
   await f.sync.sync();
-  assert.deepEqual(f.tasks.list().map((t) => [t.id, t.autonomyMode, t.model, t.rank]), [['t1', 'autonomous', 'opus', 0], ['t2', 'autonomous', 'opus', 1]]);
+  assert.deepEqual(
+    f.tasks.list().map((t) => [t.id, t.autonomyMode, t.model, t.shellEnabled, t.rank]),
+    [['t1', 'autonomous', 'opus', true, 0], ['t2', 'autonomous', 'opus', true, 1]],
+  );
   assert.deepEqual(f.provider.keys(issue(1).url), ['t1:task-id']);
   assert.equal(f.events.filter((event) => event.type === 'task.updated').length, 0);
 });

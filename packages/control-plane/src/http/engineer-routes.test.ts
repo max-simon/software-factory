@@ -44,6 +44,7 @@ class FakeRuntime implements ExecutionRuntime {
     this.removed.push(executionId);
   };
   notify = async () => {};
+  notifyShell = async () => {};
   restart = async () => {};
 }
 
@@ -107,6 +108,7 @@ test('create returns 201 with defaults and no tokenHash', async (t) => {
   assert.equal(json.status, 'draft');
   assert.equal(json.autonomyMode, 'autonomous');
   assert.equal(json.model, 'opus');
+  assert.equal(json.shellEnabled, true);
   assert.deepEqual(json.labels, []);
   assert.equal(json.createdAt, fixedNow);
   assert.equal('tokenHash' in json, false);
@@ -131,6 +133,13 @@ test('create keeps optional fields', async (t) => {
   assert.equal(json.model, 'sonnet');
 });
 
+test('create stores a disabled shell', async (t) => {
+  const { call, repository } = await startApi(t);
+  const { json } = await call('POST', '/tasks', { ...validTask, shellEnabled: false });
+  assert.equal(json.shellEnabled, false);
+  assert.equal(repository.get('task-1')?.shellEnabled, false);
+});
+
 test('create rejects invalid bodies with 400', async (t) => {
   const { call } = await startApi(t);
   const cases: Array<[string, unknown]> = [
@@ -141,6 +150,7 @@ test('create rejects invalid bodies with 400', async (t) => {
     ['bad autonomyMode', { ...validTask, autonomyMode: 'reckless' }],
     ['bad model', { ...validTask, model: 'haiku' }],
     ['non-string model', { ...validTask, model: 1 }],
+    ['non-boolean shellEnabled', { ...validTask, shellEnabled: 'false' }],
     ['non-string labels', { ...validTask, labels: [1, 2] }],
     ['non-JSON body', '{not json'],
     ['array body', []],
@@ -345,6 +355,15 @@ test('edit rejects the model, which is set on creation only', async (t) => {
   assert.equal(status, 400);
   assert.equal(json.error.message, 'cannot edit model');
   assert.equal((await call('GET', '/tasks/task-1')).json.model, 'opus');
+});
+
+test('edit rejects shellEnabled, which is set on creation only', async (t) => {
+  const { call } = await startApi(t);
+  await call('POST', '/tasks', validTask);
+  const { status, json } = await call('PATCH', '/tasks/task-1', { shellEnabled: false });
+  assert.equal(status, 400);
+  assert.equal(json.error.message, 'cannot edit shellEnabled');
+  assert.equal((await call('GET', '/tasks/task-1')).json.shellEnabled, true);
 });
 
 test('edit after start returns 409 not_editable', async (t) => {

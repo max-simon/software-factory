@@ -42,6 +42,8 @@ class FakeRuntime implements ExecutionRuntime {
     this.notified.push(executionId);
   }
 
+  async notifyShell(): Promise<void> {}
+
   async restart(executionId: string): Promise<void> {
     this.#maybeThrow('restart');
     this.restarted.push(executionId);
@@ -152,6 +154,7 @@ test('starts an execution server for a queued task, marks it in progress and its
   assert.equal(spec.repoUrl, task.repoUrl);
   assert.equal(spec.baseBranch, 'develop');
   assert.equal(spec.model, 'opus');
+  assert.equal(spec.shellEnabled, true);
   assert.equal(spec.controlPlaneUrl, 'http://host.containers.internal:8080');
   assert.match(spec.token, /^[0-9a-f]{64}$/);
 
@@ -223,6 +226,13 @@ test('passes the task model to the execution server', async () => {
   queued(f, { model: 'sonnet' });
   await f.dispatcher.reconcile();
   assert.equal(f.runtime.started[0]!.model, 'sonnet');
+});
+
+test('passes whether the task allows a shell to the execution server', async () => {
+  const f = setup();
+  queued(f, { shellEnabled: false });
+  await f.dispatcher.reconcile();
+  assert.equal(f.runtime.started[0]!.shellEnabled, false);
 });
 
 test('omits baseBranch and repoUrl from the spec when the task has none', async () => {

@@ -150,6 +150,7 @@ export class Dispatcher {
         controlPlaneUrl,
         token,
         model: task.model,
+        shellEnabled: task.shellEnabled,
         ...(task.repoUrl && { repoUrl: task.repoUrl }),
         ...(task.baseBranch && { baseBranch: task.baseBranch }),
       });

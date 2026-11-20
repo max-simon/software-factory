@@ -29,6 +29,7 @@ class FakeRuntime implements ExecutionRuntime {
   listExecutions = async (): Promise<string[]> => [];
   remove = async (): Promise<void> => {};
   notify = async () => {};
+  notifyShell = async () => {};
   restart = async () => {};
 }
 

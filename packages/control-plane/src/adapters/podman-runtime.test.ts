@@ -44,6 +44,7 @@ const spec: ExecutionSpec = {
   controlPlaneUrl: 'http://host.containers.internal:8080',
   token: 'tok-plain-value',
   model: 'sonnet',
+  shellEnabled: true,
 };
 
 const envArgs = (args: readonly string[]): string[] => args.flatMap((arg, i) => (args[i - 1] === '--env' ? [arg] : []));
@@ -77,6 +78,7 @@ test('start passes plain values by assignment and secrets by name only', async (
     'FACTORY_REPO_URL=https://github.com/o/r',
     'FACTORY_BASE_BRANCH=develop',
     'FACTORY_MODEL=sonnet',
+    'FACTORY_SHELL_ENABLED=true',
     'FACTORY_CONTROL_PLANE_URL=http://host.containers.internal:8080',
     'GIT_USER_NAME=Factory Bot',
     'GIT_USER_EMAIL=bot@example.com',
@@ -84,6 +86,12 @@ test('start passes plain values by assignment and secrets by name only', async (
     'GITHUB_TOKEN',
     'FACTORY_TASK_TOKEN',
   ]);
+});
+
+test('start passes a disabled shell as a plain value too', async () => {
+  const { runtime, calls } = setup();
+  await runtime.start({ ...spec, shellEnabled: false });
+  assert.ok(envArgs(calls[0]!.args).includes('FACTORY_SHELL_ENABLED=false'));
 });
 
 test('start forwards the configured Anthropic credential by name', async () => {
@@ -149,6 +157,25 @@ test('notify starts a stopped container instead of ringing', async () => {
 test('notify throws with stderr when the container cannot be inspected', async () => {
   const { runtime } = setup({ code: 125, stderr: 'no such container' });
   await assert.rejects(runtime.notify('c1'), /podman inspect failed with exit code 125: no such container/);
+});
+
+test('notifyShell rings the shell doorbell of a running container', async () => {
+  const { runtime, calls, nudges } = setup(containerIn(true));
+  await runtime.notifyShell('c1');
+  assert.deepEqual(calls.map((call) => call.args), [['inspect', '--format', '{{.State.Running}}', 'c1'], ['port', 'c1', '4097/tcp']]);
+  assert.deepEqual(nudges, [{ url: 'http://127.0.0.1:43100/shell', method: 'POST' }]);
+});
+
+test('notifyShell starts a stopped container instead of ringing', async () => {
+  const { runtime, calls, nudges } = setup(containerIn(false));
+  await runtime.notifyShell('c1');
+  assert.deepEqual(calls.map((call) => call.args).slice(1), [['start', 'c1']]);
+  assert.deepEqual(nudges, []);
+});
+
+test('notifyShell throws when the doorbell does not accept the request', async () => {
+  const { runtime } = setup(containerIn(true), { doorbellStatus: 503 });
+  await assert.rejects(runtime.notifyShell('c1'), /the doorbell answered 503/);
 });
 
 test('restart kills the container at once and keeps it', async () => {

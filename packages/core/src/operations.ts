@@ -37,6 +37,8 @@ export interface NewTask {
   baseBranch?: string;
   /** Defaults to `opus`. */
   model?: TaskModel;
+  /** Defaults to `true`. */
+  shellEnabled?: boolean;
   /** Defaults to none; the caller validates them against the other tasks. */
   dependsOn?: string[];
 }
@@ -121,6 +123,7 @@ export function createTask(
     labels: input.labels ?? [],
     autonomyMode: input.autonomyMode ?? 'autonomous',
     model: input.model ?? 'opus',
+    shellEnabled: input.shellEnabled ?? true,
     status: 'draft',
     rank: meta.rank,
     dependsOn: input.dependsOn ?? [],

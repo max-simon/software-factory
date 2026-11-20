@@ -287,8 +287,8 @@ interface LegacyExecutionFields {
   workAcceptedAt?: string;
   lastHeartbeat?: Heartbeat;
 }
-type StoredTask = Omit<Task, 'model' | 'followUps' | 'dependsOn' | 'pullRequests' | 'decisions'> &
-  Partial<Pick<Task, 'model' | 'followUps' | 'dependsOn'>> & { pullRequests: StoredPullRequest[]; decisions: StoredDecision[] } & LegacyExecutionFields;
+type StoredTask = Omit<Task, 'model' | 'shellEnabled' | 'followUps' | 'dependsOn' | 'pullRequests' | 'decisions'> &
+  Partial<Pick<Task, 'model' | 'shellEnabled' | 'followUps' | 'dependsOn'>> & { pullRequests: StoredPullRequest[]; decisions: StoredDecision[] } & LegacyExecutionFields;
 
 // Decisions stored before `chosen` became an index hold the chosen text, which
 // agents often worded differently from every option; such text becomes the last option.
@@ -339,7 +339,8 @@ function legacyExecution(fields: LegacyExecutionFields, updatedAt: string): Exec
 // them; they keep the old behaviour. A done task only got there once all its
 // pull requests were merged or closed, and merged is by far the common case.
 // Tasks stored before heartbeats had their own table carry one in `data`; it
-// is dropped, since a running task beats again within seconds.
+// is dropped, since a running task beats again within seconds. Tasks stored
+// before shells existed allow them, like new tasks do by default.
 const toTask = (row: Row): Task => {
   const { lastHeartbeat: _legacy, tokenHash, executionId, worker, workAcceptedAt, ...stored } = JSON.parse(row.data) as StoredTask;
   const legacyStatus: PullRequestStatus = stored.status === 'done' ? 'merged' : 'open';
@@ -351,6 +352,7 @@ const toTask = (row: Row): Task => {
     ...task,
     ...(execution && { execution: { ...execution, ...(heartbeat && { lastHeartbeat: heartbeat }) } }),
     model: stored.model ?? 'opus',
+    shellEnabled: stored.shellEnabled ?? true,
     followUps: stored.followUps ?? [],
     dependsOn: stored.dependsOn ?? [],
     pullRequests: stored.pullRequests.map((pr) => ({ ...pr, status: pr.status ?? legacyStatus })),

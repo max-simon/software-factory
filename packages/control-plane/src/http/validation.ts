@@ -100,6 +100,7 @@ export function parseNewTask(body: unknown): NewTask {
       ? undefined
       : oneOf<AutonomyMode>(fields, 'autonomyMode', ['autonomous', 'supervised']);
   const model = fields.model === undefined ? undefined : oneOf<TaskModel>(fields, 'model', ['opus', 'sonnet']);
+  const shellEnabled = optionalBoolean(fields, 'shellEnabled');
   const labels = optionalStringArray(fields, 'labels');
   const baseBranch = optionalString(fields, 'baseBranch');
   const repoUrl = fields.repoUrl === undefined ? undefined : repositoryUrl(fields, 'repoUrl');
@@ -114,6 +115,7 @@ export function parseNewTask(body: unknown): NewTask {
     ...(autonomyMode && { autonomyMode }),
     ...(baseBranch && { baseBranch }),
     ...(model && { model }),
+    ...(shellEnabled !== undefined && { shellEnabled }),
     ...(dependsOn && { dependsOn }),
   };
 }

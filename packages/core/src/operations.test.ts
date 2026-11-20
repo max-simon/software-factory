@@ -75,6 +75,7 @@ describe('createTask', () => {
     assert.equal(task.updatedAt, meta.now);
     assert.equal(task.autonomyMode, 'autonomous');
     assert.equal(task.model, 'opus');
+    assert.equal(task.shellEnabled, true);
     assert.deepEqual(task.labels, []);
     assert.equal(task.status, 'draft');
     assert.equal(task.rank, 3);
@@ -101,9 +102,11 @@ describe('createTask', () => {
         autonomyMode: 'supervised',
         baseBranch: 'dev',
         model: 'sonnet',
+        shellEnabled: false,
       },
       meta,
     );
+    assert.equal(task.shellEnabled, false);
     assert.deepEqual(task.labels, ['x']);
     assert.equal(task.autonomyMode, 'supervised');
     assert.equal(task.baseBranch, 'dev');
@@ -363,7 +366,7 @@ describe('restartTask', () => {
     for (const status of ['in_progress', 'input_required', 'ready', 'done', 'failed'] as const) {
       const before = ran(status);
       const task = restartTask(before);
-      const { id, projectId, title, specification, labels, autonomyMode, model, repoUrl: repo, rank, dependsOn, createdAt, updatedAt, metrics } = before;
+      const { id, projectId, title, specification, labels, autonomyMode, model, shellEnabled, repoUrl: repo, rank, dependsOn, createdAt, updatedAt, metrics } = before;
       assert.deepEqual(task, {
         id,
         createdAt,
@@ -374,6 +377,7 @@ describe('restartTask', () => {
         labels,
         autonomyMode,
         model,
+        shellEnabled,
         repoUrl: repo,
         rank,
         dependsOn,

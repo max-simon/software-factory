@@ -41,6 +41,7 @@ export interface ExecutionSpec {
   repoUrl?: string;
   baseBranch?: string;
   model: TaskModel;
+  shellEnabled: boolean;
   controlPlaneUrl: string;
   /** Plain agent token; never stored. */
   token: string;
@@ -66,11 +67,19 @@ export interface ExecutionRuntime {
    * suspended it; its runner then asks for the work. Harmless to repeat.
    */
   notify(executionId: string): Promise<void>;
+  /** A shell request waits; resumes the execution server if the runtime suspended it; harmless to repeat. */
+  notifyShell(executionId: string): Promise<void>;
   /** Restarts a hung or silent execution server, keeping its disk; its runner then asks for work. */
   restart(executionId: string): Promise<void>;
   remove(executionId: string): Promise<void>;
   /** Ids of every execution server this runtime started that still exists, running or stopped. */
   listExecutions(): Promise<string[]>;
+}
+
+/** One open shell connection as the services see it, so they never handle a WebSocket. */
+export interface ShellEndpoint {
+  close(code: number, reason: string): void;
+  onClose(listener: () => void): void;
 }
 
 /** Reads a pull request's current title and status from its host. */
