@@ -63,3 +63,19 @@ test('the bridge needs only the control-plane URL and token', () => {
   });
   assert.throws(() => loadBridgeConfig({}), /FACTORY_CONTROL_PLANE_URL, FACTORY_TASK_TOKEN/);
 });
+
+test('shells are disabled unless FACTORY_SHELL_ENABLED is true', () => {
+  assert.equal(loadRunnerConfig(complete).shellEnabled, false);
+  assert.equal(loadRunnerConfig({ ...complete, FACTORY_SHELL_ENABLED: 'false' }).shellEnabled, false);
+  assert.equal(loadRunnerConfig({ ...complete, FACTORY_SHELL_ENABLED: 'true' }).shellEnabled, true);
+});
+
+test('rejects any other FACTORY_SHELL_ENABLED value', () => {
+  for (const value of ['', 'TRUE', '1', 'yes']) {
+    assert.throws(
+      () => loadRunnerConfig({ ...complete, FACTORY_SHELL_ENABLED: value }),
+      (error) => error instanceof ConfigError && /FACTORY_SHELL_ENABLED must be true or false/.test(error.message),
+    );
+  }
+});
+

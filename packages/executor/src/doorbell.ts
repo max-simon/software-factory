@@ -49,17 +49,32 @@ export interface ServedDoorbell extends Doorbell {
   close(): void;
 }
 
+export interface DoorbellOptions {
+  /** Called on `POST /shell`; without it, `/shell` is 404 like any unknown path. */
+  onShellRing?: () => void;
+}
+
 /**
- * Serves a doorbell on `port`: `POST /nudge` rings it, anything else is 404.
- * Unauthenticated: a ring only makes the runner ask for work, which takes its token.
+ * Serves a doorbell on `port`: `POST /nudge` rings it, `POST /shell` calls
+ * `onShellRing` (if given) without waking the work loop, anything else is 404.
+ * Unauthenticated: a ring only makes the runner ask the control plane, which takes its token.
  */
-export async function serveDoorbell(port: number): Promise<ServedDoorbell> {
+export async function serveDoorbell(port: number, { onShellRing }: DoorbellOptions = {}): Promise<ServedDoorbell> {
   const doorbell = createDoorbell();
   const server = createServer((request, response) => {
     request.resume();
-    const isNudge = request.method === 'POST' && request.url === '/nudge';
-    if (isNudge) doorbell.ring();
-    response.writeHead(isNudge ? 204 : 404).end();
+    const isPost = request.method === 'POST';
+    if (isPost && request.url === '/nudge') {
+      doorbell.ring();
+      response.writeHead(204).end();
+      return;
+    }
+    if (isPost && request.url === '/shell' && onShellRing) {
+      onShellRing();
+      response.writeHead(204).end();
+      return;
+    }
+    response.writeHead(404).end();
   });
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);

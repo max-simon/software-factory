@@ -181,6 +181,7 @@ export function fakeAgentClient(task: AgentTaskView = sampleTask()): FakeAgentCl
       if (!task) throw new AgentApiError(404, 'not_found', `task ${id} not found`);
       return task;
     },
+    listShellRequests: async () => [],
   };
   const awaiting = (requestApproval?: boolean): Partial<AgentTaskView> => {
     if (!requestApproval) return {};

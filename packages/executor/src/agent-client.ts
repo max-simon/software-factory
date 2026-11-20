@@ -10,8 +10,10 @@ import type {
   Question,
   QuestionType,
   SessionMetrics,
+  ShellRequest,
   Work,
 } from '@factory/core';
+import { parseShellSize } from '@factory/core';
 
 export interface QuestionRequest {
   problem: string;
@@ -46,6 +48,8 @@ export interface AgentClient {
   /** The other tasks in the project, in rank order. */
   listProjectTasks(): Promise<ProjectTaskSummary[]>;
   getProjectTask(id: string): Promise<AgentTaskView>;
+  /** The engineers' pending shell requests for this task. */
+  listShellRequests(): Promise<ShellRequest[]>;
 }
 
 export class AgentApiError extends Error {
@@ -96,7 +100,33 @@ export function createAgentClient(baseUrl: string, token: string, fetchImpl: typ
     listProjectTasks: async () => (await call<{ tasks: ProjectTaskSummary[] }>('GET', '/agent/project/tasks')).tasks,
     getProjectTask: async (id) =>
       (await call<{ task: AgentTaskView }>('GET', `/agent/project/tasks/${encodeURIComponent(id)}`)).task,
+    listShellRequests: async () => parseShellRequests(await call<unknown>('GET', '/agent/shells')),
   };
+}
+
+// The ids end up in a URL and the size in a command line, so the reply is
+// checked here rather than trusted.
+function parseShellRequests(payload: unknown): ShellRequest[] {
+  const requests = isRecord(payload) ? payload.requests : undefined;
+  if (!Array.isArray(requests)) throw new AgentApiError(200, 'unexpected_response', 'shell requests: expected { requests: [] }');
+  return requests.map((entry: unknown, index) => {
+    const request = parseShellRequest(entry);
+    if (!request) throw new AgentApiError(200, 'unexpected_response', `shell requests: malformed entry ${index}`);
+    return request;
+  });
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const isId = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(value);
+
+function parseShellRequest(entry: unknown): ShellRequest | undefined {
+  if (!isRecord(entry)) return undefined;
+  const { id, taskId, size, requestedBy, createdAt } = entry;
+  if (!isId(id) || !isId(taskId) || typeof requestedBy !== 'string' || typeof createdAt !== 'string') return undefined;
+  const parsedSize = isRecord(size) ? parseShellSize(size.cols, size.rows) : undefined;
+  return parsedSize && { id, taskId, size: parsedSize, requestedBy, createdAt };
 }
 
 async function readJson(response: Response): Promise<unknown> {
