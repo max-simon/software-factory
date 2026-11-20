@@ -117,6 +117,23 @@ export function hasTaskProvider(list: readonly TaskProviderAttachment[], attachm
   return list.some((candidate) => taskProviderTypes[candidate.provider].identity(candidate) === identity);
 }
 
+/**
+ * Refuses attachments another project already has, so every issue belongs to
+ * exactly one project and the factory, not a label, decides which.
+ */
+export function assertTaskProvidersUnclaimed(
+  attachments: readonly TaskProviderAttachment[],
+  projectId: string,
+  projects: readonly { id: string; taskProviders: readonly TaskProviderAttachment[] }[],
+): void {
+  for (const other of projects) {
+    if (other.id === projectId) continue;
+    const taken = attachments.find((attachment) => hasTaskProvider(other.taskProviders, attachment));
+    if (taken === undefined) continue;
+    throw new DomainError('task_provider_taken', `${describeTaskProvider(taken)} is already attached to project ${other.id}`);
+  }
+}
+
 /** The `owner/repo` of every GitHub Issues attachment of `projects`, each once (case-insensitively), in order. */
 export function gitHubIssueRepos(projects: readonly { taskProviders: readonly TaskProviderAttachment[] }[]): string[] {
   const repos = new Map<string, string>();

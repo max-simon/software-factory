@@ -178,6 +178,9 @@ Put these in `.env` in the repository root (git-ignored, loaded by `yarn start`)
 | `FACTORY_SESSION_MAX_DAYS` | `7` | A login session ends this many days after login, however active |
 
 Managed tasks come from the GitHub repositories each project attaches under **Task providers** on its edit page.
+A repository belongs to one project. Label an issue `factory` to import it as a draft, add `factory:queued` to
+start it; the factory writes the project label and keeps a `factory:<status>` label current. Optional
+`factory:mode:supervised` and `factory:model:sonnet` change the defaults (autonomous, Opus).
 
 ### Start
 

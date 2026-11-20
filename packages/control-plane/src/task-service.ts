@@ -140,10 +140,10 @@ export class TaskService {
   }
 
   /** Removes the factory labels from a managed task's issue and says so there; no-op for other tasks. */
-  async #releaseIssue({ id, external }: Task): Promise<void> {
+  async #releaseIssue({ id, external, projectId }: Task): Promise<void> {
     if (external === undefined) return;
     try {
-      await this.#issues.changeLabels(external.url, deletionLabelChanges());
+      await this.#issues.changeLabels(external.url, deletionLabelChanges(projectId));
     } catch (error) {
       this.#log(`delete ${id}: removing the factory labels from ${external.key} failed: ${redact(describe(error), this.#secrets)}`);
       throw new DomainError(

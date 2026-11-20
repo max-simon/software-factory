@@ -8,6 +8,7 @@ export { toAgentTaskView, toProjectTaskSummary, toTaskView } from './views.ts';
 export { createProject, editProject, type NewProject, type Project, type ProjectEdit } from './project.ts';
 export { agentConsolePort, doorbellPort } from './ports.ts';
 export {
+  assertTaskProvidersUnclaimed,
   describeTaskProvider,
   gitHubIssueRepos,
   hasTaskProvider,
@@ -152,13 +153,15 @@ export {
   deletedCommentKey,
   deletionLabelChanges,
   factoryLabel,
+  mergeLabelChanges,
   modelLabels,
+  noLabelChanges,
   parseManagedLabels,
+  projectLabel,
+  projectLabelChanges,
   projectLabelPrefix,
-  startLabel,
   statusLabel,
   statusLabelChanges,
-  statusLabelPrefix,
   type LabelChanges,
   type ManagedLabels,
 } from './managed-labels.ts';

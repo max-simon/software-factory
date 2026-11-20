@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { DomainError } from './errors.ts';
 import {
+  assertTaskProvidersUnclaimed,
   describeTaskProvider,
   gitHubIssueRepos,
   hasTaskProvider,
@@ -85,6 +86,20 @@ test('describeTaskProvider names the provider and its source; hasTaskProvider ig
   assert.equal(describeTaskProvider(gh('acme/web')), 'GitHub Issues acme/web');
   assert.equal(hasTaskProvider([gh('acme/web')], gh('ACME/web')), true);
   assert.equal(hasTaskProvider([gh('acme/web')], gh('acme/api')), false);
+});
+
+test('assertTaskProvidersUnclaimed refuses a repository another project attaches, ignoring case, but not its own', () => {
+  const projects = [
+    { id: 'p1', taskProviders: [gh('o/r')] },
+    { id: 'p2', taskProviders: [gh('o/s')] },
+  ];
+  assert.doesNotThrow(() => assertTaskProvidersUnclaimed([gh('o/r'), gh('x/y')], 'p1', projects));
+  assert.doesNotThrow(() => assertTaskProvidersUnclaimed([], 'p3', projects));
+  assert.throws(
+    () => assertTaskProvidersUnclaimed([gh('x/y'), gh('O/S')], 'p1', projects),
+    (error: unknown) =>
+      error instanceof DomainError && error.code === 'task_provider_taken' && /GitHub Issues O\/S is already attached to project p2/.test(error.message),
+  );
 });
 
 test('gitHubIssueRepos lists every attached repository once, first spelling first', () => {

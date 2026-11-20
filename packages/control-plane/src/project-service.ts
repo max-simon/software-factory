@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import {
+  assertTaskProvidersUnclaimed,
   createProject,
   editProject,
   type NewProject,
@@ -30,6 +31,7 @@ export class ProjectService {
 
   create(input: NewProject, by: Principal): Project {
     const project = createProject(input, { id: this.#newId(), now: this.#now(), createdBy: by.userId });
+    assertTaskProvidersUnclaimed(project.taskProviders, project.id, this.#repository.list());
     this.#repository.insert(project);
     return project;
   }
@@ -48,6 +50,7 @@ export class ProjectService {
     const current = this.get(id);
     const now = this.#now();
     const next = { ...editProject(current, edit), updatedAt: now };
+    assertTaskProvidersUnclaimed(next.taskProviders, id, this.#repository.list());
     this.#repository.save(next);
     return next;
   }

@@ -4,17 +4,15 @@ import type { AutonomyMode, TaskModel, TaskStatus } from './task.ts';
 /*
  * Labels on a provider issue are the control channel of a managed task.
  * GitHub label names are case-insensitive, so every label in the `factory`
- * namespace is matched case-insensitively; a project id keeps the case it was
- * written in. Content labels are kept exactly as written.
+ * namespace is matched case-insensitively. Content labels are kept exactly as
+ * written.
  */
 
 export const factoryLabel = 'factory';
-export const startLabel = 'factory:start';
 export const projectLabelPrefix = 'factory:project:';
-export const statusLabelPrefix = 'factory:status:';
 export const autonomyLabels: Readonly<Record<AutonomyMode, string>> = {
-  autonomous: 'factory:autonomous',
-  supervised: 'factory:supervised',
+  autonomous: 'factory:mode:autonomous',
+  supervised: 'factory:mode:supervised',
 };
 export const modelLabels: Readonly<Record<TaskModel, string>> = {
   opus: 'factory:model:opus',
@@ -24,10 +22,17 @@ export const modelLabels: Readonly<Record<TaskModel, string>> = {
 const defaultAutonomyMode: AutonomyMode = 'autonomous';
 const defaultModel: TaskModel = 'opus';
 
+/** `input_required` becomes `factory:input-required`. */
+export const statusLabel = (status: TaskStatus): string => `${factoryLabel}:${status.replaceAll('_', '-')}`;
+
+const statusLabels: readonly string[] = (Object.keys(transitions) as TaskStatus[]).map(statusLabel);
+
+/** The factory writes it; the project comes from the attachment that covers the issue's repository. */
+export const projectLabel = (projectId: string): string => projectLabelPrefix + projectId;
+
 export interface ManagedLabels {
   isManaged: boolean;
-  /** Unset when no project label is present, or when several name different projects. */
-  projectId?: string;
+  /** A human starts a task by setting the status it moves to, `factory:queued`. */
   wantsStart: boolean;
   autonomyMode: AutonomyMode;
   model: TaskModel;
@@ -55,35 +60,18 @@ function pickOption<T extends string>(
   return fallback;
 }
 
-function pickProjectId(labels: readonly string[], conflicts: string[]): string | undefined {
-  const ids = new Set(
-    labels
-      .filter((label) => label.toLowerCase().startsWith(projectLabelPrefix))
-      .map((label) => label.slice(projectLabelPrefix.length))
-      .filter((id) => id !== ''),
-  );
-  if (ids.size <= 1) return [...ids][0];
-  conflicts.push(`several project labels are set (${[...ids].join(', ')}); no project is used`);
-  return undefined;
-}
-
 /** Reads an issue's labels; unknown `factory*` labels are ignored. */
 export function parseManagedLabels(labels: readonly string[]): ManagedLabels {
   const conflicts: string[] = [];
-  const projectId = pickProjectId(labels, conflicts);
-  const parsed: ManagedLabels = {
+  return {
     isManaged: hasLabel(labels, factoryLabel),
-    wantsStart: hasLabel(labels, startLabel),
+    wantsStart: hasLabel(labels, statusLabel('queued')),
     autonomyMode: pickOption(labels, autonomyLabels, defaultAutonomyMode, conflicts),
     model: pickOption(labels, modelLabels, defaultModel, conflicts),
     contentLabels: [...new Set(labels.filter((label) => !isFactoryLabel(label)))],
     conflicts,
   };
-  return projectId === undefined ? parsed : { ...parsed, projectId };
 }
-
-/** `input_required` becomes `factory:status:input-required`. */
-export const statusLabel = (status: TaskStatus): string => statusLabelPrefix + status.replaceAll('_', '-');
 
 export interface LabelChanges {
   add: readonly string[];
@@ -91,29 +79,38 @@ export interface LabelChanges {
   remove: readonly string[];
 }
 
-/**
- * The changes that leave exactly one status label, the wanted one. Any other
- * `factory:status:*` label is removed, including ones a human set; labels
- * outside that prefix are never touched.
- */
-export function statusLabelChanges(current: readonly string[], status: TaskStatus): LabelChanges {
-  const wanted = statusLabel(status);
-  const statusLabels = current.filter((label) => label.toLowerCase().startsWith(statusLabelPrefix));
-  const kept = statusLabels.find((label) => label.toLowerCase() === wanted);
-  return {
-    add: kept === undefined ? [wanted] : [],
-    remove: statusLabels.filter((label) => label !== kept),
-  };
+export const noLabelChanges: LabelChanges = { add: [], remove: [] };
+
+/** Keeps exactly one of `current`'s labels that `isOfClass`, the wanted one, adding it if missing. */
+function keepOnly(current: readonly string[], isOfClass: (lowered: string) => boolean, wanted: string): LabelChanges {
+  const ofClass = current.filter((label) => isOfClass(label.toLowerCase()));
+  const kept = ofClass.find((label) => label.toLowerCase() === wanted.toLowerCase());
+  return { add: kept === undefined ? [wanted] : [], remove: ofClass.filter((label) => label !== kept) };
 }
 
 /**
- * What deleting a managed task removes from its issue, so the sync does not
- * import it again: the marker, the start command and every status label.
- * Project and config labels stay, so adding `factory` again restores the setup.
+ * The changes that leave exactly one status label, the wanted one. Any other
+ * status label is removed, including one a human set; no other label is touched.
  */
-export function deletionLabelChanges(): { add: string[]; remove: string[] } {
-  const statuses = Object.keys(transitions) as TaskStatus[];
-  return { add: [], remove: [factoryLabel, startLabel, ...statuses.map(statusLabel)] };
+export const statusLabelChanges = (current: readonly string[], status: TaskStatus): LabelChanges =>
+  keepOnly(current, (label) => statusLabels.includes(label), statusLabel(status));
+
+/** The changes that leave exactly one project label, the task's; one a human set or changed is corrected. */
+export const projectLabelChanges = (current: readonly string[], projectId: string): LabelChanges =>
+  keepOnly(current, (label) => label.startsWith(projectLabelPrefix), projectLabel(projectId));
+
+export const mergeLabelChanges = (...changes: readonly LabelChanges[]): LabelChanges => ({
+  add: changes.flatMap((change) => change.add),
+  remove: changes.flatMap((change) => change.remove),
+});
+
+/**
+ * What deleting a managed task removes from its issue, so the sync does not
+ * import it again: the marker, every status label and the project label.
+ * Config labels stay, so adding `factory` again restores the setup.
+ */
+export function deletionLabelChanges(projectId: string): { add: string[]; remove: string[] } {
+  return { add: [], remove: [factoryLabel, ...statusLabels, projectLabel(projectId)] };
 }
 
 /** Scoped by task, so a task imported again from the same issue and deleted again gets its own comment. */

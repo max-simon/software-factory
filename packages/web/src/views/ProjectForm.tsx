@@ -111,7 +111,7 @@ function ProjectFields({
           <span className="hint">Every pull request gets a PR review; merge those it rates low risk without a human.</span>
         </span>
       </label>
-      <TaskProviders value={taskProviders} onChange={onTaskProvidersChange} {...(project && { projectId: project.id })} />
+      <TaskProviders value={taskProviders} onChange={onTaskProvidersChange} />
     </>
   );
 }
