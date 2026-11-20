@@ -59,7 +59,10 @@ The web UI shows each task as a timeline of exactly these items, next to its
 pull requests, cost and a changelog of who changed what (engineer, agent,
 reviewer or system). The transcript is disposable; the record is not.
 
-Engineers work through the web UI or any MCP client.
+Engineers work through the web UI or any MCP client. From a task's page in
+the web UI they can also open a shell into its container, unless the task was
+created without one. A shell sees the container's credentials (see
+[Shell](docs/architecture.md#shell) and the known gaps).
 
 ## Idle workers can sleep
 
@@ -168,6 +171,7 @@ Put these in `.env` in the repository root (git-ignored, loaded by `yarn start`)
 | `FACTORY_FOLLOW_UP_WINDOW_HOURS` | `24` | How long a failed task keeps its container for follow-ups |
 | `FACTORY_SESSION_IDLE_HOURS` | `12` | A login session ends after this many hours unused |
 | `FACTORY_SESSION_MAX_DAYS` | `7` | A login session ends this many days after login, however active |
+| `FACTORY_SHELL_IDLE_MINUTES` | `30` | A browser shell closes after this many minutes without input |
 
 Managed tasks come from the GitHub repositories each project attaches under **Task providers** on its edit page.
 A repository belongs to one project. Label an issue `factory` to import it as a draft, add `factory:queued` to

@@ -6,11 +6,11 @@ Detail behind the [README](../README.md): packages, task lifecycle, the worker p
 
 | Package | Role |
 |---|---|
-| `packages/core` | Domain model and rules: task and project types (a started task carries its `Execution`: token hash, worker state, heartbeat, console), the views each audience gets (`TaskView`, `AgentTaskView`), the status machine, pure operations (`startTask`, `addDecision`, `markReady`, …) the worker lifecycle (`pendingWork`, `acceptWork`, `releaseWorker`, …), task and pull request events (`pullRequestEvents` derives the latter from two saved versions of a task), users and identity (`User`, `ExternalIdentity`, `Principal`, `createUser`, …), personal access token metadata and its validation (`AccessToken`, `parseAccessTokenName`, …), the task provider registry and attachments of a project (`taskProviderTypes`, `parseTaskProviders`, …), and the ports (`TaskRepository`, `ProjectRepository`, `UserRepository`, `AccessTokenRepository`, `Authenticator`, `PasswordHasher`, `ExecutionRuntime`, `PullRequestReader`, `PullRequestWriter`, `Reviewer`, `IssueProvider`). No I/O. |
-| `packages/control-plane` | HTTP server on `127.0.0.1:4700`. Login (`/auth/*`), engineer API (`/projects`, `/tasks`) and MCP endpoint (`/mcp`), both behind a browser session or a personal access token; agent API (`/agent/*`, token-authenticated); static web UI. Reads go through the `TaskStore`; changes through one service per actor: `TaskService` (engineer), `AgentService` (agent and runner), `LifecycleService` (the dispatcher). Adapters: SQLite repositories (`node:sqlite`), `PodmanRuntime`, `PodmanReviewer`, `GitHubPullRequests` and `GitHubIssues` (REST API). The `Dispatcher` reconciles every 2 s; the `PullRequestObserver` polls GitHub every minute; `Hooks` react to task and pull request events. |
+| `packages/core` | Domain model and rules: task and project types (a started task carries its `Execution`: token hash, worker state, heartbeat, console), the views each audience gets (`TaskView`, `AgentTaskView`), the status machine, pure operations (`startTask`, `addDecision`, `markReady`, …) the worker lifecycle (`pendingWork`, `acceptWork`, `releaseWorker`, …), task and pull request events (`pullRequestEvents` derives the latter from two saved versions of a task), users and identity (`User`, `ExternalIdentity`, `Principal`, `createUser`, …), personal access token metadata and its validation (`AccessToken`, `parseAccessTokenName`, …), the task provider registry and attachments of a project (`taskProviderTypes`, `parseTaskProviders`, …), the shell rules (`ShellRequest`, `parseShellSize`, `parseShellControl`, `canOpenShell`, `maxShellsPerTask`), and the ports (`TaskRepository`, `ProjectRepository`, `UserRepository`, `AccessTokenRepository`, `Authenticator`, `PasswordHasher`, `ExecutionRuntime`, `ShellEndpoint`, `PullRequestReader`, `PullRequestWriter`, `Reviewer`, `IssueProvider`). No I/O. |
+| `packages/control-plane` | HTTP server on `127.0.0.1:4700`. Login (`/auth/*`), engineer API (`/projects`, `/tasks`) and MCP endpoint (`/mcp`), both behind a browser session or a personal access token; agent API (`/agent/*`, token-authenticated); the shell WebSockets (`/tasks/:id/shell` for the browser, `/agent/shells/:id` for the runner) and their relay; static web UI. Reads go through the `TaskStore`; changes through one service per actor: `TaskService` (engineer), `AgentService` (agent and runner), `LifecycleService` (the dispatcher); `ShellService` pairs shells in memory. Adapters: SQLite repositories (`node:sqlite`), `PodmanRuntime`, `PodmanReviewer`, `GitHubPullRequests` and `GitHubIssues` (REST API). The `Dispatcher` reconciles every 2 s, and a sweep closes idle shells every minute; the `PullRequestObserver` polls GitHub every minute; `Hooks` react to task and pull request events. |
 | `packages/reviewer` | The reviewer image, with three roles picked by its first argument, each with its own system prompt. `spec` reads one task specification with its project and the project's other tasks; `input` reads a supervised task waiting for input, with its open questions and approval requests, and may read the repository and pull requests with `gh` and `git` for context; `pr` reads one pull request reference (URL, head commit, the task it was opened for) and lets the model read the pull request itself with `gh` and `git`. Each takes the request as JSON on stdin, runs one `claude -p` turn with structured output (without tools for `spec`), and prints the answer as JSON on stdout. |
-| `packages/executor` | The container image. Its runner asks the control plane for work, clones the repository, runs one agent turn per piece of work and, once there is none, waits for a nudge on its doorbell; the session state stays on the container's disk, so a restarted runner resumes it. The agent is the `claude` CLI (one process per turn) behind the `AgentSession` port. The agent reports through a stdio MCP bridge (`report_plan`, `report_decision`, `ask_question`, `report_ready`, …). |
-| `packages/web` | React + Vite UI: login page, account page (display name, password, access tokens), project sidebar, per-project board and dashboard with its open pull requests, task detail with live activity, timeline, question and approval forms, follow-ups. Polls the engineer API. |
+| `packages/executor` | The container image. Its runner asks the control plane for work, clones the repository, runs one agent turn per piece of work and, once there is none, waits for a nudge on its doorbell; the session state stays on the container's disk, so a restarted runner resumes it. When the task allows it, the runner also serves engineers' shells (see *Shell*). The agent is the `claude` CLI (one process per turn) behind the `AgentSession` port. The agent reports through a stdio MCP bridge (`report_plan`, `report_decision`, `ask_question`, `report_ready`, …). |
+| `packages/web` | React + Vite UI: login page, account page (display name, password, access tokens), project sidebar, per-project board and dashboard with its open pull requests, task detail with live activity, a browser shell (xterm.js), timeline, question and approval forms, follow-ups. Polls the engineer API. |
 | `packages/mcp` | Stateless Streamable HTTP MCP handler, mounted by the control plane at `/mcp`, that lets an MCP client create and inspect projects and tasks through the engineer API, passing the caller's session cookie and `Authorization` header on to it. |
 
 ## Task lifecycle
@@ -41,8 +41,9 @@ Detail behind the [README](../README.md): packages, task lifecycle, the worker p
 - **ready → done, input_required → done:** the agent reported its work
   complete. Once its worker is idle and none of its pull requests is open as
   last recorded (see *Pull request events*), the dispatcher marks it `done`
-  (immediately when it has none), then removes the execution server. A task
-  with an unanswered question or a pending approval is never marked `done`.
+  (immediately when it has none), then removes the execution server; an open
+  shell holds both back (see *Shell*). A task with an unanswered question or a
+  pending approval is never marked `done`.
 - **failed:** the agent or runner reported a failure, the engineer cancelled, a
   turn ended without an outcome, or a working execution server sent no
   heartbeat for 60 s (5 min after it was started or notified). Time the
@@ -51,7 +52,8 @@ Detail behind the [README](../README.md): packages, task lifecycle, the worker p
   `failedAt`, the time the caller passes; a follow-up or restart clears both,
   and tasks that failed before `failedAt` existed lack it. A failed task
   keeps its execution server for `FACTORY_FOLLOW_UP_WINDOW_HOURS`, so a
-  follow-up can resume the same agent session.
+  follow-up can resume the same agent session, and beyond it while a shell is
+  open (see *Shell*).
 - **Changelog:** every change to title, specification, labels or status is
   appended to the `task_changes` table with its time, old and new value and
   actor: `user` for the engineer API (web UI and MCP server), `agent` for the
@@ -177,6 +179,114 @@ failing and continues by itself once the limit resets.
 - **Cancel.** Cancelling removes the execution and the pause with it.
 - **Web UI.** The task page shows "Paused: usage limit, resumes …" in place of
   the heartbeat, the board card "usage limit", with the reset time on hover.
+
+### Shell
+
+An engineer can open an interactive shell into a task's execution server
+from the task page ("Open shell"). The control plane pairs two WebSockets,
+one from the browser and one from the runner, and relays bytes between them.
+It keeps shells in memory only (`ShellService`).
+
+**Flow.**
+
+1. The browser opens `/tasks/:id/shell?cols=&rows=` with its session cookie.
+   The upgrade is refused before the handshake, like any engineer request,
+   if `Host` or `Origin` is not loopback (403), without a signed-in user
+   (401), or with a personal access token instead of a session.
+2. The control plane checks that the task allows a shell (`canOpenShell`: the
+   flag is on, the task has an execution server and is not `done`) and that
+   it has fewer than 3 shells, then records a pending **shell request**
+   (random id, size, user, time).
+3. It rings the execution server's doorbell with `POST /shell`, on the same
+   port as `/nudge`, through `ExecutionRuntime.notifyShell`; Podman starts a
+   stopped container instead, as for a nudge. The ring carries nothing. It is
+   a separate path so the work loop is never woken: a runner that asks for
+   work and finds none releases its worker, which fails a task still
+   `in_progress`.
+4. The runner lists its task's pending requests with `GET /agent/shells`
+   (task token); a runner that just started lists them once by itself, since
+   a container started for a shell gets no ring.
+5. For each request it has not handled, it opens a WebSocket to
+   `/agent/shells/:requestId` with `Authorization: Bearer <task token>`.
+6. The control plane pairs it with the browser once: only a pending request
+   of the token's own task, and only the first runner connection. Any other
+   request id is answered as unknown, so a runner learns nothing about other
+   tasks' shells. The task must still allow a shell.
+7. The relay copies frames both ways until either side closes, then closes
+   the other with the same code and reason. The browser's socket is paused
+   until the pairing, so keystrokes typed meanwhile are not lost.
+
+A runner that does not connect within 10 s ends the request, as does a
+failed ring.
+
+**Wire protocol.** On both connections binary frames are terminal bytes. Text
+frames are JSON control messages; only `{ "type": "resize", "cols", "rows" }`
+exists, and only the browser sends it. The relay parses every control
+message (exact fields, cols 1 to 500, rows 1 to 200) and forwards it
+re-serialized; it drops anything else and any text frame from the runner.
+The query's `cols` and `rows` follow the same bounds (400 otherwise). Both
+sides are pinged every 30 s and dropped without a pong. Close codes:
+
+- `1000` with reason `exit <code or signal>`: the shell exited.
+- `4000`: the control plane refused or ended the shell; the reason says why
+  (unknown task, shell disabled, no execution server, task done, the limit
+  of 3, "the execution server did not connect", "cannot reach the execution
+  server", "signed out", "closed after N minutes without input", unknown
+  request). Browsers cannot read the body of a refused handshake, so a
+  refusal after the upgrade travels as a close reason.
+- `4011` "shell could not start": the runner could not start the shell or
+  find its terminal. A WHATWG client may not send 1011, so the runner mirrors
+  it in the application range.
+- `1011` "internal error": an unexpected error in the control plane.
+- `1009`: a frame above the size limit (see *Limits*).
+
+A connection that drops without a close frame (1005, 1006) is passed on to
+the other side as `1000`. Reasons are cut to the protocol's 123 bytes.
+
+**Per-task flag.** `shellEnabled` defaults to `true`, also for tasks stored
+before it existed and for tasks imported from issues (no label controls it).
+It is set on creation only, like `model`: `POST /tasks` and the MCP `set_task`
+accept it, `PATCH /tasks/:id` refuses it. The dispatcher passes it to the
+execution server as `FACTORY_SHELL_ENABLED=true|false` on every start,
+restarts included. Both sides enforce it: the control plane refuses the
+browser and the runner's connection, and a runner with the flag off (or
+missing: a runner only offers a shell when the control plane says so)
+answers `POST /shell` with 404 and never lists requests.
+
+**Inside the container.** The runner starts `script -qfec 'tty; exec bash -l'
+/dev/null` in its own process group, in the workspace directory
+(the home directory if there is none yet), with `TERM=xterm-256color` and the
+runner's environment. `tty` prints the pseudo-terminal's path first; the
+runner reads it, sizes the terminal from outside with `stty -F <pts> rows R
+cols C`, and again on each resize. Input that arrives before the path is
+known is held back, so it is not echoed ahead of it. A shell ends when:
+
+- the shell exits (close `1000`, `exit <code>`);
+- either connection closes: the runner then sends `SIGHUP` to the process
+  group and `SIGKILL` 2 s later if it still runs;
+- no browser frame arrived for `FACTORY_SHELL_IDLE_MINUTES` (default 30);
+  output alone does not count. A sweep runs once a minute, so a shell may
+  last up to a minute longer;
+- the engineer's session ends (signed out, expired, user disabled), found by
+  the same sweep;
+- the execution server is removed or restarted, which drops the runner's
+  connection; this includes a `podman restart` of a silent worker.
+
+**The hold.** While a shell into a task is pending or open, the dispatcher
+neither marks the task `done` nor removes its execution server: a failed task
+whose follow-up window ran out keeps it until the shell closes, so the window
+is in effect extended. The pass after the last shell closed catches up. A
+shell takes no `FACTORY_MAX_RUNNING` slot, since slots count working workers,
+not running containers. Cancelling, deleting or restarting a task still
+removes its execution server at once, ending its shells.
+
+**Limits.** At most 3 shells per task, pending ones included. Frames from the
+browser are at most 64 KiB (a larger paste arrives split), frames from the
+runner at most 1 MiB. Each side of the relay, and the runner's output, pauses
+reading while more than 1 MiB waits to be sent. The runner has 10 s to
+connect. The web UI shows one shell per task page and loads xterm.js only
+when the panel opens, without the clipboard and web-links add-ons, since the
+container's output is untrusted.
 
 ## Pull request events
 
@@ -716,7 +826,13 @@ issue first, so the sync does not import it again:
   work in heartbeat replies. Its one inbound call into an execution server is
   a nudge without content, so a provider can suspend an idle server and resume
   it on that request, and a spurious nudge only makes the runner ask for work
-  with its token. The doorbell is unauthenticated for that reason.
+  with its token. The doorbell is unauthenticated for that reason. A shell
+  request rings a second path, `POST /shell`, also without content: the
+  runner then lists its pending shells with its token and connects back to
+  the control plane itself, so the control plane still opens no connection
+  that carries data into a container. The path is separate so a shell never
+  wakes the work loop, where finding no work would fail a task still
+  `in_progress`.
 - **The runner is deterministic; the agent is not.** Liveness and work delivery
   are plain code in the runner; `done` and pull request status are plain code
   in the control plane. The agent only reports content and `ready`/`failure`.
@@ -752,7 +868,12 @@ issue first, so the sync does not import it again:
   `Origin` is not loopback are rejected to stop DNS rebinding and cross-site
   requests; this holds for bearer requests too, so a token does not open the
   API to other machines, and a web page cannot attach one anyway without a
-  CORS preflight, which the API does not answer. The MCP handler calls the
+  CORS preflight, which the API does not answer. The same check runs on the
+  browser's shell upgrade, and matters most there: browsers apply no CORS to
+  WebSockets, so the `Origin` check is what stops another site from opening
+  a shell with the engineer's cookie. The upgrade needs a session; access
+  tokens cannot open a shell. The runner's upgrade is checked by its task
+  token only, as it arrives through `host.containers.internal`. The MCP handler calls the
   engineer API over loopback with the caller's `Cookie` and `Authorization`
   headers, so the API sees the same user.
 - **Usage is tracked, not limited.** Each agent turn reports its wall-clock
@@ -784,35 +905,57 @@ names the problem and the intended fix; only the first is mitigated so far.
    therefore advisory against an agent misled by repository content. Fix:
    short-lived GitHub App installation tokens per task, scoped to its
    repository; a read-only token for the reviewer.
-3. **Hooks are not durable.** A PR review still running when the control plane
+3. **A shell exposes every credential in the container.** The shell runs
+   with the runner's environment, so it can read `GITHUB_TOKEN`, the
+   Anthropic credential and the task token, and every signed-in user may
+   open a shell into any task that allows one. Related to gap 2: with
+   narrower credentials per task, a shell would expose less. Fix: scoped
+   tokens, and a shell environment without them; meanwhile, turn
+   `shellEnabled` off for tasks whose credentials matter.
+4. **The task's agent can take over a pending shell of its own task.** The
+   agent runs in the same container and can read the task token, list its
+   task's pending shell requests and connect to one before the runner does,
+   since the control plane pairs the first connection with that token. It
+   then sees everything the engineer types. Nobody should type secrets into
+   a shell. Fix: a credential for shells the agent cannot read.
+5. **Hooks are not durable.** A PR review still running when the control plane
    stops is lost, and since only the transition to `ready` triggers one, the
    task stays `ready` with its pull requests open and nothing says so. Fix: the
    dispatcher finds `ready` tasks whose pull requests were never reviewed at
    their head and starts the review.
-4. **The MCP server covers only part of the engineer API.** It cannot answer
+6. **Shells live in memory.** A control plane restart drops every shell
+   and pending request, and so does a `podman restart` of a silent worker,
+   which the dispatcher performs on an `in_progress` task with a shell open.
+   The engineer has to open the shell again.
+7. **The MCP server covers only part of the engineer API.** It cannot answer
    questions, review approval requests, send follow-ups, move tasks or edit
    projects, so an engineer working only through MCP cannot unblock a task
    that waits for input.
-5. **The HTTP API has no single contract.** The web UI, the MCP server and the
+8. **The HTTP API has no single contract.** The web UI, the MCP server and the
    executor each carry a hand-written client with its own parsing of the error
    envelope, and response shapes differ (the agent API wraps a task as
    `{ task }`, the engineer API returns it bare). Runner image and control
    plane are not checked to speak the same protocol version, so a stale image
    fails obscurely. Fix: route paths and request and response types in core,
    and a protocol version header on agent API requests.
-6. **The dispatcher acts on stale lists.** It awaits the runtime per task, so
+9. **The dispatcher acts on stale lists.** It awaits the runtime per task, so
    later tasks of a pass are judged on a list that may be seconds old, e.g.
    for heartbeat silence. Waking idle workers also ignores
    `FACTORY_MAX_RUNNING`, which is therefore no hard limit.
-7. **Whole tasks are read and written as one JSON document.** Every dispatcher
+10. **Whole tasks are read and written as one JSON document.** Every dispatcher
    pass parses every task several times, finished ones and artifact contents
    included, and the web UI polls full task views every 3 s. Cost grows with
    history. Fix: narrower queries for the dispatcher and summary views for
    lists.
-8. **The database has no schema version.** Readers fill defaults for data
+11. **The database has no schema version.** Readers fill defaults for data
    stored before a field existed, but no `user_version` or migration step
    records which format the file holds.
-9. **"Review" names five things:** the engineer's review of an approval
+12. **Other users don't see that a shell holds a task back.** A task with an
+   open shell stays `ready` or `input_required`, or keeps its execution
+   server, with nothing on the board or task page saying why; only the
+   engineer with the shell knows. Fix: show open shells on the task in the
+   web UI.
+13. **"Review" names five things:** the engineer's review of an approval
    request (`Review`), the spec, input and PR reviews of the reviewer, and
    reviews submitted on GitHub (`PullRequestReview`). The comment in
    `main.ts` that calls `host.containers.internal` unverified is stale.
