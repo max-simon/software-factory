@@ -440,6 +440,42 @@ test('notifies an idle worker once the last question is answered', async () => {
   assert.deepEqual(f.runtime.notified, ['c1']);
 });
 
+test('a task paused for a usage limit idles, holds queued tasks of its agent and is notified once the limit resets', async () => {
+  const f = setup();
+  const paused = inStatus(f, 'in_progress', 'c1');
+  f.agent.acceptWork(paused.id, []);
+  f.agent.recordUsageLimit(paused.id, '2026-11-12T12:00:00.000Z');
+  assert.equal(f.agent.requestWork(f.tasks.get(paused.id)), undefined);
+  assert.deepEqual([f.tasks.get(paused.id).status, f.tasks.get(paused.id).execution?.worker.state], ['in_progress', 'idle']);
+  const claude = queued(f);
+  const opencode = queued(f, { agent: 'opencode' });
+
+  await f.dispatcher.reconcile();
+  assert.deepEqual(f.runtime.notified, []);
+  assert.deepEqual(f.runtime.started.map((spec) => spec.taskId), [opencode.id], 'only another agent starts meanwhile');
+
+  // Derived from the stored task, so a restarted control plane resumes it too.
+  f.advance(2 * 3_600_000 + 60_000);
+  await f.newDispatcher().reconcile();
+  assert.deepEqual(f.runtime.notified, ['c1']);
+  assert.deepEqual(f.runtime.started.map((spec) => spec.taskId), [opencode.id, claude.id]);
+  assert.ok(f.agent.requestWork(f.tasks.get(paused.id)), 'the cut-off turn is owed');
+  assert.equal(f.agent.acceptWork(paused.id, []).execution?.usageLimit, undefined);
+});
+
+test('cancelling a task paused for a usage limit removes its execution server and the pause with it', async () => {
+  const f = setup();
+  const paused = inStatus(f, 'in_progress', 'c1');
+  f.agent.recordUsageLimit(paused.id, undefined);
+  f.agent.requestWork(f.tasks.get(paused.id));
+  await f.service.cancel(paused.id, ada);
+  const cancelled = f.tasks.get(paused.id);
+  assert.deepEqual([cancelled.status, cancelled.execution], ['failed', undefined]);
+  const next = queued(f);
+  await f.dispatcher.reconcile();
+  assert.deepEqual(f.runtime.started.map((spec) => spec.taskId), [next.id]);
+});
+
 test('records the agent console address a notified execution server reports', async () => {
   const f = setup();
   f.runtime.agentConsole = { url: 'http://127.0.0.1:43021', password: 'pw' };

@@ -361,6 +361,7 @@ test('heartbeatInfo shows the activity, or the phase, with time and age on hover
     text: 'Running Bash: yarn test',
     tooltip: 'Last heartbeat: 11:59:50 (10s ago)\nWorking: Running Bash: yarn test',
     isStale: false,
+    isPaused: false,
   });
   const settingUp = task('b', 'in_progress', '2026-01-01T11:00:00Z', {
     execution: { id: 'c1', worker: busy, lastHeartbeat: { at: '2026-01-01T11:59:15Z', phase: 'setting_up' } },
@@ -369,6 +370,7 @@ test('heartbeatInfo shows the activity, or the phase, with time and age on hover
     text: 'Setting up',
     tooltip: 'Last heartbeat: 11:59:15 (45s ago)\nSetting up',
     isStale: false,
+    isPaused: false,
   });
 });
 
@@ -381,7 +383,30 @@ test('heartbeatInfo shows an idle worker and since when, never as stale', () => 
     text: 'Idle',
     tooltip: 'Idle since 11:00 (1h ago); new work notifies it.',
     isStale: false,
+    isPaused: false,
   });
+});
+
+test('heartbeatInfo shows a worker paused for a usage limit with when the session continues', () => {
+  const now = Date.parse('2026-01-01T12:00:00Z');
+  const time = (date: Date) => date.toISOString().slice(11, 16);
+  const paused = (resetsAt?: string) =>
+    task('a', 'in_progress', '2026-01-01T11:00:00Z', {
+      execution: {
+        id: 'c1',
+        worker: { state: 'idle', since: '2026-01-01T11:00:00Z' },
+        usageLimit: { since: '2026-01-01T11:00:00Z', ...(resetsAt && { resetsAt }), resumesAt: '2026-01-01T15:01:00.000Z' },
+      },
+    });
+  assert.deepEqual(heartbeatInfo(paused('2026-01-01T15:00:00.000Z'), now, time), {
+    text: 'Paused: usage limit, resumes 15:01 (in 3h)',
+    tooltip: 'Usage limit reached 11:00 (1h ago).\nIt resets 15:00.\nThe session continues 15:01 (in 3h).',
+    isStale: false,
+    isPaused: true,
+  });
+  assert.match(heartbeatInfo(paused(), now, time)!.tooltip, /did not say when it resets/);
+  const resuming = heartbeatInfo(paused(), Date.parse('2026-01-01T15:02:00Z'), time)!;
+  assert.equal(resuming.text, 'Paused: usage limit, resumes 15:01 (now)');
 });
 
 test('heartbeatInfo shows a notified worker as starting until it beats, ignoring older heartbeats', () => {

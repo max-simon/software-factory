@@ -142,6 +142,42 @@ returns the latest turn's lines; the task page polls it while the task has an
 execution server ("Live activity") and loads it once otherwise ("Last
 activity"), hiding the section when there are none.
 
+### Usage limits
+
+When the agent's account hits a usage limit, the task pauses instead of
+failing and continues by itself once the limit resets.
+
+- **Detection (claude only).** The claude adapter watches the CLI's
+  `stream-json` events for `rate_limit_event`: its `rate_limit_info.status`
+  is `allowed`, `allowed_warning` or `rejected`, and `resetsAt` is when the
+  limit resets, in Unix seconds. A turn that ends in an error (non-zero exit,
+  or a `result` event with `is_error`) after the latest such event said
+  `rejected` hit the limit; the reset time comes from that event. The message
+  text is not parsed. opencode turns that hit a limit fail as before.
+- **Report.** The runner sends `POST /agent/usage-limit` with `resetsAt` (UTC
+  ISO timestamp, optional) instead of a failure. The control plane records it
+  on the execution as `usageLimit` (`since`, `resetsAt`, `resumesAt`) and the
+  task stays `in_progress`. `resumesAt` is a minute after the reset, at least
+  a minute from now for a reset already past, at most 8 days ahead (Claude's
+  longest limit is weekly), and 30 minutes from now without a reset time; a
+  session resumed too early only hits the limit again and pauses once more.
+  A report that cannot be sent fails the task with the CLI's error.
+- **Pause.** Until `resumesAt`, the task has no work: the runner's request for
+  work idles its worker without failing the task, and follow-ups wait. Queued
+  tasks of the same agent are not started meanwhile, since every task of an
+  agent runs on the same credential; other agents' tasks start as usual.
+- **Resume.** From `resumesAt` the task has work even if nothing new arrived,
+  so the dispatcher notifies its idle worker as for any work. Everything is
+  derived from the stored task, so a restarted control plane resumes it too.
+  Accepting work clears `usageLimit`. A resumed session gets the cut-off
+  turn's prompt again, kept in the runner's session file, with a note that
+  part of it may be done, plus any work that arrived meanwhile. A first turn
+  keeps no session and starts over from the task, like after a failure;
+  follow-ups it had already accepted are not repeated.
+- **Cancel.** Cancelling removes the execution and the pause with it.
+- **Web UI.** The task page shows "Paused: usage limit, resumes …" in place of
+  the heartbeat, the board card "usage limit", with the reset time on hover.
+
 ## Pull request events
 
 The `PullRequestObserver` reads every open pull request of a task in

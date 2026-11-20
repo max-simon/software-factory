@@ -13,6 +13,8 @@ export interface SessionState {
   costUsd: number;
   /** The session's running token totals so far, reported like the cost. */
   tokens: TokenUsage;
+  /** The prompt of a turn a usage limit cut off, sent again when the session resumes. */
+  interruptedPrompt?: string;
 }
 
 export interface SessionStore {
@@ -43,19 +45,21 @@ export function createSessionStore(path: string): SessionStore {
 // Written only by this runner, so a malformed file means a broken disk: failing
 // loudly beats silently starting over and losing the agent's work.
 function parseState(text: string, path: string): SessionState {
-  const { sessionId, costUsd, tokens } = JSON.parse(text) as Partial<Record<keyof SessionState, unknown>>;
+  const { sessionId, costUsd, tokens, interruptedPrompt } = JSON.parse(text) as Partial<Record<keyof SessionState, unknown>>;
   const failure = new Error(`${path} does not hold a session state: ${text.slice(0, 200)}`);
   if (typeof sessionId !== 'string' || sessionId === '' || !isCount(costUsd)) throw failure;
+  if (interruptedPrompt !== undefined && typeof interruptedPrompt !== 'string') throw failure;
+  const interrupted = interruptedPrompt === undefined ? {} : { interruptedPrompt };
   // A state saved before tokens were tracked has a zero baseline: none of its tokens were reported yet,
   // so the next turn reports the session's whole total.
-  if (tokens === undefined) return { sessionId, costUsd, tokens: noTokens };
+  if (tokens === undefined) return { sessionId, costUsd, tokens: noTokens, ...interrupted };
   if (typeof tokens !== 'object' || tokens === null) throw failure;
   const inputTokens = Reflect.get(tokens, 'inputTokens');
   const outputTokens = Reflect.get(tokens, 'outputTokens');
   const cacheReadTokens = Reflect.get(tokens, 'cacheReadTokens');
   const cacheCreationTokens = Reflect.get(tokens, 'cacheCreationTokens');
   if (!isCount(inputTokens) || !isCount(outputTokens) || !isCount(cacheReadTokens) || !isCount(cacheCreationTokens)) throw failure;
-  return { sessionId, costUsd, tokens: { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens } };
+  return { sessionId, costUsd, tokens: { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens }, ...interrupted };
 }
 
 export const noTokens: TokenUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 };

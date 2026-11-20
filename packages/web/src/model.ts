@@ -341,11 +341,14 @@ export interface HeartbeatInfo {
   /** For the hover title: when the last heartbeat came and what it said. */
   tooltip: string;
   isStale: boolean;
+  /** The worker waits for the agent's usage limit to reset. */
+  isPaused: boolean;
 }
 
 /**
- * What the execution server is doing: idle, starting, or what its last
- * heartbeat says. Undefined while the task has no execution server.
+ * What the execution server is doing: paused for a usage limit, idle,
+ * starting, or what its last heartbeat says. Undefined while the task has no
+ * execution server.
  */
 export function heartbeatInfo(
   task: Pick<TaskView, 'execution'>,
@@ -353,10 +356,22 @@ export function heartbeatInfo(
   formatTime: (date: Date) => string = (date) => date.toLocaleTimeString(),
 ): HeartbeatInfo | undefined {
   if (!task.execution) return undefined;
-  const { worker, lastHeartbeat } = task.execution;
+  const { worker, lastHeartbeat, usageLimit } = task.execution;
+  // The pause outlasts the idle worker only until the runner accepts work again, which clears it.
+  if (worker.state === 'idle' && usageLimit) {
+    const resumes = `${formatTime(new Date(usageLimit.resumesAt))} (${until(usageLimit.resumesAt, now)})`;
+    const tooltip = [
+      `Usage limit reached ${formatTime(new Date(usageLimit.since))} (${ago(usageLimit.since, now)}).`,
+      usageLimit.resetsAt
+        ? `It resets ${formatTime(new Date(usageLimit.resetsAt))}.`
+        : 'The agent did not say when it resets, so the session is simply tried again.',
+      `The session continues ${resumes}.`,
+    ];
+    return { text: `Paused: usage limit, resumes ${resumes}`, tooltip: tooltip.join('\n'), isStale: false, isPaused: true };
+  }
   if (worker.state === 'idle') {
     const tooltip = `Idle since ${formatTime(new Date(worker.since))} (${ago(worker.since, now)}); new work notifies it.`;
-    return { text: 'Idle', tooltip, isStale: false };
+    return { text: 'Idle', tooltip, isStale: false, isPaused: false };
   }
   // A heartbeat from before the last notification says nothing about this one.
   const heartbeat = lastHeartbeat && lastHeartbeat.at >= worker.since ? lastHeartbeat : undefined;
@@ -366,7 +381,7 @@ export function heartbeatInfo(
       `Started or notified ${formatTime(new Date(worker.since))} (${ago(worker.since, now)}), no heartbeat yet`,
       ...(isStale ? ['No heartbeat for a while: the execution server may be stuck or gone.'] : []),
     ];
-    return { text: 'Starting', tooltip: tooltip.join('\n'), isStale };
+    return { text: 'Starting', tooltip: tooltip.join('\n'), isStale, isPaused: false };
   }
   const phase = heartbeatPhaseLabels[heartbeat.phase];
   const isStale = now - Date.parse(heartbeat.at) > staleHeartbeatMs;
@@ -375,7 +390,16 @@ export function heartbeatInfo(
     heartbeat.activity ? `${phase}: ${heartbeat.activity}` : phase,
     ...(isStale ? ['No heartbeat for a while: the execution server may be stuck or gone.'] : []),
   ];
-  return { text: heartbeat.activity ?? phase, tooltip: lines.join('\n'), isStale };
+  return { text: heartbeat.activity ?? phase, tooltip: lines.join('\n'), isStale, isPaused: false };
+}
+
+/** How long until `iso`, coarsely, e.g. "in 3h"; "now" once it has passed. */
+function until(iso: string, now: number): string {
+  const minutes = Math.round((Date.parse(iso) - now) / 60_000);
+  if (minutes < 1) return 'now';
+  if (minutes < 60) return `in ${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  return hours < 24 ? `in ${hours}h` : `in ${Math.round(hours / 24)}d`;
 }
 
 // Seconds matter while judging whether a runner is alive; later, coarser is clearer.

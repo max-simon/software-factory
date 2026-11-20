@@ -212,6 +212,18 @@ export interface Execution {
   lastHeartbeat?: Heartbeat;
   /** Only for agents that have a web console (opencode). */
   console?: AgentConsole;
+  /** Set while the agent waits for its account's usage limit to reset; cleared when the runner accepts work again. */
+  usageLimit?: UsageLimit;
+}
+
+/** The agent's account hit a usage limit; the control plane hands out work again at `resumesAt`. */
+export interface UsageLimit {
+  /** When the runner reported it; stamped by the control plane. */
+  since: string;
+  /** When the agent said the limit resets; unset when it did not say. */
+  resetsAt?: string;
+  /** When the session continues: derived from `resetsAt`, or a fallback without it. */
+  resumesAt: string;
 }
 
 /**

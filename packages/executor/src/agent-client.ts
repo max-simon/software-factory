@@ -31,6 +31,8 @@ export interface AgentClient {
   reportMetrics(metrics: SessionMetrics): Promise<AgentTaskView>;
   reportReady(): Promise<AgentTaskView>;
   reportFailure(reason: string): Promise<AgentTaskView>;
+  /** Sent by the runner: the turn hit a usage limit that resets at `resetsAt`, if the agent said when. */
+  reportUsageLimit(resetsAt: string | undefined): Promise<AgentTaskView>;
   /** Sent by the runner, never by the agent; the control plane stamps the time. */
   sendHeartbeat(heartbeat: Omit<Heartbeat, 'at'>): Promise<void>;
   /** Sent by the runner: what the agent did since the last report, oldest first. */
@@ -85,6 +87,7 @@ export function createAgentClient(baseUrl: string, token: string, fetchImpl: typ
     reportMetrics: (metrics) => taskOf('POST', '/agent/metrics', metrics),
     reportReady: () => taskOf('POST', '/agent/ready'),
     reportFailure: (reason) => taskOf('POST', '/agent/failure', { reason }),
+    reportUsageLimit: (resetsAt) => taskOf('POST', '/agent/usage-limit', resetsAt === undefined ? {} : { resetsAt }),
     sendHeartbeat: async (heartbeat) => void (await call('POST', '/agent/heartbeat', heartbeat)),
     sendActivity: async (entries) => void (await call('POST', '/agent/activity', { entries })),
     requestWork: async () => (await call<{ work?: Work }>('POST', '/agent/heartbeat', { phase: 'awaiting_work' })).work,

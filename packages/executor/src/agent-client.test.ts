@@ -55,6 +55,8 @@ test('maps every operation to its route', async () => {
   await client.reportReady();
   await client.reportFailure('broken');
   await client.acceptWork(['f1', 'f2']);
+  await client.reportUsageLimit('2026-11-20T03:40:00.000Z');
+  await client.reportUsageLimit(undefined);
   assert.deepEqual(
     received.map((r) => `${r.method} ${r.url}`),
     [
@@ -66,11 +68,15 @@ test('maps every operation to its route', async () => {
       'POST /agent/ready',
       'POST /agent/failure',
       'POST /agent/work/accept',
+      'POST /agent/usage-limit',
+      'POST /agent/usage-limit',
     ],
   );
   assert.deepEqual(received[4]!.body, { durationMs: 1500, costUsd: 0.25, tokens });
   assert.deepEqual(received[6]!.body, { reason: 'broken' });
   assert.deepEqual(received[7]!.body, { followUpIds: ['f1', 'f2'] });
+  assert.deepEqual(received[8]!.body, { resetsAt: '2026-11-20T03:40:00.000Z' });
+  assert.deepEqual(received[9]!.body, {});
 });
 
 test('project reads unwrap the project, the summaries and the task view', async () => {

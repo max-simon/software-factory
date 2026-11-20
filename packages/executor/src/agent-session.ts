@@ -14,10 +14,17 @@ export interface SessionTurn {
 export interface TurnOutcome {
   /** Set when the turn failed; becomes the task's failure reason, so it carries the cause. */
   failure?: string;
+  /** Set, with `failure`, when the turn failed because the agent's account hit a usage limit. */
+  usageLimit?: UsageLimitHit;
   /** The session's running cost total after this turn; unset when the agent reported none. */
   totalCostUsd?: number;
   /** The session's running token totals after this turn; unset when the agent reported none. */
   totalTokens?: TokenUsage;
+}
+
+export interface UsageLimitHit {
+  /** When the limit resets, as an ISO timestamp; unset when the agent did not say. */
+  resetsAt?: string;
 }
 
 export interface AgentSession {

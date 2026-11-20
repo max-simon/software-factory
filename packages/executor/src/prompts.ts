@@ -60,6 +60,16 @@ export function resumePrompt(task: AgentTaskView, ids: ReadonlySet<string>, foll
   ].join('\n');
 }
 
+/** Sends a turn a usage limit cut off again, once the limit has reset. */
+export function interruptedTurnPrompt(prompt: string): string {
+  return [
+    'Your previous turn was cut off by a usage limit, which has reset now. Part of it may already be done:',
+    'check the repository and what you reported before you continue. That turn asked:',
+    '',
+    prompt,
+  ].join('\n');
+}
+
 /** The engineer's follow-up requests that arrived after the agent's last turn. */
 export function followUpPrompt(followUps: readonly FollowUp[]): string {
   return [

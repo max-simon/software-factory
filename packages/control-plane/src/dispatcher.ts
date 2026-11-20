@@ -2,6 +2,7 @@ import {
   hasOpenInput,
   heartbeatTimeoutMs,
   isBlocked,
+  isPausedForUsageLimit,
   isWorking,
   needsNotify,
   type ExecutionRuntime,
@@ -79,18 +80,23 @@ export class Dispatcher {
    * One pass: remove orphaned execution servers when a sweep is due, restart
    * silent workers, notify idle workers that have work, start queued tasks
    * whose dependencies are done in rank order while fewer workers than the
-   * limit are working, mark ready tasks, and those waiting for the engineer
-   * on their pull requests only, done once none of their pull requests is
-   * open, and remove execution servers no task needs.
+   * limit are working and no task of their agent waits for a usage limit,
+   * mark ready tasks, and those waiting for the engineer on their pull
+   * requests only, done once none of their pull requests is open, and remove
+   * execution servers no task needs.
    */
   async reconcile(): Promise<void> {
     const { tasks, lifecycle, maxRunning } = this.#deps;
     await this.#sweepOrphansIfDue();
     await this.#forEach(tasks.list().filter(isWorking), (task) => this.#restartIfSilent(task));
-    await this.#forEach(tasks.list(['in_progress']).filter(needsNotify), (task) => this.#notify(task));
+    const now = new Date(this.#now()).toISOString();
+    const inProgress = tasks.list(['in_progress']);
+    await this.#forEach(inProgress.filter((task) => needsNotify(task, now)), (task) => this.#notify(task));
     const all = tasks.list();
     const freeSlots = Math.max(0, maxRunning - all.filter(isWorking).length);
-    const startable = tasks.list(['queued']).filter((task) => !isBlocked(task, all));
+    // Every task of an agent runs on the same credential, so a new one would only hit the same limit.
+    const limitedAgents = new Set(inProgress.filter((task) => isPausedForUsageLimit(task, now)).map((task) => task.agent));
+    const startable = tasks.list(['queued']).filter((task) => !isBlocked(task, all) && !limitedAgents.has(task.agent));
     await this.#forEach(startable.slice(0, freeSlots), (task) => this.#dispatch(task));
     await this.#forEach(tasks.list(['ready', 'input_required']).filter(isSettleable), async (task) => {
       lifecycle.markDone(task.id);

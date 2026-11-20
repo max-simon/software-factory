@@ -4,7 +4,7 @@ import type { AgentClient } from './agent-client.ts';
 import type { AgentSession, TurnOutcome } from './agent-session.ts';
 import type { Doorbell } from './doorbell.ts';
 import type { HeartbeatSender } from './heartbeat.ts';
-import { followUpPrompt, resumePrompt, taskPrompt } from './prompts.ts';
+import { followUpPrompt, interruptedTurnPrompt, resumePrompt, taskPrompt } from './prompts.ts';
 import type { RunCommand } from './run-command.ts';
 import { noTokens, type SessionState, type SessionStore } from './session-state.ts';
 
@@ -111,6 +111,8 @@ interface PlannedTurn {
   prompt: string;
   sessionId: string;
   isResume: boolean;
+  /** Whether `prompt` is sent again because a usage limit cut it off. */
+  isRetry?: boolean;
   /** The session's cost total before the turn. */
   costUsd: number;
   /** The session's token totals before the turn. */
@@ -125,10 +127,15 @@ async function freshTurn(deps: RunnerDeps, work: Work): Promise<PlannedTurn> {
   return { prompt: prompt.join('\n\n'), sessionId: deps.newSessionId(), isResume: false, costUsd: 0, tokens: noTokens };
 }
 
+/** A turn a usage limit cut off goes first, with any work that arrived meanwhile. */
 async function resumeTurn(deps: RunnerDeps, work: Work, state: SessionState): Promise<PlannedTurn> {
   const task = await deps.client.getTask();
-  const prompt = resumePrompt(task, new Set(work.inputIds), work.followUps);
-  return { prompt, sessionId: state.sessionId, isResume: true, costUsd: state.costUsd, tokens: state.tokens };
+  const { sessionId, costUsd, tokens, interruptedPrompt } = state;
+  const next = resumePrompt(task, new Set(work.inputIds), work.followUps);
+  if (interruptedPrompt === undefined) return { prompt: next, sessionId, isResume: true, costUsd, tokens };
+  const hasNewWork = work.followUps.length > 0 || work.inputIds.length > 0;
+  const prompt = hasNewWork ? `${interruptedPrompt}\n\n${next}` : interruptedPrompt;
+  return { prompt, sessionId, isResume: true, isRetry: true, costUsd, tokens };
 }
 
 /**
@@ -139,7 +146,8 @@ async function runTurn(deps: RunnerDeps, turn: PlannedTurn): Promise<SessionStat
   const { heartbeat } = deps;
   heartbeat.setPhase('working');
   const started = deps.now();
-  const { prompt, sessionId, isResume } = turn;
+  const { sessionId, isResume } = turn;
+  const prompt = turn.isRetry ? interruptedTurnPrompt(turn.prompt) : turn.prompt;
   const outcome = await deps.session.runTurn({ prompt, sessionId, isResume }, (activity) => {
     heartbeat.setActivity(activity);
     deps.activity.add(activity);
@@ -148,12 +156,38 @@ async function runTurn(deps: RunnerDeps, turn: PlannedTurn): Promise<SessionStat
   await deps.activity.flush();
   await recordMetrics(deps, deps.now() - started, turn, outcome);
   const next = { sessionId, costUsd: outcome.totalCostUsd ?? turn.costUsd, tokens: outcome.totalTokens ?? turn.tokens };
+  if (outcome.usageLimit !== undefined) return pause(deps, turn, next, outcome.usageLimit.resetsAt, outcome.failure);
   if (outcome.failure === undefined || isResume) await deps.sessions.save(next);
   if (outcome.failure !== undefined) {
     await fail(deps, outcome.failure);
     return isResume ? next : undefined;
   }
   return next;
+}
+
+/**
+ * A usage limit cut the turn off: the control plane resumes the task once the
+ * limit resets. A resumed session keeps the turn's prompt to send it again; a
+ * first turn keeps nothing and starts over, like after a failure. A limit
+ * that cannot be reported fails the task, so it does not wait unseen.
+ */
+async function pause(
+  deps: RunnerDeps,
+  turn: PlannedTurn,
+  next: SessionState,
+  resetsAt: string | undefined,
+  failure = 'usage limit reached',
+): Promise<SessionState | undefined> {
+  const state = turn.isResume ? { ...next, interruptedPrompt: turn.prompt } : undefined;
+  if (state !== undefined) await deps.sessions.save(state);
+  deps.log(`usage limit reached, resets at ${resetsAt ?? 'an unknown time'}`);
+  try {
+    await deps.client.reportUsageLimit(resetsAt);
+  } catch (error) {
+    deps.log(`could not report usage limit: ${describe(error)}`);
+    await fail(deps, failure);
+  }
+  return state;
 }
 
 /**

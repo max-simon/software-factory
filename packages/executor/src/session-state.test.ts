@@ -40,3 +40,12 @@ test('malformed tokens fail loudly', async (t) => {
     await assert.rejects(createSessionStore(path).load(), /does not hold a session state/, JSON.stringify(malformed));
   }
 });
+
+test('keeps the prompt of a turn a usage limit cut off, and rejects a malformed one', async (t) => {
+  const path = join(directory(t), 'session.json');
+  const store = createSessionStore(path);
+  await store.save({ sessionId: 'sid', costUsd: 1, tokens, interruptedPrompt: 'Continue the task.' });
+  assert.deepEqual(await store.load(), { sessionId: 'sid', costUsd: 1, tokens, interruptedPrompt: 'Continue the task.' });
+  writeFileSync(path, JSON.stringify({ sessionId: 'sid', costUsd: 1, tokens, interruptedPrompt: 3 }));
+  await assert.rejects(store.load(), /does not hold a session state/);
+});

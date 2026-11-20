@@ -303,6 +303,24 @@ export function parseFailure(body: unknown): string {
   return requiredString(object(body), 'reason');
 }
 
+// UTC, as the runner writes it with `toISOString`; nothing looser is accepted from inside a container.
+const utcTimestamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z$/;
+
+/**
+ * When the usage limit resets, if the agent said. The time itself is
+ * untrusted: the core clamps it into a sane range.
+ */
+export function parseUsageLimit(body: unknown): string | undefined {
+  const fields = object(body);
+  rejectUnknownFields(fields, ['resetsAt']);
+  const resetsAt = fields.resetsAt;
+  if (resetsAt === undefined) return undefined;
+  if (typeof resetsAt !== 'string' || !utcTimestamp.test(resetsAt) || Number.isNaN(Date.parse(resetsAt))) {
+    throw new ValidationError('resetsAt must be a UTC timestamp like 2026-01-01T15:00:00.000Z');
+  }
+  return new Date(resetsAt).toISOString();
+}
+
 const heartbeatPhases: readonly HeartbeatPhase[] = ['awaiting_work', 'setting_up', 'working'];
 const maxActivityLength = 200;
 

@@ -9,6 +9,7 @@ import {
   markReady,
   pendingWork,
   recordHeartbeat,
+  recordUsageLimit,
   releaseWorker,
   replacePlan,
   type Heartbeat,
@@ -86,6 +87,11 @@ export class AgentService {
     return this.#tasks.update(id, 'agent', (task) => markFailed(task, reason, this.#tasks.now()));
   }
 
+  /** The runner's turn ended on a usage limit that resets at `resetsAt`, if the agent said when. */
+  recordUsageLimit(id: string, resetsAt: string | undefined): Task {
+    return this.#tasks.update(id, 'agent', (task) => recordUsageLimit(task, resetsAt, this.#tasks.now()));
+  }
+
   /**
    * Takes the task the caller just loaded instead of an id: heartbeats are the
    * most frequent request, and the agent API has loaded the task to authenticate.
@@ -104,11 +110,12 @@ export class AgentService {
   /**
    * Answers a runner that asks for work. With none pending its worker goes
    * idle, and a task still in progress fails: its agent ended the turn without
-   * an outcome. Synchronous from load to save, so no follow-up slips in between.
+   * an outcome, unless it waits for a usage limit to reset. Synchronous from
+   * load to save, so no follow-up slips in between.
    */
   requestWork(task: Task): Work | undefined {
     this.recordHeartbeat(task, { phase: 'awaiting_work' });
-    const work = pendingWork(task);
+    const work = pendingWork(task, this.#tasks.now());
     if (work === undefined) {
       const reason = 'the agent ended its turn without reporting ready, failure or a question';
       this.#tasks.update(task.id, 'agent', (current) => releaseWorker(current, reason, this.#tasks.now()));
