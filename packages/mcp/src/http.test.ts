@@ -88,6 +88,20 @@ test('set_task without id forwards the new task and returns the draft', async ()
   assert.equal(fake.tasks[0]!.status, 'draft');
 });
 
+test('set_task without id forwards shellEnabled, which get_task returns', async () => {
+  fake = fakeTaskClient();
+  const input = { projectId: 'p1', title: 'Greet', specification: 'Say hi.', shellEnabled: false };
+  await call('set_task', input);
+  assert.deepEqual(fake.created, [input]);
+  assert.equal(JSON.parse((await call('get_task', { id: 't1' })).text).shellEnabled, false);
+});
+
+test('set_task with id passes shellEnabled on for the API to refuse, like the other creation-only fields', async () => {
+  fake = fakeTaskClient([sampleTask({ id: 't1' })]);
+  await call('set_task', { id: 't1', shellEnabled: false });
+  assert.deepEqual(fake.edited, [{ id: 't1', edit: { shellEnabled: false } }]);
+});
+
 test('set_task without id with start queues the task', async () => {
   fake = fakeTaskClient();
   const result = await call('set_task', { projectId: 'p1', title: 'Greet', specification: 'Say hi.', start: true });

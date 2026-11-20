@@ -13,6 +13,7 @@ export function sampleTask(overrides: Partial<TaskView> = {}): TaskView {
     labels: [],
     autonomyMode: 'autonomous',
     model: 'opus',
+    shellEnabled: true,
     status: 'draft',
     rank: 0,
     plan: [],

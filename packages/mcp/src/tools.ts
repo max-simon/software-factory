@@ -83,7 +83,7 @@ export function registerTools(server: McpServer, client: ApiClient): void {
     'set_task',
     {
       description:
-        'Create a factory task, or change one by passing its id. A new task is a draft; start: true queues it for an agent. A queued task starts only once every task in dependsOn is done, so a whole chain can be queued at once. Title, specification and labels can change until the task is queued, dependsOn until it starts; projectId, repoUrl, baseBranch, autonomyMode and model are set on creation only.',
+        'Create a factory task, or change one by passing its id. A new task is a draft; start: true queues it for an agent. A queued task starts only once every task in dependsOn is done, so a whole chain can be queued at once. Title, specification and labels can change until the task is queued, dependsOn until it starts; projectId, repoUrl, baseBranch, autonomyMode, model and shellEnabled are set on creation only.',
       inputSchema: {
         id: z.string().min(1).optional().describe('The task to change; omit to create one'),
         projectId: z.string().min(1).optional().describe('Required to create: the project the task belongs to; see list_projects'),
@@ -94,6 +94,7 @@ export function registerTools(server: McpServer, client: ApiClient): void {
         labels: z.array(z.string().min(1)).optional(),
         autonomyMode: z.enum(['autonomous', 'supervised']).optional().describe('Defaults to autonomous'),
         model: z.enum(['opus', 'sonnet']).optional().describe('Defaults to opus'),
+        shellEnabled: z.boolean().optional().describe('Whether engineers may open a shell into the execution server. Defaults to true; set on creation only'),
         dependsOn: z
           .array(z.string().min(1))
           .optional()

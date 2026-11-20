@@ -151,6 +151,15 @@ test('reads tasks stored before models existed as opus', () => {
   assert.deepEqual(repo.list().map((task) => `${task.id}=${task.model}`), ['new=sonnet', 'old=opus']);
 });
 
+test('reads tasks stored before shells existed as allowing them', () => {
+  const repo = repository();
+  const { shellEnabled: _dropped, ...legacy } = draft('old');
+  repo.insert(legacy as Task);
+  repo.insert({ ...draft('new'), shellEnabled: false });
+  assert.equal(repo.get('old')?.shellEnabled, true);
+  assert.equal(repo.get('new')?.shellEnabled, false);
+});
+
 test('reads tasks stored before follow-ups existed with none', () => {
   const repo = repository();
   const { followUps: _dropped, ...legacy } = draft('old');

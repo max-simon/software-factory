@@ -25,6 +25,15 @@ export {
   type TaskProviderType,
 } from './task-provider.ts';
 export { DomainError, type DomainErrorCode } from './errors.ts';
+export {
+  canOpenShell,
+  maxShellsPerTask,
+  parseShellControl,
+  parseShellSize,
+  type ShellControl,
+  type ShellRequest,
+  type ShellSize,
+} from './shell.ts';
 export { assertTransition, transitions } from './status.ts';
 export {
   changeMeta,
