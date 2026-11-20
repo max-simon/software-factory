@@ -98,10 +98,10 @@ test('delete removes the factory labels from a managed task\'s issue, comments o
   const [change] = f.issues.labelChanges;
   assert.equal(change!.url, issueUrl);
   assert.deepEqual(change!.add, []);
-  for (const label of ['factory', 'factory:start', 'factory:status:in-progress', 'factory:status:draft', 'factory:status:done']) {
+  for (const label of ['factory', 'factory:in-progress', 'factory:draft', 'factory:done', 'factory:project:p1']) {
     assert.ok(change!.remove.includes(label), label);
   }
-  assert.equal(change!.remove.some((label) => label.startsWith('factory:project:') || label.includes('model') || label.endsWith('autonomous')), false);
+  assert.equal(change!.remove.some((label) => label.includes('model') || label.includes('mode:')), false);
   assert.equal(f.issues.comments.length, 1);
   assert.equal(f.issues.comments[0]!.key, 'm1:task-deleted');
   assert.equal(f.issues.comments[0]!.url, issueUrl);

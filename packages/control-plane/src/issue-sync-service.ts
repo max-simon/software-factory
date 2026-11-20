@@ -6,10 +6,12 @@ import {
   gitHubIssueRepos,
   isEditable,
   managedComments,
+  mergeLabelChanges,
   nextRank,
+  noLabelChanges,
   parseManagedLabels,
+  projectLabelChanges,
   returnToDraft,
-  startLabel,
   startTask,
   statusLabelChanges,
   syncManagedContent,
@@ -17,6 +19,7 @@ import {
   type IssueProvider,
   type ManagedContent,
   type ManagedLabels,
+  type Project,
   type ProjectRepository,
   type Task,
 } from '@factory/core';
@@ -26,7 +29,7 @@ import type { TaskStore } from './task-store.ts';
 
 export interface IssueSyncDeps {
   tasks: Pick<TaskStore, 'findByExternalUrl' | 'insert' | 'update' | 'delete' | 'list' | 'now'>;
-  projects: Pick<ProjectRepository, 'get' | 'list'>;
+  projects: Pick<ProjectRepository, 'list'>;
   provider: IssueProvider;
   /** Secret values to strip from logged errors. */
   secrets: readonly string[];
@@ -71,10 +74,11 @@ const isContentChanged = (task: Task, content: ManagedContent): boolean =>
 
 /**
  * Creates managed tasks from the provider's issues that carry the factory
- * label, keeps their title, specification, labels and configuration in step
- * until they start, starts them on the start label, and deletes them when
- * their issue is closed or loses the factory label before they start. It
- * reports each task's status as a label on its issue, notes once when an
+ * label, in the project that attaches the issue's repository, keeps their
+ * title, specification, labels and configuration in step until they start,
+ * starts them when a human sets `factory:queued`, and deletes them when their
+ * issue is closed or loses the factory label before they start. It reports
+ * each task's status and project as labels on its issue, notes once when an
  * issue is edited after its task started, and comments on what happens on the
  * task (`managedComments`). Comments on the issue are never read back. Issue
  * text is untrusted: it goes into the task as it is and never into the log.
@@ -101,15 +105,15 @@ export class IssueSync {
     const withoutProject: string[] = [];
     for (const issue of issues) {
       await this.#guard(issue.url, () => this.#sync(issue, withoutProject));
-      // Separately guarded, so a failure earlier for this issue does not hold back its status or comments.
-      await this.#guard(issue.url, () => this.#reportStatus(issue));
+      // Separately guarded, so a failure earlier for this issue does not hold back its labels or comments.
+      await this.#guard(issue.url, () => this.#reportLabels(issue));
       await this.#guard(issue.url, () => this.#postComments(issue));
     }
     await this.#deleteUnlabelled(new Set(issues.map((issue) => issue.url)), repos);
-    // One line per pass, not per issue: an issue waiting for its project label is no error.
+    // One line per pass, not per issue: an issue that moved to a repository no project attaches is no error.
     if (withoutProject.length > 0) {
       this.#log(
-        `issue sync: skipped ${withoutProject.length} issues without the label of a project that attaches their repository: ${withoutProject.join(', ')}`,
+        `issue sync: skipped ${withoutProject.length} issues whose repository no single project attaches: ${withoutProject.join(', ')}`,
       );
     }
   }
@@ -153,19 +157,14 @@ export class IssueSync {
     // Ensured on every pass: the provider posts a key once, so this only
     // recovers a comment whose first attempt failed after the task was saved.
     await this.#commentTaskId(issue, task);
-    // After start the issue no longer steers the task; a start label left by a failed removal goes now.
-    if (!isEditable(task.status)) {
-      if (parsed.wantsStart) await this.#removeStartLabel(issue);
-      return this.#commentLateEdit(task, issue, parsed);
-    }
+    // After start the issue no longer steers the task.
+    if (!isEditable(task.status)) return this.#commentLateEdit(task, issue, parsed);
     if (!issue.isOpen) return this.#delete(task);
     await this.#commentConflicts(issue, parsed, task);
     // Nothing to vouch for yet: the start waits, label and all, until the issue has a description.
     if (isEmpty(issue.body)) return this.#deps.provider.comment(issue.url, emptyBodyKey, emptyBodyComment);
     this.#syncContent(task, contentOf(issue, parsed));
-    if (!parsed.wantsStart) return;
-    this.#deps.tasks.update(task.id, 'system', startTask);
-    await this.#removeStartLabel(issue);
+    if (parsed.wantsStart) this.#deps.tasks.update(task.id, 'system', startTask);
   }
 
   #syncContent(task: Task, content: ManagedContent): void {
@@ -191,12 +190,17 @@ export class IssueSync {
   /**
    * Read after the issue's sync, so a task started in this pass reports its
    * new status. Compared with the listed labels, so nothing is stored and a
-   * status label a human changed is corrected on the next pass.
+   * status or project label a human changed is corrected on the next pass.
    */
-  #reportStatus(issue: ExternalIssue): Promise<void> {
+  #reportLabels(issue: ExternalIssue): Promise<void> {
     const task = this.#deps.tasks.findByExternalUrl(issue.url);
     if (task === undefined) return Promise.resolve();
-    const { add, remove } = statusLabelChanges(issue.labels, task.status);
+    // A start still waiting (no description yet) keeps its `factory:queued`, so it goes ahead once it can.
+    const isStartPending = isEditable(task.status) && parseManagedLabels(issue.labels).wantsStart;
+    const { add, remove } = mergeLabelChanges(
+      isStartPending ? noLabelChanges : statusLabelChanges(issue.labels, task.status),
+      projectLabelChanges(issue.labels, task.projectId),
+    );
     if (add.length === 0 && remove.length === 0) return Promise.resolve();
     return this.#deps.provider.changeLabels(issue.url, { add: [...add], remove: [...remove] });
   }
@@ -211,18 +215,10 @@ export class IssueSync {
     for (const { key, body } of managedComments(task, digest)) await this.#deps.provider.comment(issue.url, key, body);
   }
 
-  /** Removes the start label as written on the issue, since labels match case-insensitively. */
-  #removeStartLabel(issue: ExternalIssue): Promise<void> {
-    const remove = issue.labels.filter((label) => label.toLowerCase() === startLabel);
-    return this.#deps.provider.changeLabels(issue.url, { add: [], remove });
-  }
-
   async #import(issue: ExternalIssue, parsed: ManagedLabels, withoutProject: string[]): Promise<void> {
     if (!issue.isOpen) return;
-    const { projectId } = parsed;
-    const project = projectId === undefined ? undefined : this.#deps.projects.get(projectId);
-    // Another project's repository is listed too, but its issues must not reach a project that did not attach it.
-    if (project === undefined || !this.#deps.provider.covers(issue.url, gitHubIssueRepos([project]))) {
+    const project = this.#attachingProject(issue);
+    if (project === undefined) {
       withoutProject.push(issue.url);
       return;
     }
@@ -236,6 +232,16 @@ export class IssueSync {
     tasks.insert(task, 'system');
     await this.#commentTaskId(issue, task);
     await this.#commentConflicts(issue, parsed, task);
+  }
+
+  /**
+   * The one project attaching the issue's repository. Projects cannot share a
+   * repository, but ones stored before that rule may; their issues wait until
+   * only one is left. A transferred issue may be in a repository none attaches.
+   */
+  #attachingProject(issue: ExternalIssue): Project | undefined {
+    const attaching = this.#deps.projects.list().filter((project) => this.#deps.provider.covers(issue.url, gitHubIssueRepos([project])));
+    return attaching.length === 1 ? attaching[0] : undefined;
   }
 
   #commentTaskId(issue: ExternalIssue, task: Task): Promise<void> {

@@ -456,8 +456,11 @@ factory owns everything else.
   `github-issues`, configured with `owner/repo`, so far. A repository is
   checked against GitHub's naming rules, attached at most once per project
   (ignoring case) and at most 20 attachments per project; anything else is
-  400 `invalid_task_provider`. Several projects may attach the same
-  repository. Projects stored before attachments existed attach none.
+  400 `invalid_task_provider`. A repository belongs to one project: one
+  another project attaches is refused with 409 `task_provider_taken`
+  (`assertTaskProvidersUnclaimed`, checked by `ProjectService` on create and
+  edit), so the attachment, not a label, says which project an issue's task
+  belongs to. Projects stored before attachments existed attach none.
   Nothing else is configured: the sync looks in exactly the repositories
   projects attach.
 
@@ -490,27 +493,32 @@ start with `factory`, and each class has one owner:
 | Class | Labels | Written by |
 |---|---|---|
 | Marker | `factory` | human: only issues carrying it are considered |
-| Project | `factory:project:<project id>` | human: which factory project the task belongs to |
-| Command | `factory:start` | human: start the task; the factory removes it once handled |
-| Config | `factory:supervised`, `factory:autonomous`, `factory:model:opus`, `factory:model:sonnet` | human |
-| Status | `factory:status:<status>` with hyphens, e.g. `factory:status:input-required` | factory only |
+| Status | `factory:<status>` with hyphens, e.g. `factory:input-required` | factory; a human sets `factory:queued` to start the task |
+| Project | `factory:project:<project id>` | factory only: the project that attaches the issue's repository |
+| Config | `factory:mode:autonomous`, `factory:mode:supervised`, `factory:model:opus`, `factory:model:sonnet` | human |
 | Content | every label that does not start with `factory` | human: synced into `Task.labels` |
 
 - **Matching.** GitHub label names are case-insensitive, so every label that
-  starts with `factory` is matched case-insensitively (`Factory:Start` starts
-  the task). The project id keeps the case it is written in; content labels
-  are kept exactly as written, in order, each once.
+  starts with `factory` is matched case-insensitively (`Factory:Queued`
+  starts the task). Content labels are kept exactly as written, in order,
+  each once.
 - **Defaults and conflicts.** Without config labels a task is `autonomous`
-  and runs on `opus`. Both autonomy labels, both model labels or several
-  project labels naming different projects are a conflict: the default
-  applies (no project, for the project label) and `parseManagedLabels`
-  returns a human-readable note for each.
+  and runs on `opus`. Both autonomy labels or both model labels are a
+  conflict: the default applies and `parseManagedLabels` returns a
+  human-readable note for each.
 - **Unknown labels.** A `factory*` label outside the table (e.g.
-  `factory:typo`, `factory-bug`) is ignored and is not a content label.
-- **Status.** `statusLabelChanges` computes which labels to add and remove so
-  that exactly one `factory:status:*` label, the current one, remains. Any
-  other status label is removed, including one a human set; no other label is
-  touched.
+  `factory:typo`, `factory-bug`, or the retired `factory:start` and
+  `factory:status:*`) is ignored and is not a content label.
+- **Status and project.** `statusLabelChanges` and `projectLabelChanges`
+  compute which labels to add and remove so that exactly one status label,
+  the current one, and one project label, the task's, remain. Any other
+  label of the class is removed, including one a human set; no other label
+  is touched.
+- **Start by status.** The start command is the status a start moves the
+  task to: a human sets `factory:queued` next to `factory:draft` (or
+  `factory:clarification-required`), the factory starts the task and the
+  report removes the old status label. There is no separate command label to
+  clean up.
 
 ### Issue provider
 
@@ -548,21 +556,20 @@ every minute; the first pass runs at start-up. Without attachments a pass
 asks GitHub nothing.
 
 - **Import.** An open issue without a task becomes a `draft` task in the
-  project its project label names, with the issue's title, body as the
+  project that attaches its repository, with the issue's title, body as the
   specification, content labels, autonomy mode and model from its config
   labels, the issue's `repoUrl`, the default agent and `external` set to the
   issue's link. The changelog records it as created by `system`, and the task
   has no `createdBy`; the web UI shows it as created by `system`. The issue
   text goes into the task unchanged and is never interpreted, nor logged.
-- **Skipped issues.** A closed issue is not imported. Nor is an issue without
-  a project label, or whose label names no known project or a project that
-  does not attach the issue's repository (another project's attachment lists
-  it, but must not let it into this one); it gets no comment,
-  since adding the label later is the expected fix, and a pass logs one line
-  at most listing such issues; that includes several project labels naming
-  different projects, which therefore get no conflict comment. An issue with
-  an empty body gets one comment, key `empty-body`, saying it needs a
-  description, and is skipped until it has one.
+- **Skipped issues.** A closed issue is not imported. Nor is an issue whose
+  repository not exactly one project attaches: one transferred to a
+  repository no project attaches, or one in a repository several projects
+  stored before the one-project rule still share. It gets no comment, and a
+  pass logs one line at most listing such issues. A project label on the
+  issue plays no part. An issue with an empty body gets one comment, key
+  `empty-body`, saying it needs a description, and is skipped until it has
+  one.
 - **Comment keys.** Every comment about a task has a key starting with the
   task id (`<task id>:task-id`, `<task id>:late-edit`, …). An issue whose
   task was deleted can be imported again as a new task, which then posts its
@@ -579,18 +586,19 @@ asks GitHub nothing.
   review runs on the new text, as for an engineer's edit; a label-only change
   leaves it waiting. An empty body is not synced; the issue gets the same one
   comment. The project is fixed at import: a changed project label is
-  ignored.
-- **Start.** `factory:start` on the issue of a `draft` or
+  corrected, never followed.
+- **Start.** `factory:queued` on the issue of a `draft` or
   `clarification_required` task first applies any pending update, so the
   task starts with the issue's current text, then starts it with
-  `startTask`, the engineer's start, recorded as `system`, and finally
-  removes the label (as written on the issue) through `changeLabels`. Whoever
-  sets the label vouches for the text as it is; the factory does not check
-  who did. While the body is empty the start waits and the label stays. A
-  label whose removal failed is seen again on the started task next pass,
-  and only removed; on a task in any other status, too, the label is only
-  removed. An issue imported in a pass is started in the next one. Starting
-  from the web UI works as before.
+  `startTask`, the engineer's start, recorded as `system`. The status report
+  of the same pass then removes the old status label, so the issue keeps
+  `factory:queued` as written. Whoever sets the label vouches for the text
+  as it is; the factory does not check who did. While the start cannot
+  happen (the body is empty, or the start failed and is logged) the status
+  report leaves the issue's status labels alone, so the request stays and is
+  tried again next pass. On a task in any other status the label is a wrong
+  status label and is corrected. An issue imported in a pass is started in
+  the next one. Starting from the web UI works as before.
 - **Leaving before start.** A `draft` or `clarification_required` task is
   deleted when its issue is closed, or when the issue is missing from
   `listIssues` because it lost the label. Absence counts only
@@ -614,14 +622,16 @@ asks GitHub nothing.
   it one comment per task, however many edits and passes follow. Content is
   compared, not the issue's update time, which also moves on the factory's
   own comments and label writes; an unchanged issue never gets the comment.
-- **Status label.** For every managed task whose issue is listed, a pass
-  compares the issue's labels with the task's status after the issue's own
-  sync (so a task started in this pass reports `queued`) and calls
-  `changeLabels` with `statusLabelChanges` only when they differ. The issue
-  then carries exactly one `factory:status:<status>` label, the current
-  one; all eight statuses are reported, `draft` included. No state is
-  stored: a status label a human sets or removes is corrected on the next
-  pass. A started task is reported while its issue is listed, closed or not;
+- **Status and project labels.** For every managed task whose issue is
+  listed, a pass compares the issue's labels with the task's status and
+  project after the issue's own sync (so a task started in this pass reports
+  `queued`) and calls `changeLabels` once with `statusLabelChanges` and
+  `projectLabelChanges` merged, only when they differ. The issue then
+  carries exactly one `factory:<status>` label, the current one, and
+  `factory:project:<project id>`; all eight statuses are reported, `draft`
+  included, so an import gets `factory:draft` and its project label in one
+  call. No state is stored: a status or project label a human sets or
+  removes is corrected on the next pass, except a pending start (see Start). A started task is reported while its issue is listed, closed or not;
   once the issue loses the `factory` label it is no longer listed and
   reporting stops silently.
 - **Conflicts.** Contradictory config labels of an issue with a task get one
@@ -677,9 +687,10 @@ issue first, so the sync does not import it again:
   that has not started depends on it touches nothing. Then `TaskService`
   removes the labels from the issue (`deletionLabelChanges`), posts one
   comment, stops the execution server and deletes the task.
-- **Labels.** `factory`, `factory:start` and every `factory:status:*` label
-  are removed. Project and config labels stay, so adding `factory` again
-  imports the issue as a new task with the same setup.
+- **Labels.** `factory`, every status label and the task's project label
+  are removed. Config labels stay, so adding `factory` again imports the
+  issue as a new task with the same setup; the project comes from the
+  attachment again.
 - **Comment.** One comment, key `<task id>:task-deleted`, says the task was
   deleted in the factory, its labels were removed and re-adding `factory`
   imports the issue again; scoped by task, so a task imported again and

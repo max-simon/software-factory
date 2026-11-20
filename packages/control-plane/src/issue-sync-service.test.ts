@@ -1,11 +1,13 @@
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createProject, createTask, requestClarification, restartTask, startTask, statusLabel, statusLabelPrefix, transitions, type ExternalIssue, type IssueProvider, type Task, type TaskEvent, type TaskStatus } from '@factory/core';
+import { createProject, createTask, projectLabelPrefix, requestClarification, restartTask, startTask, statusLabel, transitions, type ExternalIssue, type IssueProvider, type Task, type TaskEvent, type TaskStatus } from '@factory/core';
 import { SqliteProjectRepository } from './adapters/sqlite-project-repository.ts';
 import { SqliteTaskRepository } from './adapters/sqlite-task-repository.ts';
 import { IssueSync } from './issue-sync-service.ts';
 import { TaskStore } from './task-store.ts';
+
+const allStatusLabels = (Object.keys(transitions) as TaskStatus[]).map(statusLabel);
 
 class FakeIssues implements IssueProvider {
   issues: ExternalIssue[] = [];
@@ -49,15 +51,16 @@ class FakeIssues implements IssueProvider {
     this.comments.push({ url, key, body });
   }
 
-  /** Label changes other than status reports, which any pass may make. */
-  commandChanges(): { url: string; add: string[]; remove: string[] }[] {
-    const isStatus = (label: string) => label.toLowerCase().startsWith(statusLabelPrefix);
-    return this.labelChanges.filter((change) => ![...change.add, ...change.remove].every(isStatus));
+  statusLabels(url: string): string[] {
+    return this.#labels(url).filter((label) => allStatusLabels.includes(label.toLowerCase()));
   }
 
-  statusLabels(url: string): string[] {
-    const issue = this.issues.find((candidate) => candidate.url === url);
-    return (issue?.labels ?? []).filter((label) => label.toLowerCase().startsWith(statusLabelPrefix));
+  projectLabels(url: string): string[] {
+    return this.#labels(url).filter((label) => label.toLowerCase().startsWith(projectLabelPrefix));
+  }
+
+  #labels(url: string): string[] {
+    return this.issues.find((candidate) => candidate.url === url)?.labels ?? [];
   }
 
   keys(url: string): string[] {
@@ -74,7 +77,7 @@ const issue = (n: number, fields: Partial<ExternalIssue> = {}): ExternalIssue =>
   repoUrl: 'https://github.com/o/r',
   title: `Issue ${n}`,
   body: `Body ${n}`,
-  labels: ['factory', 'factory:project:p1'],
+  labels: ['factory'],
   isOpen: true,
   ...fields,
 });
@@ -117,7 +120,7 @@ async function imported(f: Fixture, synced: ExternalIssue): Promise<string> {
 test('imports an open issue as a draft managed task, created by system, with a task-id comment', async () => {
   const f = setup();
   f.provider.issues = [
-    issue(1, { labels: ['bug', 'factory', 'Factory:Project:p1', 'factory:supervised', 'factory:model:sonnet', 'ui', 'bug'] }),
+    issue(1, { labels: ['bug', 'factory', 'factory:mode:supervised', 'factory:model:sonnet', 'ui', 'bug'] }),
   ];
   await f.sync.sync();
   assert.deepEqual(f.provider.listed, [{ repos: ['o/r'], label: 'factory' }]);
@@ -135,6 +138,7 @@ test('imports an open issue as a draft managed task, created by system, with a t
   assert.equal('createdBy' in task, false);
   assert.deepEqual(f.tasks.changes('t1'), [{ at: task.createdAt, actor: 'system', field: 'created' }]);
   assert.deepEqual(f.provider.comments, [{ url: issue(1).url, key: 't1:task-id', body: 'The factory tracks this issue as task `t1`.' }]);
+  assert.deepEqual(f.provider.labelChanges, [{ url: issue(1).url, add: ['factory:draft', 'factory:project:p1'], remove: [] }]);
   assert.deepEqual(f.logged, []);
 });
 
@@ -148,15 +152,20 @@ test('defaults apply without config labels, and a second pass neither duplicates
   assert.equal(f.events.filter((event) => event.type === 'task.updated').length, 0);
 });
 
-test('skips issues without a project label or with an unknown project silently, logging one line per pass', async () => {
+test('skips issues of a repository no single project attaches silently, logging one line per pass', async () => {
   const f = setup();
-  f.provider.issues = [issue(1, { labels: ['factory'] }), issue(2, { labels: ['factory', 'factory:project:nope'] })];
+  // Shared only by projects stored before the rule; the project service refuses it now.
+  f.projects.insert(
+    createProject({ title: 'Shared', taskProviders: [{ provider: 'github-issues', repo: 'o/r' }] }, { id: 'p2', now: f.tasks.now() }),
+  );
+  // A transferred issue reports a repository no project attaches.
+  const moved = issue(2, { url: 'https://github.com/o/moved/issues/2', key: 'o/moved#2', repoUrl: 'https://github.com/o/moved' });
+  f.provider.issues = [issue(1), moved];
   await f.sync.sync();
   assert.deepEqual(f.tasks.list(), []);
   assert.deepEqual(f.provider.comments, []);
-  assert.deepEqual(f.logged, [
-    `issue sync: skipped 2 issues without the label of a project that attaches their repository: ${issue(1).url}, ${issue(2).url}`,
-  ]);
+  assert.deepEqual(f.provider.labelChanges, []);
+  assert.deepEqual(f.logged, [`issue sync: skipped 2 issues whose repository no single project attaches: ${issue(1).url}, ${moved.url}`]);
 });
 
 test('lists the repositories every project attaches, each once whatever its case', async () => {
@@ -171,16 +180,18 @@ test('lists the repositories every project attaches, each once whatever its case
   assert.deepEqual(f.provider.listed, [{ repos: ['o/r', 'o/s'], label: 'factory' }]);
 });
 
-test('an issue labelled for a project that does not attach its repository is skipped and logged', async () => {
+test('a project label a human set is ignored: the issue goes to the project that attaches its repository', async () => {
   const f = setup();
   f.projects.insert(
     createProject({ title: 'Other', taskProviders: [{ provider: 'github-issues', repo: 'o/s' }] }, { id: 'p2', now: f.tasks.now() }),
   );
-  f.provider.issues = [issue(1, { labels: ['factory', 'factory:project:p2'] })];
+  f.provider.issues = [issue(1, { labels: ['factory', 'Factory:Project:p2'] })];
   await f.sync.sync();
-  assert.deepEqual(f.tasks.list(), []);
-  assert.deepEqual(f.provider.comments, []);
-  assert.match(f.logged[0]!, /skipped 1 issues without the label of a project that attaches their repository/);
+  assert.equal(f.tasks.get('t1').projectId, 'p1');
+  assert.deepEqual(f.provider.labelChanges, [
+    { url: issue(1).url, add: ['factory:draft', 'factory:project:p1'], remove: ['Factory:Project:p2'] },
+  ]);
+  assert.deepEqual(f.logged, []);
 });
 
 test('without attachments the provider is asked for no repository and nothing is imported', async () => {
@@ -213,7 +224,7 @@ test('an issue with an empty body is not imported and gets one comment', async (
 
 test('contradicting labels get one comment per set of conflicts, and the defaults apply', async () => {
   const f = setup();
-  const conflicted = issue(1, { labels: ['factory', 'factory:project:p1', 'factory:supervised', 'factory:autonomous'] });
+  const conflicted = issue(1, { labels: ['factory', 'factory:mode:supervised', 'factory:mode:autonomous'] });
   f.provider.issues = [conflicted];
   await f.sync.sync();
   await f.sync.sync();
@@ -223,19 +234,10 @@ test('contradicting labels get one comment per set of conflicts, and the default
   const conflictComments = f.provider.comments.filter((c) => c.key.startsWith('t1:config-conflict:'));
   assert.equal(conflictComments.length, 1);
   assert.match(conflictComments[0]!.body, /defaults apply/);
-  assert.match(conflictComments[0]!.body, /factory:autonomous and factory:supervised are both set/);
+  assert.match(conflictComments[0]!.body, /factory:mode:autonomous and factory:mode:supervised are both set/);
   f.provider.issues = [{ ...conflicted, labels: [...conflicted.labels, 'factory:model:opus', 'factory:model:sonnet'] }];
   await f.sync.sync();
   assert.equal(f.provider.comments.filter((c) => c.key.startsWith('t1:config-conflict:')).length, 2);
-});
-
-test('an issue with conflicting project labels never becomes a task, so it is skipped without a comment', async () => {
-  const f = setup();
-  f.provider.issues = [issue(1, { labels: ['factory', 'factory:project:p1', 'factory:project:p2'] })];
-  await f.sync.sync();
-  assert.deepEqual(f.tasks.list(), []);
-  assert.deepEqual(f.provider.comments, []);
-  assert.equal(f.logged.length, 1);
 });
 
 test('syncs title, body, labels and config into a draft as system, saving nothing when nothing changed', async () => {
@@ -246,7 +248,7 @@ test('syncs title, body, labels and config into a draft as system, saving nothin
   assert.equal(f.tasks.get(id).updatedAt, updatedAt);
   assert.equal(f.events.filter((event) => event.type === 'task.updated').length, 0);
 
-  f.provider.issues = [issue(1, { title: 'New', body: 'New body', labels: ['factory', 'factory:project:p1', 'factory:model:sonnet', 'ui'] })];
+  f.provider.issues = [issue(1, { title: 'New', body: 'New body', labels: ['factory', 'factory:model:sonnet', 'ui'] })];
   await f.sync.sync();
   const task = f.tasks.get(id);
   assert.deepEqual([task.title, task.specification, task.labels, task.model, task.status], ['New', 'New body', ['ui'], 'sonnet', 'draft']);
@@ -258,14 +260,15 @@ test('syncs title, body, labels and config into a draft as system, saving nothin
   ]);
 });
 
-test('a label order change is a change; a changed project label is ignored', async () => {
+test('a label order change is a change; a changed project label is corrected', async () => {
   const f = setup();
-  const id = await imported(f, issue(1, { labels: ['factory', 'factory:project:p1', 'a', 'b'] }));
-  f.provider.issues = [issue(1, { labels: ['factory', 'factory:project:other', 'b', 'a'] })];
+  const id = await imported(f, issue(1, { labels: ['factory', 'a', 'b'] }));
+  f.provider.issues = [issue(1, { labels: ['factory', 'factory:draft', 'factory:project:other', 'b', 'a'] })];
   await f.sync.sync();
   const task = f.tasks.get(id);
   assert.deepEqual(task.labels, ['b', 'a']);
   assert.equal(task.projectId, 'p1');
+  assert.deepEqual(f.provider.projectLabels(issue(1).url), ['factory:project:p1']);
   assert.deepEqual(f.logged, []);
 });
 
@@ -288,7 +291,7 @@ test('a label-only change leaves a task waiting for clarification', async () => 
   const f = setup();
   const id = await imported(f, issue(1));
   f.tasks.update(id, 'reviewer', (task) => requestClarification(task, 'What?'));
-  f.provider.issues = [issue(1, { labels: ['factory', 'factory:project:p1', 'ui'] })];
+  f.provider.issues = [issue(1, { labels: ['factory', 'ui'] })];
   await f.sync.sync();
   const task = f.tasks.get(id);
   assert.equal(task.status, 'clarification_required');
@@ -338,10 +341,11 @@ test('one failing issue does not stop the others, and its error is logged redact
   assert.deepEqual(f.logged, [`issue sync: ${issue(1).url}: bad credentials [redacted]`]);
 });
 
+/** As the factory left the issue of a draft, plus the start a human asked for. */
 const startable = (n: number, fields: Partial<ExternalIssue> = {}) =>
-  issue(n, { labels: ['factory', 'factory:project:p1', 'Factory:Start'], ...fields });
+  issue(n, { labels: ['factory', 'factory:project:p1', 'factory:draft', 'Factory:Queued'], ...fields });
 
-test('factory:start applies the pending content update first, starts the task as system and removes the label', async () => {
+test('factory:queued applies the pending content update first and starts the task as system', async () => {
   const f = setup();
   const id = await imported(f, issue(1));
   f.provider.issues = [startable(1, { body: 'Final body' })];
@@ -353,58 +357,63 @@ test('factory:start applies the pending content update first, starts the task as
     updates.map((event) => [event.actor, event.changes.map((change) => change.field)]),
     [['system', ['specification']], ['system', ['status']]],
   );
-  assert.deepEqual(f.provider.commandChanges(), [{ url: issue(1).url, add: [], remove: ['Factory:Start'] }]);
+  assert.deepEqual(f.provider.statusLabels(issue(1).url), ['Factory:Queued']);
   assert.deepEqual(f.logged, []);
 });
 
-test('factory:start settles a clarification request as an engineer start does', async () => {
+test('factory:queued settles a clarification request as an engineer start does', async () => {
   const f = setup();
   const id = await imported(f, issue(1));
   f.tasks.update(id, 'reviewer', (task) => requestClarification(task, 'What?'));
-  f.provider.issues = [startable(1)];
+  f.provider.issues = [startable(1, { labels: ['factory', 'factory:project:p1', 'factory:clarification-required', 'factory:queued'] })];
   await f.sync.sync();
   const task = f.tasks.get(id);
   assert.equal(task.status, 'queued');
   assert.equal(task.clarification, undefined);
+  assert.deepEqual(f.provider.statusLabels(issue(1).url), ['factory:queued']);
 });
 
-test('a failed label removal is retried on the next pass, which only removes the label', async () => {
+test('a failed label report is retried on the next pass, which does not start the task again', async () => {
   const f = setup();
   const id = await imported(f, issue(1));
   f.provider.issues = [startable(1)];
   f.provider.labelFailure = 'bad gateway ghp_secret';
   await f.sync.sync();
   assert.equal(f.tasks.get(id).status, 'queued');
-  // The start label's removal and the status report fail alike.
-  const failure = `issue sync: ${issue(1).url}: bad gateway [redacted]`;
-  assert.deepEqual(f.logged, [failure, failure]);
+  assert.deepEqual(f.logged, [`issue sync: ${issue(1).url}: bad gateway [redacted]`]);
   const before = f.tasks.get(id);
   f.provider.labelFailure = undefined;
   await f.sync.sync();
   assert.deepEqual(f.tasks.get(id), before);
-  assert.deepEqual(f.provider.commandChanges(), [{ url: issue(1).url, add: [], remove: ['Factory:Start'] }]);
-  assert.equal(f.logged.length, 2);
+  assert.deepEqual(f.provider.labelChanges.at(-1), { url: issue(1).url, add: [], remove: ['factory:draft'] });
+  assert.equal(f.logged.length, 1);
 });
 
-test('factory:start on a started task only removes the label', async () => {
+test('factory:queued on a task past it changes nothing on the task and is corrected', async () => {
   const f = setup();
   const id = await imported(f, issue(1));
   f.tasks.update(id, 'system', startTask);
   f.tasks.update(id, 'system', (task) => ({ ...task, status: 'in_progress' }));
   const before = f.tasks.get(id);
-  f.provider.issues = [startable(1, { body: 'Late body' })];
+  f.provider.issues = [startable(1, { body: 'Late body', labels: ['factory', 'factory:project:p1', 'factory:in-progress', 'Factory:Queued'] })];
   await f.sync.sync();
   assert.deepEqual(f.tasks.get(id), before);
-  assert.deepEqual(f.provider.commandChanges(), [{ url: issue(1).url, add: [], remove: ['Factory:Start'] }]);
+  assert.deepEqual(f.provider.labelChanges.at(-1), { url: issue(1).url, add: [], remove: ['Factory:Queued'] });
 });
 
-test('factory:start waits while the issue has no description', async () => {
+test('factory:queued waits, label and all, while the issue has no description', async () => {
   const f = setup();
   const id = await imported(f, issue(1));
+  const changes = f.provider.labelChanges.length;
   f.provider.issues = [startable(1, { body: '' })];
   await f.sync.sync();
+  await f.sync.sync();
   assert.equal(f.tasks.get(id).status, 'draft');
-  assert.deepEqual(f.provider.commandChanges(), []);
+  assert.equal(f.provider.labelChanges.length, changes);
+  f.provider.issues[0]!.body = 'Described';
+  await f.sync.sync();
+  assert.equal(f.tasks.get(id).status, 'queued');
+  assert.deepEqual(f.provider.statusLabels(issue(1).url), ['Factory:Queued']);
 });
 
 test('an unstarted task is deleted once its issue loses the factory label', async () => {
@@ -418,14 +427,15 @@ test('an unstarted task is deleted once its issue loses the factory label', asyn
   assert.deepEqual(f.logged, []);
 });
 
-test('an unstarted task is deleted once its issue is closed, even with factory:start', async () => {
+test('an unstarted task is deleted once its issue is closed, even with factory:queued', async () => {
   const f = setup();
   const id = await imported(f, issue(1));
+  const changes = f.provider.labelChanges.length;
   f.provider.issues = [startable(1, { isOpen: false })];
   await f.sync.sync();
   assert.equal(f.tasks.findByExternalUrl(issue(1).url), undefined);
   assert.throws(() => f.tasks.get(id));
-  assert.deepEqual(f.provider.commandChanges(), []);
+  assert.equal(f.provider.labelChanges.length, changes);
 });
 
 test('nothing is deleted when the list call failed or does not cover the repository of the issue', async () => {
@@ -478,41 +488,40 @@ test('after start, a closed issue or a removed factory label has no effect', asy
   assert.deepEqual(f.tasks.get(id), before);
 });
 
-test('the status label is written only when it differs from the issue', async () => {
+test('the status and project labels are written only when they differ from the issue', async () => {
   const f = setup();
   await imported(f, issue(1));
-  assert.deepEqual(f.provider.labelChanges, [{ url: issue(1).url, add: ['factory:status:draft'], remove: [] }]);
+  assert.deepEqual(f.provider.labelChanges, [{ url: issue(1).url, add: ['factory:draft', 'factory:project:p1'], remove: [] }]);
   await f.sync.sync();
   await f.sync.sync();
   assert.equal(f.provider.labelChanges.length, 1);
-  assert.deepEqual(f.provider.statusLabels(issue(1).url), ['factory:status:draft']);
+  assert.deepEqual(f.provider.statusLabels(issue(1).url), ['factory:draft']);
+  assert.deepEqual(f.provider.projectLabels(issue(1).url), ['factory:project:p1']);
 });
 
-test('a task started by label reports its new status in the same pass', async () => {
+test('a task started by label reports its new status in the same pass, in one change', async () => {
   const f = setup();
   await imported(f, issue(1));
-  f.provider.issues = [startable(1, { labels: ['factory', 'factory:project:p1', 'factory:start', 'factory:status:draft'] })];
+  f.provider.issues = [startable(1)];
   await f.sync.sync();
-  assert.deepEqual(f.provider.labelChanges.slice(1), [
-    { url: issue(1).url, add: [], remove: ['factory:start'] },
-    { url: issue(1).url, add: ['factory:status:queued'], remove: ['factory:status:draft'] },
-  ]);
+  assert.deepEqual(f.provider.labelChanges.slice(1), [{ url: issue(1).url, add: [], remove: ['factory:draft'] }]);
 });
 
-test('a status label a human set or removed is corrected on the next pass', async () => {
+test('status and project labels a human set or removed are corrected on the next pass', async () => {
   const f = setup();
   await imported(f, issue(1));
   const [listed] = f.provider.issues;
-  listed!.labels = ['factory', 'factory:project:p1', 'Factory:Status:Done', 'factory:status:bogus'];
+  listed!.labels = ['factory', 'factory:project:p1', 'Factory:Done', 'factory:failed', 'factory:status:draft'];
   await f.sync.sync();
   assert.deepEqual(f.provider.labelChanges.at(-1), {
     url: issue(1).url,
-    add: ['factory:status:draft'],
-    remove: ['Factory:Status:Done', 'factory:status:bogus'],
+    add: ['factory:draft'],
+    remove: ['Factory:Done', 'factory:failed'],
   });
-  listed!.labels = ['factory', 'factory:project:p1'];
+  listed!.labels = ['factory'];
   await f.sync.sync();
-  assert.deepEqual(f.provider.statusLabels(issue(1).url), ['factory:status:draft']);
+  assert.deepEqual(f.provider.statusLabels(issue(1).url), ['factory:draft']);
+  assert.deepEqual(f.provider.projectLabels(issue(1).url), ['factory:project:p1']);
 });
 
 for (const status of Object.keys(transitions) as TaskStatus[]) {
@@ -532,7 +541,7 @@ test('a started task whose issue left the list is no longer reported', async () 
   f.tasks.update(id, 'system', startTask);
   f.provider.issues = [issue(1, { isOpen: false })];
   await f.sync.sync();
-  assert.deepEqual(f.provider.statusLabels(issue(1).url), ['factory:status:queued']);
+  assert.deepEqual(f.provider.statusLabels(issue(1).url), ['factory:queued']);
   const changes = f.provider.labelChanges.length;
   f.provider.issues = [];
   f.tasks.update(id, 'system', (task) => ({ ...task, status: 'in_progress' }));
@@ -551,9 +560,9 @@ test('edits after start get one late-edit comment across passes and edits, and c
   const edits: Partial<ExternalIssue>[] = [
     { title: 'New title' },
     { body: 'New body' },
-    { labels: ['factory', 'factory:project:p1', 'ui'] },
-    { labels: ['factory', 'factory:project:p1', 'factory:supervised'] },
-    { labels: ['factory', 'factory:project:p1', 'factory:model:sonnet'] },
+    { labels: ['factory', 'ui'] },
+    { labels: ['factory', 'factory:mode:supervised'] },
+    { labels: ['factory', 'factory:model:sonnet'] },
   ];
   for (const edit of edits) {
     f.provider.issues = [issue(1, edit)];
@@ -570,7 +579,7 @@ test('edits after start get one late-edit comment across passes and edits, and c
 });
 
 test('each edited config option is a late edit on its own', async () => {
-  for (const labels of [['factory', 'factory:project:p1', 'ui'], ['factory', 'factory:project:p1', 'factory:supervised'], ['factory', 'factory:project:p1', 'factory:model:sonnet']]) {
+  for (const labels of [['factory', 'ui'], ['factory', 'factory:mode:supervised'], ['factory', 'factory:model:sonnet']]) {
     const f = setup();
     const id = await imported(f, issue(1));
     f.tasks.update(id, 'system', startTask);
@@ -582,13 +591,13 @@ test('each edited config option is a late edit on its own', async () => {
 
 test('an unchanged issue gets no late-edit comment, whatever factory labels it carries', async () => {
   const f = setup();
-  const id = await imported(f, issue(1, { labels: ['factory', 'factory:project:p1', 'ui', 'factory:model:sonnet'] }));
-  f.provider.issues = [startable(1, { labels: ['factory', 'factory:project:p1', 'factory:start', 'ui', 'factory:model:sonnet'] })];
+  const id = await imported(f, issue(1, { labels: ['factory', 'ui', 'factory:model:sonnet'] }));
+  f.provider.issues = [startable(1, { labels: ['factory', 'factory:queued', 'ui', 'factory:model:sonnet'] })];
   await f.sync.sync();
   assert.equal(f.tasks.get(id).status, 'queued');
   // Same content, with factory labels in another case and order, a closed issue and a project label changed.
   f.provider.issues = [
-    issue(1, { isOpen: false, labels: ['Factory:Model:Sonnet', 'FACTORY', 'factory:project:other', 'ui', 'ui', 'factory:status:done', 'factory:start'] }),
+    issue(1, { isOpen: false, labels: ['Factory:Model:Sonnet', 'FACTORY', 'factory:project:other', 'ui', 'ui', 'factory:done', 'factory:queued'] }),
   ];
   for (let pass = 0; pass < 3; pass++) await f.sync.sync();
   assert.deepEqual(lateEdits(f, issue(1).url), []);
@@ -600,7 +609,7 @@ test('edits before start get no late-edit comment', async () => {
   f.provider.issues = [issue(1, { title: 'Edited in draft' })];
   await f.sync.sync();
   f.tasks.update(id, 'reviewer', (task) => requestClarification(task, 'What?'));
-  f.provider.issues = [issue(1, { title: 'Edited in draft', labels: ['factory', 'factory:project:p1', 'ui'] })];
+  f.provider.issues = [issue(1, { title: 'Edited in draft', labels: ['factory', 'ui'] })];
   await f.sync.sync();
   assert.deepEqual(lateEdits(f, issue(1).url), []);
   assert.deepEqual(f.tasks.get(id).labels, ['ui']);
@@ -618,7 +627,7 @@ test('a provider error on one issue changes neither its task nor the other issue
   await f.sync.sync();
   assert.deepEqual(f.tasks.get('t1'), before);
   assert.deepEqual(f.provider.statusLabels(issue(1).url), []);
-  assert.deepEqual(f.provider.statusLabels(issue(2).url), ['factory:status:queued']);
+  assert.deepEqual(f.provider.statusLabels(issue(2).url), ['factory:queued']);
   assert.equal(lateEdits(f, issue(2).url).length, 1);
   assert.deepEqual(f.logged, [
     `issue sync: ${issue(1).url}: comment failed [redacted]`,
@@ -627,7 +636,7 @@ test('a provider error on one issue changes neither its task nor the other issue
   f.provider.failures.clear();
   f.provider.labelFailures.clear();
   await f.sync.sync();
-  assert.deepEqual(f.provider.statusLabels(issue(1).url), ['factory:status:queued']);
+  assert.deepEqual(f.provider.statusLabels(issue(1).url), ['factory:queued']);
   assert.equal(lateEdits(f, issue(1).url).length, 1);
   assert.deepEqual(f.tasks.get('t1'), before);
 });
@@ -715,7 +724,7 @@ test('a failed comment changes nothing on the task, is logged redacted and poste
   await f.sync.sync();
   assert.deepEqual(f.tasks.get(id), before);
   assert.deepEqual(reports(f), []);
-  assert.deepEqual(f.provider.statusLabels(issue(1).url), ['factory:status:input-required']);
+  assert.deepEqual(f.provider.statusLabels(issue(1).url), ['factory:input-required']);
   // The task-id comment, ensured by the issue's own sync, fails alike.
   const failure = `issue sync: ${issue(1).url}: comment failed [redacted]`;
   assert.deepEqual(f.logged, [failure, failure]);

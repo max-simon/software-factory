@@ -273,6 +273,21 @@ test('task providers are attached on creation and replaced as a whole on edit', 
   assert.deepEqual((await call('GET', '/projects/p2')).json.taskProviders, []);
 });
 
+test('a repository another project attaches is refused with 409 on creation and edit', async (t) => {
+  const { call } = await startApi(t);
+  const web = { provider: 'github-issues', repo: 'acme/web' };
+  assert.equal((await call('PATCH', '/projects/p1', { taskProviders: [web] })).status, 200);
+  const created = await call('POST', '/projects', { title: 'Billing', taskProviders: [{ ...web, repo: 'ACME/web' }] });
+  assert.equal(created.status, 409);
+  assert.equal(created.json.error.code, 'task_provider_taken');
+  assert.equal((await call('GET', '/projects')).json.length, 1);
+  const { id } = (await call('POST', '/projects', { title: 'Billing' })).json;
+  assert.equal((await call('PATCH', `/projects/${id}`, { taskProviders: [web] })).status, 409);
+  assert.deepEqual((await call('GET', `/projects/${id}`)).json.taskProviders, []);
+  // A project keeps its own attachment through an edit.
+  assert.equal((await call('PATCH', '/projects/p1', { title: 'Web', taskProviders: [web] })).status, 200);
+});
+
 test('project tasks lists only that project, in rank order', async (t) => {
   const { call } = await startApi(t);
   await call('POST', '/projects', { title: 'Billing' });

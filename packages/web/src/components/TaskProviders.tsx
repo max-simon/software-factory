@@ -24,12 +24,9 @@ export const hasUnaddedTaskProvider = (form: FormData): boolean =>
 export function TaskProviders({
   value,
   onChange,
-  projectId,
 }: {
   value: readonly TaskProviderAttachment[];
   onChange: (next: TaskProviderAttachment[]) => void;
-  /** Unset for a project not created yet. */
-  projectId?: string;
 }) {
   const [kind, setKind] = useState<TaskProviderKind>(taskProviderKinds[0]!);
   const [config, setConfig] = useState<Record<string, string>>({});
@@ -61,13 +58,12 @@ export function TaskProviders({
     event.preventDefault();
     add();
   };
-  const projectLabel = `factory:project:${projectId ?? '<project id>'}`;
-
   return (
     <fieldset className="field task-providers">
       <legend>Task providers</legend>
       <span className="hint">
-        Issues labelled <code>factory</code> and <code>{projectLabel}</code> in these sources become managed tasks of this project.
+        Issues labelled <code>factory</code> in these sources become managed tasks of this project; add <code>factory:queued</code>{' '}
+        to start one. A source belongs to one project only.
       </span>
       {value.length === 0 ? (
         <p className="muted task-providers-empty">None attached.</p>
