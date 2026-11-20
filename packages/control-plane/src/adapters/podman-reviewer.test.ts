@@ -103,10 +103,10 @@ test('reviewInput runs the image in its input role with the GitHub token and che
   await assert.rejects(setup(() => ({ stdout: '{"responses":{}}' })).reviewer.reviewInput(inputRequest), /must be an array/);
 });
 
-test('forwards the one credential a claude task gets: the subscription token when both are set', async () => {
+test('forwards the one credential a task gets: the subscription token when both are set', async () => {
   const required = { GITHUB_TOKEN: 'g', FACTORY_GIT_USER_NAME: 'bot', FACTORY_GIT_USER_EMAIL: 'bot@example.com' };
   const forwarded = async (env: Record<string, string>): Promise<string[]> => {
-    const { reviewer, calls } = setup(() => ({ stdout: '{"verdict":"ready","comment":"fine"}' }), undefined, loadConfig(env).agentCredentials.claude!);
+    const { reviewer, calls } = setup(() => ({ stdout: '{"verdict":"ready","comment":"fine"}' }), undefined, loadConfig(env).agentCredential);
     await reviewer.reviewSpec(request);
     return calls[0]!.args.flatMap((arg, i) => (calls[0]!.args[i - 1] === '--env' && !arg.includes('=') ? [arg] : []));
   };

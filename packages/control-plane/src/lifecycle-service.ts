@@ -5,7 +5,6 @@ import {
   markFailed,
   markInProgress,
   markWorking,
-  moveAgentConsole,
   recordPrReview,
   releaseWorker,
   requireInputForPullRequests,
@@ -40,11 +39,6 @@ export class LifecycleService {
   /** The worker is done; a task still in progress fails with `reason`. */
   releaseWorker(id: string, reason: string): Task {
     return this.#tasks.update(id, 'system', (task) => releaseWorker(task, reason, this.#tasks.now()));
-  }
-
-  /** A notified or restarted execution server may publish its agent console on another port. */
-  moveAgentConsole(id: string, url: string): Task {
-    return this.#tasks.update(id, 'system', (task) => moveAgentConsole(task, url));
   }
 
   detachExecution(id: string): Task {

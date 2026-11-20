@@ -34,21 +34,6 @@ test('rejects any other model', () => {
   }
 });
 
-test('the agent defaults to claude and may be opencode', () => {
-  assert.equal(loadRunnerConfig(complete).agent, 'claude');
-  assert.equal(loadRunnerConfig({ ...complete, FACTORY_AGENT: ' ' }).agent, 'claude');
-  assert.equal(loadRunnerConfig({ ...complete, FACTORY_AGENT: 'opencode' }).agent, 'opencode');
-  assert.throws(
-    () => loadRunnerConfig({ ...complete, FACTORY_AGENT: 'codex' }),
-    (error) => error instanceof ConfigError && /FACTORY_AGENT must be one of claude, opencode/.test(error.message),
-  );
-});
-
-test('the opencode console password is optional', () => {
-  assert.equal('opencodePassword' in loadRunnerConfig(complete), false);
-  assert.equal(loadRunnerConfig({ ...complete, FACTORY_OPENCODE_PASSWORD: 'pw' }).opencodePassword, 'pw');
-});
-
 test('the repository is optional', () => {
   const { FACTORY_REPO_URL, ...withoutRepo } = complete;
   assert.equal('repoUrl' in loadRunnerConfig(withoutRepo), false);

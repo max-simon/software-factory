@@ -1,10 +1,10 @@
-import { isEditable, type NewTask, type Project, type TaskAgent, type TaskModel } from '@factory/core';
+import { isEditable, type NewTask, type Project, type TaskModel } from '@factory/core';
 import { useState, type FormEvent } from 'react';
 import { api } from '../api.ts';
 import { DependencyPicker } from '../components/Dependencies.tsx';
 import { ErrorText } from '../components/ErrorText.tsx';
 import { useAction, usePolling } from '../hooks.ts';
-import { agentLabels, href, parseLabels, type TaskView } from '../model.ts';
+import { href, parseLabels, type TaskView } from '../model.ts';
 
 const open = (task: TaskView) => {
   location.hash = href.task(task.id);
@@ -16,7 +16,6 @@ export function NewTask({ projectId, project }: { projectId: string; project: Pr
   const [baseBranch, setBaseBranch] = useState('');
   const [isSupervised, setSupervised] = useState(false);
   const [model, setModel] = useState<TaskModel>('opus');
-  const [agent, setAgent] = useState<TaskAgent>('claude');
   const [dependsOn, setDependsOn] = useState<string[]>([]);
   const { data: projectTasks } = usePolling(() => api.listProjectTasks(projectId), `new-task-${projectId}`);
   const { isBusy, error, run } = useAction();
@@ -30,7 +29,6 @@ export function NewTask({ projectId, project }: { projectId: string; project: Pr
       ...common,
       autonomyMode: isSupervised ? 'supervised' : 'autonomous',
       model,
-      agent,
       ...(repoUrl.trim() && { repoUrl: repoUrl.trim() }),
       ...(repoUrl.trim() && baseBranch.trim() && { baseBranch: baseBranch.trim() }),
       ...(dependsOn.length > 0 && { dependsOn }),
@@ -68,16 +66,6 @@ export function NewTask({ projectId, project }: { projectId: string; project: Pr
         <select value={model} onChange={(e) => setModel(e.target.value as TaskModel)}>
           <option value="opus">Opus</option>
           <option value="sonnet">Sonnet</option>
-        </select>
-      </label>
-      <label className="field">
-        <span>Agent</span>
-        <select value={agent} onChange={(e) => setAgent(e.target.value as TaskAgent)}>
-          {Object.entries(agentLabels).map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
         </select>
       </label>
       {projectTasks && projectTasks.length > 0 && (

@@ -80,7 +80,7 @@ export class Dispatcher {
    * One pass: remove orphaned execution servers when a sweep is due, restart
    * silent workers, notify idle workers that have work, start queued tasks
    * whose dependencies are done in rank order while fewer workers than the
-   * limit are working and no task of their agent waits for a usage limit,
+   * limit are working and no task waits for a usage limit,
    * mark ready tasks, and those waiting for the engineer on their pull
    * requests only, done once none of their pull requests is open, and remove
    * execution servers no task needs.
@@ -94,9 +94,9 @@ export class Dispatcher {
     await this.#forEach(inProgress.filter((task) => needsNotify(task, now)), (task) => this.#notify(task));
     const all = tasks.list();
     const freeSlots = Math.max(0, maxRunning - all.filter(isWorking).length);
-    // Every task of an agent runs on the same credential, so a new one would only hit the same limit.
-    const limitedAgents = new Set(inProgress.filter((task) => isPausedForUsageLimit(task, now)).map((task) => task.agent));
-    const startable = tasks.list(['queued']).filter((task) => !isBlocked(task, all) && !limitedAgents.has(task.agent));
+    // Every task runs on the same credential, so a new one would only hit the same limit.
+    const isUsageLimited = inProgress.some((task) => isPausedForUsageLimit(task, now));
+    const startable = isUsageLimited ? [] : tasks.list(['queued']).filter((task) => !isBlocked(task, all));
     await this.#forEach(startable.slice(0, freeSlots), (task) => this.#dispatch(task));
     await this.#forEach(tasks.list(['ready', 'input_required']).filter(isSettleable), async (task) => {
       lifecycle.markDone(task.id);
@@ -150,7 +150,6 @@ export class Dispatcher {
         controlPlaneUrl,
         token,
         model: task.model,
-        agent: task.agent,
         ...(task.repoUrl && { repoUrl: task.repoUrl }),
         ...(task.baseBranch && { baseBranch: task.baseBranch }),
       });
@@ -177,7 +176,7 @@ export class Dispatcher {
     const { lifecycle, runtime } = this.#deps;
     lifecycle.markWorking(task.id);
     try {
-      this.#moveAgentConsole(task, await runtime.notify(task.execution!.id, task.agent));
+      await runtime.notify(task.execution!.id);
     } catch (error) {
       lifecycle.releaseWorker(task.id, `cannot notify execution server: ${this.#redact(describe(error))}`);
     }
@@ -193,13 +192,7 @@ export class Dispatcher {
     const { lifecycle, runtime } = this.#deps;
     if (!this.#isSilent(task)) return;
     lifecycle.releaseWorker(task.id, 'execution server stopped sending heartbeats before the task finished');
-    this.#moveAgentConsole(task, await runtime.restart(task.execution!.id, task.agent));
-  }
-
-  #moveAgentConsole(task: Task, { agentConsoleUrl }: { agentConsoleUrl?: string }): void {
-    if (agentConsoleUrl !== undefined && agentConsoleUrl !== task.execution?.console?.url) {
-      this.#deps.lifecycle.moveAgentConsole(task.id, agentConsoleUrl);
-    }
+    await runtime.restart(task.execution!.id);
   }
 
   /** Silent: no heartbeat within the timeout, or none since it was started or notified within the startup timeout. */

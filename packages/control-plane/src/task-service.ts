@@ -1,7 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import {
   addFollowUp,
-  agentConsoleOf,
   answerQuestion,
   assertDeletable,
   assertValidDependencies,
@@ -183,13 +182,6 @@ export class TaskService {
     return this.#tasks.update(id, by, (task) =>
       addFollowUp(task, { id: this.#tasks.newItemId('f'), createdAt: this.#tasks.now(), message, authorId: by.userId }),
     );
-  }
-
-  /** Where to open the agent's web console of a task's running execution server, and how to sign in. */
-  agentConsole(id: string): { url: string; username: string; password: string } {
-    const console = agentConsoleOf(this.#tasks.get(id));
-    // opencode fixes the user name of its Basic auth.
-    return { url: console.url, username: 'opencode', password: console.password };
   }
 
   /** What the agent did in its current turn, oldest first. */

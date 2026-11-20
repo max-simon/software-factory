@@ -75,7 +75,6 @@ describe('createTask', () => {
     assert.equal(task.updatedAt, meta.now);
     assert.equal(task.autonomyMode, 'autonomous');
     assert.equal(task.model, 'opus');
-    assert.equal(task.agent, 'claude');
     assert.deepEqual(task.labels, []);
     assert.equal(task.status, 'draft');
     assert.equal(task.rank, 3);
@@ -102,7 +101,6 @@ describe('createTask', () => {
         autonomyMode: 'supervised',
         baseBranch: 'dev',
         model: 'sonnet',
-        agent: 'opencode',
       },
       meta,
     );
@@ -110,7 +108,6 @@ describe('createTask', () => {
     assert.equal(task.autonomyMode, 'supervised');
     assert.equal(task.baseBranch, 'dev');
     assert.equal(task.model, 'sonnet');
-    assert.equal(task.agent, 'opencode');
   });
 });
 
@@ -290,7 +287,7 @@ describe('lifecycle', () => {
 describe('cancelTask', () => {
   it('fails a queued or running task with a reason and drops its token and execution', () => {
     for (const status of ['queued', 'in_progress', 'input_required', 'ready'] as const) {
-      const execution = { id: 'c', tokenHash: 'h', worker: { state: 'working' as const, since: 'x' }, console: { url: 'u', password: 'p' } };
+      const execution = { id: 'c', tokenHash: 'h', worker: { state: 'working' as const, since: 'x' } };
       const task = cancelTask(taskIn(status, { execution }), '2026-01-02T00:00:00Z');
       assert.equal(task.status, 'failed');
       assert.equal(task.failureReason, 'Cancelled by the engineer');
@@ -359,7 +356,6 @@ describe('restartTask', () => {
         worker: { state: 'idle', since: 'x' },
         workAcceptedAt: 'x',
         lastHeartbeat: { at: 'x', phase: 'working' },
-        console: { url: 'http://127.0.0.1:1', password: 'pw' },
       },
     });
 
@@ -367,7 +363,7 @@ describe('restartTask', () => {
     for (const status of ['in_progress', 'input_required', 'ready', 'done', 'failed'] as const) {
       const before = ran(status);
       const task = restartTask(before);
-      const { id, projectId, title, specification, labels, autonomyMode, model, agent, repoUrl: repo, rank, dependsOn, createdAt, updatedAt, metrics } = before;
+      const { id, projectId, title, specification, labels, autonomyMode, model, repoUrl: repo, rank, dependsOn, createdAt, updatedAt, metrics } = before;
       assert.deepEqual(task, {
         id,
         createdAt,
@@ -378,7 +374,6 @@ describe('restartTask', () => {
         labels,
         autonomyMode,
         model,
-        agent,
         repoUrl: repo,
         rank,
         dependsOn,
@@ -402,7 +397,7 @@ describe('restartTask', () => {
 });
 
 describe('detachExecution', () => {
-  it('removes the execution with token, worker state and console and keeps the rest', () => {
+  it('removes the execution with token and worker state and keeps the rest', () => {
     const task = taskIn('in_progress', { execution: { id: 'c', tokenHash: 'h', worker: { state: 'idle', since: '2026-01-02T00:00:00Z' } } });
     const detached = detachExecution(task);
     const { execution: _removed, ...rest } = task;

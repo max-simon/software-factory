@@ -5,19 +5,13 @@ export interface BridgeConfig {
   taskToken: string;
 }
 
-/** The coding agent that works on the task. */
-export type AgentKind = 'claude' | 'opencode';
-
 export interface RunnerConfig extends BridgeConfig {
   taskId: string;
-  agent: AgentKind;
   repoUrl?: string;
   baseBranch?: string;
   model: TaskModel;
   gitUserName: string;
   gitUserEmail: string;
-  /** Set by the control plane when it publishes opencode's web console for engineers. */
-  opencodePassword?: string;
 }
 
 export class ConfigError extends Error {
@@ -47,13 +41,11 @@ export function loadRunnerConfig(env: NodeJS.ProcessEnv = process.env): RunnerCo
   return {
     ...loadBridgeConfig(env),
     taskId: env.FACTORY_TASK_ID!,
-    agent: parseAgent(env.FACTORY_AGENT),
     ...(env.FACTORY_REPO_URL?.trim() ? { repoUrl: env.FACTORY_REPO_URL } : {}),
     ...(env.FACTORY_BASE_BRANCH?.trim() ? { baseBranch: env.FACTORY_BASE_BRANCH } : {}),
     model: parseModel(env.FACTORY_MODEL),
     gitUserName: env.GIT_USER_NAME!,
     gitUserEmail: env.GIT_USER_EMAIL!,
-    ...(env.FACTORY_OPENCODE_PASSWORD?.trim() ? { opencodePassword: env.FACTORY_OPENCODE_PASSWORD } : {}),
   };
 }
 
@@ -66,17 +58,6 @@ function parseModel(value: string | undefined): TaskModel {
     throw new ConfigError(`FACTORY_MODEL must be one of ${models.join(', ')}, got ${JSON.stringify(value)}`);
   }
   return model as TaskModel;
-}
-
-const agents: readonly AgentKind[] = ['claude', 'opencode'];
-
-/** Unset or empty means `claude`. */
-function parseAgent(value: string | undefined): AgentKind {
-  const agent = value?.trim() || 'claude';
-  if (!agents.includes(agent as AgentKind)) {
-    throw new ConfigError(`FACTORY_AGENT must be one of ${agents.join(', ')}, got ${JSON.stringify(value)}`);
-  }
-  return agent as AgentKind;
 }
 
 function missingVariables(env: NodeJS.ProcessEnv, names: readonly string[]): string[] {

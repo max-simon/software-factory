@@ -9,7 +9,7 @@ Detail behind the [README](../README.md): packages, task lifecycle, the worker p
 | `packages/core` | Domain model and rules: task and project types (a started task carries its `Execution`: token hash, worker state, heartbeat, console), the views each audience gets (`TaskView`, `AgentTaskView`), the status machine, pure operations (`startTask`, `addDecision`, `markReady`, …) the worker lifecycle (`pendingWork`, `acceptWork`, `releaseWorker`, …), task and pull request events (`pullRequestEvents` derives the latter from two saved versions of a task), users and identity (`User`, `ExternalIdentity`, `Principal`, `createUser`, …), personal access token metadata and its validation (`AccessToken`, `parseAccessTokenName`, …), the task provider registry and attachments of a project (`taskProviderTypes`, `parseTaskProviders`, …), and the ports (`TaskRepository`, `ProjectRepository`, `UserRepository`, `AccessTokenRepository`, `Authenticator`, `PasswordHasher`, `ExecutionRuntime`, `PullRequestReader`, `PullRequestWriter`, `Reviewer`, `IssueProvider`). No I/O. |
 | `packages/control-plane` | HTTP server on `127.0.0.1:4700`. Login (`/auth/*`), engineer API (`/projects`, `/tasks`) and MCP endpoint (`/mcp`), both behind a browser session or a personal access token; agent API (`/agent/*`, token-authenticated); static web UI. Reads go through the `TaskStore`; changes through one service per actor: `TaskService` (engineer), `AgentService` (agent and runner), `LifecycleService` (the dispatcher). Adapters: SQLite repositories (`node:sqlite`), `PodmanRuntime`, `PodmanReviewer`, `GitHubPullRequests` and `GitHubIssues` (REST API). The `Dispatcher` reconciles every 2 s; the `PullRequestObserver` polls GitHub every minute; `Hooks` react to task and pull request events. |
 | `packages/reviewer` | The reviewer image, with three roles picked by its first argument, each with its own system prompt. `spec` reads one task specification with its project and the project's other tasks; `input` reads a supervised task waiting for input, with its open questions and approval requests, and may read the repository and pull requests with `gh` and `git` for context; `pr` reads one pull request reference (URL, head commit, the task it was opened for) and lets the model read the pull request itself with `gh` and `git`. Each takes the request as JSON on stdin, runs one `claude -p` turn with structured output (without tools for `spec`), and prints the answer as JSON on stdout. |
-| `packages/executor` | The container image. Its runner asks the control plane for work, clones the repository, runs one agent turn per piece of work and, once there is none, waits for a nudge on its doorbell; the session state stays on the container's disk, so a restarted runner resumes it. Two agent adapters behind the `AgentSession` port: the `claude` CLI (one process per turn) and `opencode serve` (one HTTP session). The agent reports through a stdio MCP bridge (`report_plan`, `report_decision`, `ask_question`, `report_ready`, …). |
+| `packages/executor` | The container image. Its runner asks the control plane for work, clones the repository, runs one agent turn per piece of work and, once there is none, waits for a nudge on its doorbell; the session state stays on the container's disk, so a restarted runner resumes it. The agent is the `claude` CLI (one process per turn) behind the `AgentSession` port. The agent reports through a stdio MCP bridge (`report_plan`, `report_decision`, `ask_question`, `report_ready`, …). |
 | `packages/web` | React + Vite UI: login page, account page (display name, password, access tokens), project sidebar, per-project board and dashboard with its open pull requests, task detail with live activity, timeline, question and approval forms, follow-ups. Polls the engineer API. |
 | `packages/mcp` | Stateless Streamable HTTP MCP handler, mounted by the control plane at `/mcp`, that lets an MCP client create and inspect projects and tasks through the engineer API, passing the caller's session cookie and `Authorization` header on to it. |
 
@@ -128,7 +128,7 @@ the task is done or its follow-up window ends.
 
 The runner, not the agent, turns the agent's output into short lines
 ("Running Bash: yarn test", "Writing: …" with the start of a response): it
-parses the claude CLI's `stream-json` events or opencode's event stream, so
+parses the claude CLI's `stream-json` events, so
 the agent spends no tokens on it. A heartbeat carries only the latest line,
 and the control plane stores only the latest heartbeat of a task (one row,
 replaced). For the engineer to follow a turn, the runner also batches every
@@ -147,13 +147,13 @@ activity"), hiding the section when there are none.
 When the agent's account hits a usage limit, the task pauses instead of
 failing and continues by itself once the limit resets.
 
-- **Detection (claude only).** The claude adapter watches the CLI's
+- **Detection.** The claude adapter watches the CLI's
   `stream-json` events for `rate_limit_event`: its `rate_limit_info.status`
   is `allowed`, `allowed_warning` or `rejected`, and `resetsAt` is when the
   limit resets, in Unix seconds. A turn that ends in an error (non-zero exit,
   or a `result` event with `is_error`) after the latest such event said
   `rejected` hit the limit; the reset time comes from that event. The message
-  text is not parsed. opencode turns that hit a limit fail as before.
+  text is not parsed.
 - **Report.** The runner sends `POST /agent/usage-limit` with `resetsAt` (UTC
   ISO timestamp, optional) instead of a failure. The control plane records it
   on the execution as `usageLimit` (`since`, `resetsAt`, `resumesAt`) and the
@@ -163,9 +163,9 @@ failing and continues by itself once the limit resets.
   session resumed too early only hits the limit again and pauses once more.
   A report that cannot be sent fails the task with the CLI's error.
 - **Pause.** Until `resumesAt`, the task has no work: the runner's request for
-  work idles its worker without failing the task, and follow-ups wait. Queued
-  tasks of the same agent are not started meanwhile, since every task of an
-  agent runs on the same credential; other agents' tasks start as usual.
+  work idles its worker without failing the task, and follow-ups wait. No
+  queued task is started meanwhile, since every task runs on the same
+  credential.
 - **Resume.** From `resumesAt` the task has work even if nothing new arrived,
   so the dispatcher notifies its idle worker as for any work. Everything is
   derived from the stored task, so a restarted control plane resumes it too.
@@ -735,7 +735,7 @@ issue first, so the sync does not import it again:
   `packages/core`, tested without I/O. Services load a task, apply one
   operation, save it. Execution state lives apart from the task's content, so
   a view hides one field, not a list of them. The runtime and the coding agent sit behind ports, so
-  Podman and claude/opencode can be swapped.
+  Podman and claude can be swapped.
 - **Projects group tasks.** A project has a title and a markdown description that
   the agent reads; agents can look at the other tasks of their project to avoid
   duplicate or conflicting work. Board ranks are global, so dispatch order holds
@@ -770,10 +770,9 @@ names the problem and the intended fix; only the first is mitigated so far.
    the host's loopback, and the browser guard only checks the `Host` and
    `Origin` headers, which a client sets itself. An agent that sent
    `Host: 127.0.0.1` could approve its own approval requests, turn on
-   auto-merge, cancel, delete or follow up on other tasks, and read other
-   tasks' agent console passwords, and the same held for `/mcp`. Now every
-   engineer route and `/mcp` need a session cookie or a personal access
-   token, which containers do not have; they can only try to log in, which is
+   auto-merge, cancel, delete or follow up on other tasks, and the same held
+   for `/mcp`. Now every engineer route and `/mcp` need a session cookie or a
+   personal access token, which containers do not have; they can only try to log in, which is
    throttled. An agent token sent to the engineer API is refused like any
    unknown bearer token. MCP clients that cannot send the cookie (e.g. `claude
    mcp add --transport http`) send a personal access token as `Authorization`

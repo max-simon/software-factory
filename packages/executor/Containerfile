@@ -3,7 +3,6 @@
 FROM docker.io/library/node:26.13.1-trixie-slim
 
 ARG CLAUDE_CODE_VERSION=2.1.322
-ARG OPENCODE_VERSION=2.2.7
 ARG COREPACK_VERSION=0.36.0
 ARG MISE_VERSION=2026.11.7
 ARG MISE_SHA256_AMD64=8f5426d9971eaf713b37509749174ca69cf2f08b8b25e389168dcfcab9cd1a4d
@@ -34,9 +33,8 @@ RUN arch="$(dpkg --print-architecture)" \
  && echo "${sum}  /usr/local/bin/mise" | sha256sum -c - \
  && chmod 755 /usr/local/bin/mise
 
-# Both agents are installed; FACTORY_AGENT picks one per container.
 # Corepack is no longer bundled with Node 26; it provides the pinned Yarn.
-RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" "@opencode/cli@${OPENCODE_VERSION}" "corepack@${COREPACK_VERSION}" \
+RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" "corepack@${COREPACK_VERSION}" \
  && corepack enable \
  && npm cache clean --force
 
@@ -54,8 +52,8 @@ COPY packages/executor packages/executor
 RUN yarn workspaces focus --production @factory/executor \
  && rm -rf "$(yarn config get cacheFolder)" /root/.cache
 
-# Skills the control plane names in follow-ups. Both agents read user skills
-# from ~/.claude/skills (opencode as a Claude-compatible location).
+# Skills the control plane names in follow-ups. claude reads user skills from
+# ~/.claude/skills.
 COPY --chown=node:node packages/executor/skills /home/node/.claude/skills
 
 # claude refuses --dangerously-skip-permissions as root; the runner clones into

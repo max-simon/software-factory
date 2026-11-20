@@ -16,7 +16,6 @@ import {
   type IssueProvider,
   type NewQuestion,
   type Task,
-  type TaskAgent,
 } from '@factory/core';
 import { SqliteProjectRepository } from '../adapters/sqlite-project-repository.ts';
 import type { SqliteUserRepository } from '../adapters/sqlite-user-repository.ts';
@@ -44,8 +43,8 @@ class FakeRuntime implements ExecutionRuntime {
   remove = async (executionId: string): Promise<void> => {
     this.removed.push(executionId);
   };
-  notify = async () => ({});
-  restart = async () => ({});
+  notify = async () => {};
+  restart = async () => {};
 }
 
 interface Api {
@@ -60,13 +59,7 @@ interface Api {
   call: (method: string, path: string, body?: unknown, cookie?: string) => Promise<{ status: number; json: any }>;
 }
 
-/** `unavailableAgent` defaults to every agent being available. */
-async function startApi(
-  t: TestContext,
-  unavailableAgent?: (agent: TaskAgent) => string | undefined,
-  reviews?: ReviewTracker,
-  issues?: IssueProvider,
-): Promise<Api> {
+async function startApi(t: TestContext, reviews?: ReviewTracker, issues?: IssueProvider): Promise<Api> {
   const repository = new SqliteTaskRepository(':memory:');
   const runtime = new FakeRuntime();
   let counter = 0;
@@ -87,7 +80,7 @@ async function startApi(
     now: () => fixedNow,
   });
   projects.create({ title: 'Login', description: 'Sign-in for the app' }, ada);
-  const server = createServer(engineerRoutes(tasks, service, projects, unavailableAgent, reviews), { authenticate }).listen(0, '127.0.0.1');
+  const server = createServer(engineerRoutes(tasks, service, projects, reviews), { authenticate }).listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', resolve));
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -114,7 +107,6 @@ test('create returns 201 with defaults and no tokenHash', async (t) => {
   assert.equal(json.status, 'draft');
   assert.equal(json.autonomyMode, 'autonomous');
   assert.equal(json.model, 'opus');
-  assert.equal(json.agent, 'claude');
   assert.deepEqual(json.labels, []);
   assert.equal(json.createdAt, fixedNow);
   assert.equal('tokenHash' in json, false);
@@ -132,35 +124,11 @@ test('create accepts a task without repository, but not a base branch without on
 
 test('create keeps optional fields', async (t) => {
   const { call } = await startApi(t);
-  const { json } = await call('POST', '/tasks', { ...supervisedTask, labels: ['a'], baseBranch: 'dev', model: 'sonnet', agent: 'opencode' });
+  const { json } = await call('POST', '/tasks', { ...supervisedTask, labels: ['a'], baseBranch: 'dev', model: 'sonnet' });
   assert.equal(json.autonomyMode, 'supervised');
   assert.deepEqual(json.labels, ['a']);
   assert.equal(json.baseBranch, 'dev');
   assert.equal(json.model, 'sonnet');
-  assert.equal(json.agent, 'opencode');
-});
-
-test('create refuses an agent without a usable credential with 400, and only on creation', async (t) => {
-  const { call } = await startApi(t, (agent) =>
-    agent === 'opencode' ? 'agent opencode needs ANTHROPIC_API_KEY, which is not set' : undefined,
-  );
-  const refused = await call('POST', '/tasks', { ...validTask, agent: 'opencode' });
-  assert.equal(refused.status, 400);
-  assert.deepEqual(refused.json.error, {
-    code: 'invalid_request',
-    message: 'agent opencode needs ANTHROPIC_API_KEY, which is not set',
-  });
-  assert.deepEqual((await call('GET', '/tasks')).json, []);
-  const created = await call('POST', '/tasks', validTask);
-  assert.equal(created.status, 201);
-  assert.equal(created.json.agent, 'claude');
-});
-
-test('create checks the default agent too', async (t) => {
-  const { call } = await startApi(t, (agent) => `no credential for ${agent}`);
-  const { status, json } = await call('POST', '/tasks', validTask);
-  assert.equal(status, 400);
-  assert.equal(json.error.message, 'no credential for claude');
 });
 
 test('create rejects invalid bodies with 400', async (t) => {
@@ -173,7 +141,6 @@ test('create rejects invalid bodies with 400', async (t) => {
     ['bad autonomyMode', { ...validTask, autonomyMode: 'reckless' }],
     ['bad model', { ...validTask, model: 'haiku' }],
     ['non-string model', { ...validTask, model: 1 }],
-    ['bad agent', { ...validTask, agent: 'codex' }],
     ['non-string labels', { ...validTask, labels: [1, 2] }],
     ['non-JSON body', '{not json'],
     ['array body', []],
@@ -353,24 +320,6 @@ test('show never exposes a stored tokenHash', async (t) => {
   assert.equal(JSON.stringify(json).includes('secret-hash'), false);
 });
 
-test('the console password stays out of task views and has its own endpoint', async (t) => {
-  const { call, repository } = await startApi(t);
-  await call('POST', '/tasks', validTask);
-  const none = await call('GET', '/tasks/task-1/agent-console');
-  assert.equal(none.status, 409);
-  assert.equal(none.json.error.code, 'no_execution');
-
-  const agentConsole = { url: 'http://127.0.0.1:43021', password: 'console-secret' };
-  repository.save(markInProgress(startTask(repository.get('task-1')!), { tokenHash: 'h', executionId: 'c-1', agentConsole }, '2026-01-01T00:00:00.000Z'));
-  const shown = await call('GET', '/tasks/task-1');
-  const listed = await call('GET', '/tasks');
-  assert.equal(shown.json.execution.consoleUrl, 'http://127.0.0.1:43021');
-  assert.equal(JSON.stringify([shown.json, listed.json]).includes('console-secret'), false);
-  const { status, json } = await call('GET', '/tasks/task-1/agent-console');
-  assert.equal(status, 200);
-  assert.deepEqual(json, { url: 'http://127.0.0.1:43021', username: 'opencode', password: 'console-secret' });
-});
-
 test('edit updates a draft', async (t) => {
   const { call } = await startApi(t);
   await call('POST', '/tasks', validTask);
@@ -389,15 +338,13 @@ test('edit rejects unknown keys with 400', async (t) => {
   assert.equal(json.error.code, 'invalid_request');
 });
 
-test('edit rejects the agent and model, which are set on creation only', async (t) => {
+test('edit rejects the model, which is set on creation only', async (t) => {
   const { call } = await startApi(t);
   await call('POST', '/tasks', validTask);
-  for (const edit of [{ agent: 'opencode' }, { model: 'sonnet' }]) {
-    const { status, json } = await call('PATCH', '/tasks/task-1', edit);
-    assert.equal(status, 400);
-    assert.match(json.error.message, /^cannot edit (agent|model)$/);
-  }
-  assert.equal((await call('GET', '/tasks/task-1')).json.agent, 'claude');
+  const { status, json } = await call('PATCH', '/tasks/task-1', { model: 'sonnet' });
+  assert.equal(status, 400);
+  assert.equal(json.error.message, 'cannot edit model');
+  assert.equal((await call('GET', '/tasks/task-1')).json.model, 'opus');
 });
 
 test('edit after start returns 409 not_editable', async (t) => {
@@ -643,7 +590,7 @@ test('delete of a managed task whose issue labels cannot be removed answers 502 
     },
     comment: async () => {},
   };
-  const api = await startApi(t, undefined, undefined, issues);
+  const api = await startApi(t, undefined, issues);
   const external = { provider: 'github' as const, url: 'https://github.com/o/r/issues/7', key: 'o/r#7' };
   api.repository.insert(createTask(validTask, { id: 'm1', now: fixedNow, rank: 1, external }));
   const { status, json } = await api.call('DELETE', '/tasks/m1');
@@ -794,7 +741,7 @@ test('a clarification is settled back to draft, and requests are validated', asy
 
 test('task views show the spec, input and pull request reviews running right now', async (t) => {
   const reviews = new ReviewTracker();
-  const { call, repository } = await startApi(t, undefined, reviews);
+  const { call, repository } = await startApi(t, reviews);
   await call('POST', '/tasks', validTask);
   const url = 'https://github.com/acme/app/pull/1';
   const running = markInProgress(startTask(repository.get('task-1')!), { tokenHash: 'h', executionId: 'c-1' }, fixedNow);

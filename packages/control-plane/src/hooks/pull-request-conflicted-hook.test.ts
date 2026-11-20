@@ -14,7 +14,7 @@ function setup() {
   const services = createServices({
     repository: new SqliteTaskRepository(':memory:'),
     issues: noIssues,
-    runtime: { start: async () => ({ executionId: 'x' }), notify: async () => ({}), restart: async () => ({}), remove: async () => {}, listExecutions: async () => [] },
+    runtime: { start: async () => ({ executionId: 'x' }), notify: async () => {}, restart: async () => {}, remove: async () => {}, listExecutions: async () => [] },
     newId: () => 't1',
     newItemId: sequentialItemIds(),
   });

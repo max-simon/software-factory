@@ -6,7 +6,7 @@ export { pullRequestEvents } from './events.ts';
 export { managedComments, type ManagedComment } from './managed-comments.ts';
 export { toAgentTaskView, toProjectTaskSummary, toTaskView } from './views.ts';
 export { createProject, editProject, type NewProject, type Project, type ProjectEdit } from './project.ts';
-export { agentConsolePort, doorbellPort } from './ports.ts';
+export { doorbellPort } from './ports.ts';
 export {
   assertTaskProvidersUnclaimed,
   describeTaskProvider,
@@ -103,12 +103,10 @@ export {
 } from './operations.ts';
 export {
   acceptWork,
-  agentConsoleOf,
   heartbeatTimeoutMs,
   isPausedForUsageLimit,
   isWorking,
   markWorking,
-  moveAgentConsole,
   needsNotify,
   pendingFollowUps,
   pendingWork,

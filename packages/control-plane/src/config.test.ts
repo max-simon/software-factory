@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ConfigError, loadConfig, unavailableAgent } from './config.ts';
+import { ConfigError, loadConfig } from './config.ts';
 
 const complete = {
   ANTHROPIC_API_KEY: 'a',
@@ -24,7 +24,7 @@ test('applies defaults and keeps secrets out of the config', () => {
     sessionIdleHours: 12,
     sessionMaxDays: 7,
     credentials: ['ANTHROPIC_API_KEY'],
-    agentCredentials: { claude: 'ANTHROPIC_API_KEY', opencode: 'ANTHROPIC_API_KEY' },
+    agentCredential: 'ANTHROPIC_API_KEY',
   });
 });
 
@@ -37,25 +37,17 @@ test('names every missing required variable', () => {
   );
 });
 
-test('with only the API key, both agents use it', () => {
-  const config = loadConfig(complete);
-  assert.equal(unavailableAgent(config.agentCredentials, 'claude'), undefined);
-  assert.equal(unavailableAgent(config.agentCredentials, 'opencode'), undefined);
-});
-
-test('with only a subscription token, claude uses it and opencode cannot run', () => {
+test('with only a subscription token, the agent uses it', () => {
   const { ANTHROPIC_API_KEY, ...withoutKey } = complete;
   const config = loadConfig({ ...withoutKey, CLAUDE_CODE_OAUTH_TOKEN: 'o' });
   assert.deepEqual(config.credentials, ['CLAUDE_CODE_OAUTH_TOKEN']);
-  assert.deepEqual(config.agentCredentials, { claude: 'CLAUDE_CODE_OAUTH_TOKEN' });
-  assert.equal(unavailableAgent(config.agentCredentials, 'claude'), undefined);
-  assert.equal(unavailableAgent(config.agentCredentials, 'opencode'), 'agent opencode needs ANTHROPIC_API_KEY, which is not set');
+  assert.equal(config.agentCredential, 'CLAUDE_CODE_OAUTH_TOKEN');
 });
 
-test('with both credentials, claude gets only the subscription token and opencode only the API key', () => {
+test('with both credentials, the agent gets only the subscription token', () => {
   const config = loadConfig({ ...complete, CLAUDE_CODE_OAUTH_TOKEN: 'o' });
   assert.deepEqual(config.credentials, ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN']);
-  assert.deepEqual(config.agentCredentials, { claude: 'CLAUDE_CODE_OAUTH_TOKEN', opencode: 'ANTHROPIC_API_KEY' });
+  assert.equal(config.agentCredential, 'CLAUDE_CODE_OAUTH_TOKEN');
 });
 
 test('ignores blank credentials', () => {
@@ -72,10 +64,6 @@ test('reads the running limit and rejects anything but a positive integer', () =
   for (const value of ['0', '-1', '1.5', 'many']) {
     assert.throws(() => loadConfig({ ...complete, FACTORY_MAX_RUNNING: value }), ConfigError);
   }
-});
-
-test('no longer reads FACTORY_AGENT: the agent is chosen per task', () => {
-  assert.deepEqual(loadConfig({ ...complete, FACTORY_AGENT: 'codex' }), loadConfig(complete));
 });
 
 test('reads the follow-up window, 24 hours by default, and rejects anything but a non-negative number', () => {

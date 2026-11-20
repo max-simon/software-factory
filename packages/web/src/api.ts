@@ -51,13 +51,6 @@ export interface AccessTokenView {
   expiresAt?: string;
 }
 
-/** How to sign in to the agent's web console of a running task. */
-export interface AgentConsoleAccess {
-  url: string;
-  username: string;
-  password: string;
-}
-
 const project = (id: string) => `/projects/${encodeURIComponent(id)}`;
 const task = (id: string) => `/tasks/${encodeURIComponent(id)}`;
 
@@ -95,5 +88,4 @@ export const api = {
   review: (id: string, itemId: string, review: Review) =>
     call<TaskView>('POST', `${task(id)}/items/${encodeURIComponent(itemId)}/review`, review),
   sendFollowUp: (id: string, message: string) => call<TaskView>('POST', `${task(id)}/follow-ups`, { message }),
-  agentConsole: (id: string) => call<AgentConsoleAccess>('GET', `${task(id)}/agent-console`),
 };

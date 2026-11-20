@@ -1,4 +1,4 @@
-import type { TaskAgent, TaskModel } from '@factory/core';
+import type { TaskModel } from '@factory/core';
 
 export interface Config {
   port: number;
@@ -19,8 +19,8 @@ export interface Config {
   sessionMaxDays: number;
   /** Names of the Anthropic credentials that are set. */
   credentials: AnthropicCredential[];
-  /** The one credential forwarded to each agent; an agent without one cannot run. */
-  agentCredentials: Partial<Record<TaskAgent, AnthropicCredential>>;
+  /** The one credential forwarded to the claude CLI of execution servers and reviewers. */
+  agentCredential: AnthropicCredential;
 }
 
 /** An API key bills usage credits; an OAuth token from `claude setup-token` uses a Claude subscription. */
@@ -35,33 +35,14 @@ export class ConfigError extends Error {
 // our code.
 const anthropicCredentials: readonly AnthropicCredential[] = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
 
-/**
- * The credentials each agent works with, preferred first; only the first one
- * set is forwarded. The claude CLI silently prefers the API key when both are
- * set, which would bill credits although a subscription token was meant.
- * Anthropic allows subscription sign-in for its own clients only.
- */
-const usableCredentials: Record<TaskAgent, readonly AnthropicCredential[]> = {
-  claude: ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'],
-  opencode: ['ANTHROPIC_API_KEY'],
-};
-
-/** Why tasks of `agent` cannot run with these credentials, or undefined when they can. */
-export function unavailableAgent(agentCredentials: Config['agentCredentials'], agent: TaskAgent): string | undefined {
-  if (agentCredentials[agent] !== undefined) return undefined;
-  return `agent ${agent} needs ${usableCredentials[agent].join(' or ')}, which is not set`;
-}
-
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const missing = ['GITHUB_TOKEN', 'FACTORY_GIT_USER_NAME', 'FACTORY_GIT_USER_EMAIL'].filter((name) => !env[name]?.trim());
   const credentials = anthropicCredentials.filter((name) => env[name]?.trim());
   if (credentials.length === 0) missing.unshift(anthropicCredentials.join(' or '));
   if (missing.length > 0) throw new ConfigError(`missing environment variables: ${missing.join(', ')}`);
-  const agentCredentials: Config['agentCredentials'] = {};
-  for (const [agent, usable] of Object.entries(usableCredentials) as Array<[TaskAgent, readonly AnthropicCredential[]]>) {
-    const credential = usable.find((name) => credentials.includes(name));
-    if (credential) agentCredentials[agent] = credential;
-  }
+  // Only one is forwarded: the claude CLI silently prefers the API key when
+  // both are set, which would bill credits although a subscription token was meant.
+  const agentCredential = credentials.includes('CLAUDE_CODE_OAUTH_TOKEN') ? 'CLAUDE_CODE_OAUTH_TOKEN' : 'ANTHROPIC_API_KEY';
 
   const port = Number(env.FACTORY_PORT ?? '4700');
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -96,7 +77,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     sessionIdleHours,
     sessionMaxDays,
     credentials,
-    agentCredentials,
+    agentCredential,
   };
 }
 

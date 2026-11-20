@@ -80,42 +80,12 @@ test('exposes the project and task tools', async () => {
 
 test('set_task without id forwards the new task and returns the draft', async () => {
   fake = fakeTaskClient();
-  const input = { projectId: 'p1', title: 'Greet', specification: 'Say hi.', repoUrl: 'https://github.com/o/r', model: 'sonnet', agent: 'opencode' };
+  const input = { projectId: 'p1', title: 'Greet', specification: 'Say hi.', repoUrl: 'https://github.com/o/r', model: 'sonnet' };
   const result = await call('set_task', input);
   assert.equal(result.isError, false);
   assert.deepEqual(fake.created, [input]);
   assert.deepEqual(JSON.parse(result.text), fake.tasks[0]);
   assert.equal(fake.tasks[0]!.status, 'draft');
-});
-
-test('set_task takes an optional agent, set on creation only', async () => {
-  fake = fakeTaskClient();
-  const client = await connect();
-  const { tools } = await client.listTools();
-  await client.close();
-  const setTask = tools.find((tool) => tool.name === 'set_task')!;
-  const agent = (setTask.inputSchema.properties as Record<string, { enum?: string[] }>).agent;
-  assert.deepEqual(agent?.enum, ['claude', 'opencode']);
-  assert.ok(!setTask.inputSchema.required?.includes('agent'));
-  assert.match(setTask.description!, /model and agent are set on creation only/);
-});
-
-test('set_task relays the API refusing an agent without a credential', async () => {
-  fake = fakeTaskClient();
-  fake.createTask = async () => {
-    throw new ApiError(400, 'invalid_request', 'agent opencode needs ANTHROPIC_API_KEY, which is not set');
-  };
-  const result = await call('set_task', { projectId: 'p1', title: 'Greet', specification: 'Say hi.', agent: 'opencode' });
-  assert.deepEqual(result, { isError: true, text: 'invalid_request: agent opencode needs ANTHROPIC_API_KEY, which is not set' });
-});
-
-test('set_task with id passes an agent on for the API to refuse', async () => {
-  fake = fakeTaskClient([sampleTask({ id: 't1' })]);
-  fake.editTask = async () => {
-    throw new ApiError(400, 'invalid_request', 'cannot edit agent');
-  };
-  const result = await call('set_task', { id: 't1', agent: 'opencode' });
-  assert.deepEqual(result, { isError: true, text: 'invalid_request: cannot edit agent' });
 });
 
 test('set_task without id with start queues the task', async () => {
@@ -202,12 +172,11 @@ test('list_tasks returns a compact summary and filters by status and project', a
       title: 'Add a greeting',
       status: 'done',
       model: 'opus',
-      agent: 'claude',
       repoUrl: 'https://github.com/o/r',
       updatedAt: '2026-11-12T00:00:00.000Z',
       pullRequests: ['https://github.com/o/r/pull/1'],
     },
-    { id: 't2', projectId: 'p1', title: 'Add a greeting', status: 'draft', model: 'opus', agent: 'claude', updatedAt: '2026-11-12T00:00:00.000Z', pullRequests: [] },
+    { id: 't2', projectId: 'p1', title: 'Add a greeting', status: 'draft', model: 'opus', updatedAt: '2026-11-12T00:00:00.000Z', pullRequests: [] },
   ]);
   const drafts = JSON.parse((await call('list_tasks', { status: 'draft' })).text) as Array<{ id: string }>;
   assert.deepEqual(drafts.map((task) => task.id), ['t2']);

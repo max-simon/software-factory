@@ -26,7 +26,6 @@ export function sampleTask(overrides: Partial<AgentTaskView> = {}): AgentTaskVie
     labels: ['demo'],
     autonomyMode: 'supervised',
     model: 'opus',
-    agent: 'claude',
     repoUrl: 'https://github.com/o/r',
     status: 'in_progress',
     rank: 0,

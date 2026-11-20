@@ -3,8 +3,8 @@ import type { Execution, PullRequest, Task } from './task.ts';
 // What each audience sees of a task. Execution state is kept apart from the
 // task's content, so a view only decides what to show of the execution.
 
-/** The engineer's view of an execution: no token hash, and the console without its password. */
-export type ExecutionView = Omit<Execution, 'tokenHash' | 'console'> & { consoleUrl?: string };
+/** The engineer's view of an execution: no token hash. */
+export type ExecutionView = Omit<Execution, 'tokenHash'>;
 
 /** Which reviews run right now; they live in the control plane's memory, not in the task. */
 export interface ReviewState {
@@ -18,10 +18,7 @@ const noReviews: ReviewState = { isSpecUnderReview: () => false, isInputUnderRev
 /** The engineer's view of a pull request, with whether the reviewer judges it right now. */
 export type PullRequestView = PullRequest & { isUnderReview: boolean };
 
-/**
- * What the engineer API returns. The console password has its own endpoint, so
- * lists and polls do not spread it.
- */
+/** What the engineer API returns. */
 export type TaskView = Omit<Task, 'execution' | 'pullRequests'> & {
   execution?: ExecutionView;
   pullRequests: PullRequestView[];
@@ -48,8 +45,8 @@ export function toTaskView({ execution, ...task }: Task, reviews: ReviewState = 
     isInputUnderReview: reviews.isInputUnderReview(task.id),
   };
   if (execution === undefined) return view;
-  const { tokenHash: _hidden, console, ...shown } = execution;
-  return { ...view, execution: { ...shown, ...(console && { consoleUrl: console.url }) } };
+  const { tokenHash: _hidden, ...shown } = execution;
+  return { ...view, execution: shown };
 }
 
 export function toAgentTaskView({ execution: _hidden, ...task }: Task): AgentTaskView {

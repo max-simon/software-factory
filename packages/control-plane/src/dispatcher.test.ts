@@ -2,14 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   heartbeatTimeoutMs,
-  type AgentConsole,
   type ExecutionRuntime,
   type ExecutionSpec,
   type NewTask,
   type PullRequest,
   type StartedExecution,
   type Task,
-  type TaskAgent,
 } from '@factory/core';
 import { SqliteTaskRepository } from './adapters/sqlite-task-repository.ts';
 import { hashAgentToken } from './agent-token.ts';
@@ -22,16 +20,11 @@ class FakeRuntime implements ExecutionRuntime {
   started: ExecutionSpec[] = [];
   notified: string[] = [];
   restarted: string[] = [];
-  /** The agents `notify` and `restart` were told, in call order. */
-  agents: TaskAgent[] = [];
   removed: string[] = [];
   /** Execution servers `listExecutions` reports as existing. */
   existing: string[] = [];
   listCalls = 0;
   failOn: Partial<Record<'start' | 'notify' | 'restart' | 'remove' | 'listExecutions', string>> = {};
-  agentConsole: AgentConsole | undefined;
-  /** What `notify` and `restart` report as the console address. */
-  movedConsoleUrl: string | undefined;
 
   #maybeThrow(method: keyof FakeRuntime['failOn']): void {
     const message = this.failOn[method];
@@ -41,26 +34,17 @@ class FakeRuntime implements ExecutionRuntime {
   async start(spec: ExecutionSpec): Promise<StartedExecution> {
     this.#maybeThrow('start');
     this.started.push(spec);
-    const executionId = `c-${spec.taskId}`;
-    return { executionId, ...(this.agentConsole && { agentConsole: this.agentConsole }) };
+    return { executionId: `c-${spec.taskId}` };
   }
 
-  async notify(executionId: string, agent: TaskAgent): Promise<{ agentConsoleUrl?: string }> {
+  async notify(executionId: string): Promise<void> {
     this.#maybeThrow('notify');
     this.notified.push(executionId);
-    this.agents.push(agent);
-    return this.#movedConsole();
   }
 
-  async restart(executionId: string, agent: TaskAgent): Promise<{ agentConsoleUrl?: string }> {
+  async restart(executionId: string): Promise<void> {
     this.#maybeThrow('restart');
     this.restarted.push(executionId);
-    this.agents.push(agent);
-    return this.#movedConsole();
-  }
-
-  #movedConsole(): { agentConsoleUrl?: string } {
-    return this.movedConsoleUrl === undefined ? {} : { agentConsoleUrl: this.movedConsoleUrl };
   }
 
   async remove(executionId: string): Promise<void> {
@@ -128,15 +112,11 @@ const newTask = (overrides: Partial<NewTask> = {}): NewTask => ({
 const queued = ({ service }: Fixture, overrides: Partial<NewTask> = {}): Task =>
   service.start(service.create(newTask(overrides), ada).id, ada);
 
-/**
- * A started task in `status`; its worker stays working unless `isIdle`, which needs a status the agent reported.
- * An opencode task when the runtime gives an agent console.
- */
-function inStatus({ tasks, service, agent, lifecycle, runtime }: Fixture, status: StartedStatus, executionId: string, isIdle = false): Task {
-  const { agentConsole } = runtime;
-  const { id } = service.create(newTask({ autonomyMode: 'supervised', ...(agentConsole && { agent: 'opencode' as const }) }), ada);
+/** A started task in `status`; its worker stays working unless `isIdle`, which needs a status the agent reported. */
+function inStatus({ tasks, service, agent, lifecycle }: Fixture, status: StartedStatus, executionId: string, isIdle = false): Task {
+  const { id } = service.create(newTask({ autonomyMode: 'supervised' }), ada);
   service.start(id, ada);
-  lifecycle.markInProgress(id, { tokenHash: `hash-${id}`, executionId, ...(agentConsole && { agentConsole }) });
+  lifecycle.markInProgress(id, { tokenHash: `hash-${id}`, executionId });
   if (status === 'input_required') agent.askQuestion(id, { problem: 'p?', type: 'text', options: [] });
   if (status === 'ready' || status === 'done') agent.markReady(id);
   if (status === 'done') lifecycle.markDone(id);
@@ -172,7 +152,6 @@ test('starts an execution server for a queued task, marks it in progress and its
   assert.equal(spec.repoUrl, task.repoUrl);
   assert.equal(spec.baseBranch, 'develop');
   assert.equal(spec.model, 'opus');
-  assert.equal(spec.agent, 'claude');
   assert.equal(spec.controlPlaneUrl, 'http://host.containers.internal:8080');
   assert.match(spec.token, /^[0-9a-f]{64}$/);
 
@@ -182,21 +161,6 @@ test('starts an execution server for a queued task, marks it in progress and its
   assert.equal(updated.execution?.tokenHash, hashAgentToken(spec.token));
   assert.deepEqual(updated.execution?.worker, { state: 'working', since: '2026-11-12T10:00:00.000Z' });
   assert.ok(!JSON.stringify(updated).includes(spec.token));
-});
-
-test('keeps the agent console of the started execution server until it is removed', async () => {
-  const f = setup();
-  f.runtime.agentConsole = { url: 'http://127.0.0.1:43021', password: 'pw' };
-  const task = queued(f);
-  await f.dispatcher.reconcile();
-  const started = f.tasks.get(task.id);
-  assert.deepEqual(started.execution?.console, { url: 'http://127.0.0.1:43021', password: 'pw' });
-
-  f.agent.markReady(task.id);
-  f.lifecycle.markDone(task.id);
-  await f.dispatcher.reconcile();
-  const done = f.tasks.get(task.id);
-  assert.equal(done.execution, undefined);
 });
 
 test('starts queued tasks in rank order', async () => {
@@ -254,12 +218,11 @@ test('a blocked task takes no slot from the queued tasks ranked below it', async
   assert.equal(f.tasks.get(blocked.id).status, 'queued');
 });
 
-test('passes the task model and agent to the execution server', async () => {
+test('passes the task model to the execution server', async () => {
   const f = setup();
-  queued(f, { model: 'sonnet', agent: 'opencode' });
+  queued(f, { model: 'sonnet' });
   await f.dispatcher.reconcile();
   assert.equal(f.runtime.started[0]!.model, 'sonnet');
-  assert.equal(f.runtime.started[0]!.agent, 'opencode');
 });
 
 test('omits baseBranch and repoUrl from the spec when the task has none', async () => {
@@ -306,7 +269,6 @@ test('fails the task for its silence before the restarted runner can ask for wor
   f.advance(silence);
   f.runtime.restart = async () => {
     f.agent.requestWork(f.tasks.get(task.id));
-    return {};
   };
   await f.dispatcher.reconcile();
   assert.match(f.tasks.get(task.id).failureReason!, /stopped sending heartbeats/);
@@ -441,25 +403,24 @@ test('notifies an idle worker once the last question is answered', async () => {
   assert.deepEqual(f.runtime.notified, ['c1']);
 });
 
-test('a task paused for a usage limit idles, holds queued tasks of its agent and is notified once the limit resets', async () => {
+test('a task paused for a usage limit idles, holds every queued task and is notified once the limit resets', async () => {
   const f = setup();
   const paused = inStatus(f, 'in_progress', 'c1');
   f.agent.acceptWork(paused.id, []);
   f.agent.recordUsageLimit(paused.id, '2026-11-12T12:00:00.000Z');
   assert.equal(f.agent.requestWork(f.tasks.get(paused.id)), undefined);
   assert.deepEqual([f.tasks.get(paused.id).status, f.tasks.get(paused.id).execution?.worker.state], ['in_progress', 'idle']);
-  const claude = queued(f);
-  const opencode = queued(f, { agent: 'opencode' });
+  const next = queued(f);
 
   await f.dispatcher.reconcile();
   assert.deepEqual(f.runtime.notified, []);
-  assert.deepEqual(f.runtime.started.map((spec) => spec.taskId), [opencode.id], 'only another agent starts meanwhile');
+  assert.equal(f.runtime.started.length, 0, 'nothing starts meanwhile');
 
   // Derived from the stored task, so a restarted control plane resumes it too.
   f.advance(2 * 3_600_000 + 60_000);
   await f.newDispatcher().reconcile();
   assert.deepEqual(f.runtime.notified, ['c1']);
-  assert.deepEqual(f.runtime.started.map((spec) => spec.taskId), [opencode.id, claude.id]);
+  assert.deepEqual(f.runtime.started.map((spec) => spec.taskId), [next.id]);
   assert.ok(f.agent.requestWork(f.tasks.get(paused.id)), 'the cut-off turn is owed');
   assert.equal(f.agent.acceptWork(paused.id, []).execution?.usageLimit, undefined);
 });
@@ -475,28 +436,6 @@ test('cancelling a task paused for a usage limit removes its execution server an
   const next = queued(f);
   await f.dispatcher.reconcile();
   assert.deepEqual(f.runtime.started.map((spec) => spec.taskId), [next.id]);
-});
-
-test('records the agent console address a notified execution server reports', async () => {
-  const f = setup();
-  f.runtime.agentConsole = { url: 'http://127.0.0.1:43021', password: 'pw' };
-  const task = inStatus(f, 'ready', 'c1', true);
-  f.service.addFollowUp(task.id, 'again', ada);
-  f.runtime.movedConsoleUrl = 'http://127.0.0.1:50000';
-  await f.dispatcher.reconcile();
-  assert.deepEqual(f.tasks.get(task.id).execution?.console, { url: 'http://127.0.0.1:50000', password: 'pw' });
-  assert.deepEqual(f.runtime.agents, ['opencode'], 'the agent of the task');
-});
-
-test('records the agent console address a restarted execution server reports', async () => {
-  const f = setup();
-  f.runtime.agentConsole = { url: 'http://127.0.0.1:43021', password: 'pw' };
-  const task = inStatus(f, 'input_required', 'c1');
-  f.runtime.movedConsoleUrl = 'http://127.0.0.1:50001';
-  f.advance(silence);
-  await f.dispatcher.reconcile();
-  assert.equal(f.tasks.get(task.id).execution?.console?.url, 'http://127.0.0.1:50001');
-  assert.deepEqual(f.runtime.agents, ['opencode'], 'the agent of the task');
 });
 
 test('fails a task whose execution server cannot be notified, with a redacted reason', async () => {
