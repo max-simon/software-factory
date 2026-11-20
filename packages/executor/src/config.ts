@@ -12,6 +12,8 @@ export interface RunnerConfig extends BridgeConfig {
   model: TaskModel;
   gitUserName: string;
   gitUserEmail: string;
+  /** Whether engineers may open a shell into this execution server. */
+  shellEnabled: boolean;
 }
 
 export class ConfigError extends Error {
@@ -46,6 +48,7 @@ export function loadRunnerConfig(env: NodeJS.ProcessEnv = process.env): RunnerCo
     model: parseModel(env.FACTORY_MODEL),
     gitUserName: env.GIT_USER_NAME!,
     gitUserEmail: env.GIT_USER_EMAIL!,
+    shellEnabled: parseShellEnabled(env.FACTORY_SHELL_ENABLED),
   };
 }
 
@@ -58,6 +61,13 @@ function parseModel(value: string | undefined): TaskModel {
     throw new ConfigError(`FACTORY_MODEL must be one of ${models.join(', ')}, got ${JSON.stringify(value)}`);
   }
   return model as TaskModel;
+}
+
+/** Unset means `false`: a shell is only offered when the control plane says so. */
+function parseShellEnabled(value: string | undefined): boolean {
+  if (value === undefined || value === 'false') return false;
+  if (value === 'true') return true;
+  throw new ConfigError(`FACTORY_SHELL_ENABLED must be true or false, got ${JSON.stringify(value)}`);
 }
 
 function missingVariables(env: NodeJS.ProcessEnv, names: readonly string[]): string[] {

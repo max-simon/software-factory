@@ -140,3 +140,32 @@ test('a non-JSON error response still throws with the status', async () => {
   reset((_req, res) => res.writeHead(502).end('bad gateway'));
   await assert.rejects(client.getTask(), { name: 'AgentApiError', code: 'unexpected_response', status: 502 });
 });
+
+test('listShellRequests reads the pending requests', async () => {
+  const request = { id: 's1', taskId: 't1', size: { cols: 80, rows: 24 }, requestedBy: 'u1', createdAt: 'c' };
+  reset((_req, res) => json(res, 200, { requests: [request] }));
+  assert.deepEqual(await client.listShellRequests(), [request]);
+  assert.deepEqual(
+    received.map((r) => `${r.method} ${r.url} ${r.authorization}`),
+    ['GET /agent/shells Bearer secret-token'],
+  );
+});
+
+test('listShellRequests rejects a malformed reply', async () => {
+  const valid = { id: 's1', taskId: 't1', size: { cols: 80, rows: 24 }, requestedBy: 'u1', createdAt: 'c' };
+  const replies = [
+    {},
+    { requests: {} },
+    { requests: [null] },
+    { requests: [{ ...valid, id: '../x' }] },
+    { requests: [{ ...valid, id: 1 }] },
+    { requests: [{ ...valid, size: { cols: 80, rows: 0 } }] },
+    { requests: [{ ...valid, size: { cols: '80', rows: 24 } }] },
+    { requests: [{ ...valid, size: undefined }] },
+    { requests: [{ ...valid, createdAt: undefined }] },
+  ];
+  for (const reply of replies) {
+    reset((_req, res) => json(res, 200, reply));
+    await assert.rejects(client.listShellRequests(), { name: 'AgentApiError', code: 'unexpected_response' });
+  }
+});

@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
@@ -15,6 +16,7 @@ import { createHeartbeat } from './heartbeat.ts';
 import { runCommand } from './run-command.ts';
 import { runWorker } from './runner.ts';
 import { createSessionStore } from './session-state.ts';
+import { createShellHost, NodeWebSocket } from './shell.ts';
 
 const heartbeatIntervalMs = 15_000;
 const activityDelayMs = 2_000;
@@ -30,7 +32,7 @@ async function main(): Promise<number> {
   const client = createAgentClient(config.controlPlaneUrl, config.taskToken);
   const workDir = join(homedir(), 'workspace');
   // Listening first, so a nudge right after a (re)start is not refused.
-  const doorbell = await serveDoorbell(doorbellPort);
+  const doorbell = await serveDoorbell(doorbellPort, shellOptions(config, client, workDir));
   const session = await startAgentOrFail(config, client, workDir);
   if (session === undefined) {
     doorbell.close();
@@ -56,6 +58,23 @@ async function main(): Promise<number> {
   } finally {
     doorbell.close();
   }
+}
+
+/** Shells only listen for rings when the task allows them. */
+function shellOptions(config: RunnerConfig, client: AgentClient, workDir: string): { onShellRing?: () => void } {
+  if (!config.shellEnabled) return {};
+  const shells = createShellHost({
+    listShellRequests: client.listShellRequests,
+    controlPlaneUrl: config.controlPlaneUrl,
+    taskToken: config.taskToken,
+    workDir,
+    homeDir: homedir(),
+    spawn,
+    WebSocket: NodeWebSocket,
+    kill: (pid, signal) => void process.kill(pid, signal),
+    log: (message) => log(`shell: ${message}`),
+  });
+  return { onShellRing: () => void shells.checkRequests() };
 }
 
 /** A failure here happens before the runner can report one, so it is reported here. */
